@@ -52,6 +52,7 @@ export default function App() {
   const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
   const [hasCustomKey, setHasCustomKey] = useState<boolean>(false);
   const [pasteToast, setPasteToast] = useState<string | null>(null);
+  const [isConfirmingClearAll, setIsConfirmingClearAll] = useState<boolean>(false);
 
   const [paperSettings, setPaperSettings] = useState<PaperSettings>({
     title: "經典錯題強化與訂正筆記本",
@@ -319,9 +320,7 @@ export default function App() {
   };
 
   const handleClearAll = () => {
-    if (window.confirm("確定要清空所有錯題記錄嗎？")) {
-      setQuestions([]);
-    }
+    setQuestions([]);
   };
 
   // Subjects for filtering
@@ -420,14 +419,37 @@ export default function App() {
                 >
                   重載示範題
                 </button>
-                <button
-                  type="button"
-                  onClick={handleClearAll}
-                  className="px-2.5 py-1 text-xs text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition"
-                  title="清空錯題列表"
-                >
-                  清空題本
-                </button>
+                {isConfirmingClearAll ? (
+                  <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded-lg text-xs">
+                    <span className="text-rose-700 font-bold text-[11px]">確定清空？</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuestions([]);
+                        setIsConfirmingClearAll(false);
+                      }}
+                      className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[10px] font-bold shadow-2xs transition"
+                    >
+                      清空
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingClearAll(false)}
+                      className="px-1 text-slate-500 hover:text-slate-700 text-[10px]"
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmingClearAll(true)}
+                    className="px-2.5 py-1 text-xs text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg transition"
+                    title="清空錯題列表"
+                  >
+                    清空題本
+                  </button>
+                )}
               </>
             )}
           </div>

@@ -98,12 +98,10 @@ export const ByokModal: React.FC<ByokModalProps> = ({
   };
 
   const handleClear = () => {
-    if (window.confirm("確定要清除自備的 Gemini API Key 嗎？")) {
-      setApiKey("");
-      saveStoredApiKey("");
-      setTestResult(null);
-      onKeyUpdated();
-    }
+    setApiKey("");
+    saveStoredApiKey("");
+    setTestResult(null);
+    onKeyUpdated();
   };
 
   return (

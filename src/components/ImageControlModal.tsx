@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   X,
   ZoomIn,
@@ -36,6 +36,7 @@ export const ImageControlModal: React.FC<ImageControlModalProps> = ({
   onDeleteQuestion,
   onRemoveImageOnly,
 }) => {
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   if (!isOpen) return null;
 
   const handleZoomChange = (newZoom: number) => {
@@ -252,19 +253,38 @@ export const ImageControlModal: React.FC<ImageControlModalProps> = ({
         {/* Footer Actions */}
         <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <button
-              id="delete-question-from-modal-btn"
-              type="button"
-              onClick={() => {
-                if (window.confirm("確定要將這道題目從錯題本中刪除嗎？")) {
-                  onDeleteQuestion(questionId);
-                  onClose();
-                }
-              }}
-              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 border border-rose-200 flex items-center gap-1.5 transition"
-            >
-              <Trash2 className="w-3.5 h-3.5" /> 刪除此題
-            </button>
+            {isConfirmingDelete ? (
+              <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-300 px-2.5 py-1 rounded-xl text-xs">
+                <span className="text-rose-700 font-bold text-xs">確定刪除此題？</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onDeleteQuestion(questionId);
+                    setIsConfirmingDelete(false);
+                    onClose();
+                  }}
+                  className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-bold shadow-2xs transition"
+                >
+                  確定刪除
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmingDelete(false)}
+                  className="px-1.5 py-0.5 text-slate-500 hover:text-slate-700 text-xs"
+                >
+                  取消
+                </button>
+              </div>
+            ) : (
+              <button
+                id="delete-question-from-modal-btn"
+                type="button"
+                onClick={() => setIsConfirmingDelete(true)}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 border border-rose-200 flex items-center gap-1.5 transition"
+              >
+                <Trash2 className="w-3.5 h-3.5" /> 刪除此題
+              </button>
+            )}
             {onRemoveImageOnly && (
               <button
                 type="button"

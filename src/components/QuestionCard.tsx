@@ -72,6 +72,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   const [showSimilarSection, setShowSimilarSection] = useState(false);
   const [revealedVariantAnswers, setRevealedVariantAnswers] = useState<{ [id: string]: boolean }>({});
   const [addedVariantsMap, setAddedVariantsMap] = useState<{ [id: string]: boolean }>({});
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
 
   const handleSaveEdit = () => {
     onUpdateQuestion(question.id, {
@@ -296,18 +297,37 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
           >
             <Edit3 className="w-4 h-4" />
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              if (window.confirm("確定刪除此題目嗎？")) {
-                onDelete(question.id);
-              }
-            }}
-            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
-            title="刪除題目"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          {isConfirmingDelete ? (
+            <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded-lg text-xs animate-in fade-in">
+              <span className="text-rose-700 font-bold text-[11px] whitespace-nowrap">確定刪除此題？</span>
+              <button
+                type="button"
+                onClick={() => {
+                  onDelete(question.id);
+                  setIsConfirmingDelete(false);
+                }}
+                className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[11px] font-bold shadow-2xs transition"
+              >
+                刪除
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsConfirmingDelete(false)}
+                className="px-1.5 py-0.5 text-slate-500 hover:text-slate-700 text-[11px] font-medium"
+              >
+                取消
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setIsConfirmingDelete(true)}
+              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
+              title="刪除題目"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -640,11 +660,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                       </button>
                       <button
                         type="button"
-                        onClick={() => {
-                          if (window.confirm(`確定要清除這 ${variants.length} 道已生成的練習題嗎？`)) {
-                            onUpdateQuestion(question.id, { similarVariants: [] });
-                          }
-                        }}
+                        onClick={() => onUpdateQuestion(question.id, { similarVariants: [] })}
                         className="p-1 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
                         title="清空本題所有已生成的練習題"
                       >
@@ -783,11 +799,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                               </button>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  if (window.confirm("確定要刪除這道生成的練習題嗎？")) {
-                                    handleDeleteVariant(v.id);
-                                  }
-                                }}
+                                onClick={() => handleDeleteVariant(v.id)}
                                 className="p-1 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
                                 title="刪除此道練習題"
                               >
