@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   X,
   ZoomIn,
@@ -12,8 +12,13 @@ import {
   Check,
   Eye,
   EyeOff,
+  Upload,
+  AlertCircle,
+  Maximize2,
+  Loader2,
 } from "lucide-react";
 import { ImageSettings } from "../types";
+import { normalizeImageSrc, compressImage } from "../utils/imageUtils";
 
 interface ImageControlModalProps {
   isOpen: boolean;
@@ -24,6 +29,8 @@ interface ImageControlModalProps {
   onUpdateSettings: (newSettings: ImageSettings) => void;
   onDeleteQuestion: (id: string) => void;
   onRemoveImageOnly?: (id: string) => void;
+  onReplaceImage?: (newBase64: string) => void;
+  onOpenCalibration?: () => void;
 }
 
 export const ImageControlModal: React.FC<ImageControlModalProps> = ({
@@ -35,8 +42,14 @@ export const ImageControlModal: React.FC<ImageControlModalProps> = ({
   onUpdateSettings,
   onDeleteQuestion,
   onRemoveImageOnly,
+  onReplaceImage,
+  onOpenCalibration,
 }) => {
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [previewError, setPreviewError] = useState(false);
+  const [isReplacing, setIsReplacing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   if (!isOpen) return null;
 
   const handleZoomChange = (newZoom: number) => {
@@ -55,6 +68,22 @@ export const ImageControlModal: React.FC<ImageControlModalProps> = ({
 
   const handleToggleInclude = () => {
     onUpdateSettings({ ...settings, includeInExport: !settings.includeInExport });
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !onReplaceImage) return;
+    setIsReplacing(true);
+    try {
+      const compressed = await compressImage(file);
+      onReplaceImage(compressed);
+      setPreviewError(false);
+    } catch (err) {
+      console.error("Failed to replace image in modal:", err);
+    } finally {
+      setIsReplacing(false);
+      e.target.value = "";
+    }
   };
 
   return (
@@ -80,30 +109,68 @@ export const ImageControlModal: React.FC<ImageControlModalProps> = ({
           </button>
         </div>
 
+        {/* Hidden input for replacing image */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*,.heic,.heif,image/heic,image/heif"
+          className="hidden"
+          onChange={handleFileChange}
+        />
+
         {/* Live Preview Area */}
         <div className="my-4 p-4 rounded-xl bg-slate-100 border border-slate-200/80 overflow-hidden flex items-center justify-center min-h-[220px] max-h-[320px] relative">
-          <div
-            className={`w-full flex ${
-              settings.align === "left"
-                ? "justify-start"
-                : settings.align === "right"
-                ? "justify-end"
-                : "justify-center"
-            }`}
-          >
-            <img
-              src={imageSrc}
-              alt="題目截圖預覽"
-              className="rounded-lg shadow-sm border border-slate-300 max-h-[260px] object-contain transition-transform duration-200"
-              style={{
-                transform: `rotate(${settings.rotation}deg) scale(${settings.zoom / 100})`,
-                transformOrigin: "center center",
-              }}
-            />
-          </div>
-          <div className="absolute bottom-2 right-2 px-2 py-1 rounded bg-black/60 text-white text-[11px] font-mono backdrop-blur-xs">
-            {settings.zoom}% · {settings.rotation}°
-          </div>
+          {isReplacing && (
+            <div className="absolute inset-0 bg-white/80 backdrop-blur-xs flex flex-col items-center justify-center z-20">
+              <Loader2 className="w-6 h-6 animate-spin text-sky-600 mb-2" />
+              <span className="text-xs font-bold text-slate-700">正在處理並轉碼圖片 (含 HEIC)...</span>
+            </div>
+          )}
+          {previewError ? (
+            <div className="p-4 bg-amber-50 border border-amber-300 rounded-xl text-center max-w-md">
+              <AlertCircle className="w-8 h-8 text-amber-600 mx-auto mb-2" />
+              <div className="text-xs font-bold text-amber-950 mb-1">截圖檔案載入異常</div>
+              <div className="text-[11px] text-amber-800 mb-3">
+                原圖片資料可能不完整或暫存已過期，您可以直接選取新檔案替換。
+              </div>
+              {onReplaceImage && (
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold inline-flex items-center gap-1.5 shadow-xs transition"
+                >
+                  <Upload className="w-3.5 h-3.5" /> 重新選取圖片
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              <div
+                className={`w-full flex ${
+                  settings.align === "left"
+                    ? "justify-start"
+                    : settings.align === "right"
+                    ? "justify-end"
+                    : "justify-center"
+                }`}
+              >
+                <img
+                  src={normalizeImageSrc(imageSrc)}
+                  alt="題目截圖預覽"
+                  onError={() => setPreviewError(true)}
+                  onLoad={() => setPreviewError(false)}
+                  className="rounded-lg shadow-sm border border-slate-300 max-h-[260px] object-contain transition-transform duration-200"
+                  style={{
+                    transform: `rotate(${settings.rotation}deg) scale(${settings.zoom / 100})`,
+                    transformOrigin: "center center",
+                  }}
+                />
+              </div>
+              <div className="absolute bottom-2 right-2 px-2 py-1 rounded bg-black/60 text-white text-[11px] font-mono backdrop-blur-xs">
+                {settings.zoom}% · {settings.rotation}°
+              </div>
+            </>
+          )}
         </div>
 
         {/* Controls */}
@@ -283,6 +350,28 @@ export const ImageControlModal: React.FC<ImageControlModalProps> = ({
                 className="px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 border border-rose-200 flex items-center gap-1.5 transition"
               >
                 <Trash2 className="w-3.5 h-3.5" /> 刪除此題
+              </button>
+            )}
+            {onOpenCalibration && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenCalibration();
+                }}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 flex items-center gap-1.5 transition active:scale-95"
+                title="開啟四點透視校正（拉正歪斜考卷）與自由框選裁切"
+              >
+                <Maximize2 className="w-3.5 h-3.5" /> 透視拉正 / 裁切
+              </button>
+            )}
+            {onReplaceImage && (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 flex items-center gap-1.5 transition active:scale-95"
+              >
+                <Upload className="w-3.5 h-3.5" /> 更換截圖
               </button>
             )}
             {onRemoveImageOnly && (

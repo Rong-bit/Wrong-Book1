@@ -20,6 +20,7 @@ import {
 import { PaperSettings, QuestionItem, PaperSize } from "../types";
 import { exportToHighDefPdf } from "../services/pdfService";
 import { MathRenderer } from "./MathRenderer";
+import { normalizeImageSrc } from "../utils/imageUtils";
 
 interface PdfExportModalProps {
   isOpen: boolean;
@@ -717,7 +718,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                       }`}
                                     >
                                       <img
-                                        src={q.imageBase64}
+                                        src={normalizeImageSrc(q.imageBase64)}
                                         alt="題目原圖截圖"
                                         className="max-h-48 sm:max-h-56 w-auto object-contain border border-slate-200 rounded shadow-2xs"
                                         style={{
@@ -750,7 +751,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                           }`}
                                         >
                                           <img
-                                            src={q.imageBase64}
+                                            src={normalizeImageSrc(q.imageBase64)}
                                             alt="題目原圖"
                                             className="max-h-28 object-contain border border-slate-200 rounded"
                                             style={{
@@ -895,7 +896,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                               }`}
                             >
                               <img
-                                src={q.imageBase64}
+                                src={normalizeImageSrc(q.imageBase64)}
                                 alt="題目原圖截圖"
                                 className="max-h-64 object-contain border border-slate-200 rounded shadow-2xs"
                                 style={{
@@ -929,7 +930,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                   }`}
                                 >
                                   <img
-                                    src={q.imageBase64}
+                                    src={normalizeImageSrc(q.imageBase64)}
                                     alt="題目原圖"
                                     className="max-h-52 object-contain border border-slate-200 rounded"
                                     style={{

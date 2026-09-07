@@ -23,11 +23,124 @@ app.get("/api/config", (req, res) => {
   });
 });
 
+// --- Gemini API Resilience & Fallback Helpers ---
+
+function isTransientError(error: any): boolean {
+  const msg = (error?.message || "").toLowerCase();
+  const status = String(error?.status || "");
+  const code = String(error?.code || "");
+  return (
+    status === "UNAVAILABLE" ||
+    code === "503" ||
+    msg.includes("503") ||
+    msg.includes("high demand") ||
+    msg.includes("temporarily unavailable") ||
+    msg.includes("spikes in demand") ||
+    msg.includes("overloaded") ||
+    msg.includes("resource_exhausted") ||
+    msg.includes("rate limit") ||
+    code === "429"
+  );
+}
+
+function getFallbackModel(currentModel: string): string {
+  if (currentModel === "gemini-3.8-flash") {
+    return "gemini-3.1-flash-lite";
+  }
+  if (currentModel === "gemini-3.1-flash-lite") {
+    return "gemini-3.8-flash";
+  }
+  if (currentModel === "gemini-3.1-pro-preview") {
+    return "gemini-3.1-flash-lite";
+  }
+  return "gemini-3.1-flash-lite";
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+interface GenerateResult {
+  response: any;
+  modelUsed: string;
+  attempts: number;
+  fallbackUsed: boolean;
+}
+
+async function generateContentWithRetry(
+  ai: GoogleGenAI,
+  initialModel: string,
+  params: {
+    contents: any;
+    config?: any;
+  }
+): Promise<GenerateResult> {
+  let modelToUse = initialModel;
+  let attempts = 0;
+  const maxAttempts = 3;
+  let fallbackUsed = false;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    try {
+      const response = await ai.models.generateContent({
+        model: modelToUse,
+        contents: params.contents,
+        config: params.config,
+      });
+      return { response, modelUsed: modelToUse, attempts, fallbackUsed };
+    } catch (error: any) {
+      const isTransient = isTransientError(error);
+
+      if (isTransient && attempts < maxAttempts) {
+        // Immediately switch to fallback model to bypass the overloaded model
+        const fallback = getFallbackModel(modelToUse);
+        if (fallback !== modelToUse) {
+          console.log(`[Gemini API] Switching from ${modelToUse} to fallback model ${fallback} due to demand spike`);
+          modelToUse = fallback;
+          fallbackUsed = true;
+          await sleep(500);
+          continue;
+        } else {
+          await sleep(1000);
+          continue;
+        }
+      }
+
+      console.warn(
+        `[Gemini API] Attempt ${attempts}/${maxAttempts} failed on model ${modelToUse}:`,
+        error?.message || error
+      );
+      throw error;
+    }
+  }
+
+  throw new Error("無法取得 AI 回應，請稍候重試。");
+}
+
+function formatErrorMessage(error: any): { message: string; isKeyProblem: boolean; isTransient: boolean } {
+  const errMsg = error?.message || "AI 服務暫時無法回應";
+  const isKeyProblem =
+    errMsg.includes("API_KEY_INVALID") ||
+    errMsg.includes("invalid API key") ||
+    errMsg.includes("403") ||
+    errMsg.includes("PERMISSION_DENIED");
+  const isTransient = isTransientError(error);
+
+  let friendlyMessage = errMsg;
+  if (isTransient) {
+    friendlyMessage =
+      "Google AI 雲端模型目前正處於瞬間全球流量尖峰 (503 / High Demand)，系統已嘗試自動重試。請稍候 5~10 秒後再次點擊即可！";
+  } else if (isKeyProblem) {
+    friendlyMessage = "Gemini API 金鑰無效或尚未開通 (403/API_KEY_INVALID)，請檢查右上角「自備金鑰 BYOK」設定。";
+  }
+
+  return { message: friendlyMessage, isKeyProblem, isTransient };
+}
+
 // Verify API Key (BYOK testing endpoint)
 app.post("/api/verify-key", async (req, res) => {
   const startTime = Date.now();
   try {
-    const { apiKey, model = "gemini-3.8-flash" } = req.body;
+    const { apiKey, model = "gemini-3.1-flash-lite" } = req.body;
     const testKey = (apiKey && typeof apiKey === "string" && apiKey.trim().length > 0)
       ? apiKey.trim()
       : process.env.GEMINI_API_KEY;
@@ -39,8 +152,8 @@ app.post("/api/verify-key", async (req, res) => {
       });
     }
 
-    const validModels = ["gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3.1-flash-lite"];
-    const targetModel = validModels.includes(model) ? model : "gemini-3.8-flash";
+    const validModels = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.1-pro-preview"];
+    const targetModel = validModels.includes(model) ? model : "gemini-3.1-flash-lite";
 
     const ai = new GoogleGenAI({
       apiKey: testKey,
@@ -51,9 +164,8 @@ app.post("/api/verify-key", async (req, res) => {
       },
     });
 
-    // Send a lightweight connectivity ping
-    const testResponse = await ai.models.generateContent({
-      model: targetModel,
+    // Send a lightweight connectivity ping with retry
+    const { response: testResponse, modelUsed } = await generateContentWithRetry(ai, targetModel, {
       contents: "Reply with the exact word 'PONG'",
     });
 
@@ -62,27 +174,20 @@ app.post("/api/verify-key", async (req, res) => {
 
     return res.json({
       valid: true,
-      model: targetModel,
+      model: modelUsed,
       latencyMs,
       message: "金鑰連線測試成功！可正常調用 Gemini API。",
       sampleReply: replyText.trim(),
     });
   } catch (error: any) {
     const latencyMs = Date.now() - startTime;
-    const errMsg = error?.message || "金鑰驗證失敗";
-    let friendlyMessage = "連線驗證失敗：" + errMsg;
-
-    if (errMsg.includes("API_KEY_INVALID") || errMsg.includes("invalid API key") || errMsg.includes("403")) {
-      friendlyMessage = "API Key 無效或尚未啟用 Gemini 服務，請至 Google AI Studio 檢查金鑰。";
-    } else if (errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("quota") || errMsg.includes("429")) {
-      friendlyMessage = "API 調用頻率已超額或配額已用盡 (429 Quota Exceeded)。";
-    }
+    const { message: friendlyMessage } = formatErrorMessage(error);
 
     return res.status(400).json({
       valid: false,
       latencyMs,
       error: friendlyMessage,
-      rawError: errMsg,
+      rawError: error?.message,
     });
   }
 });
@@ -108,8 +213,8 @@ app.post("/api/analyze-question", async (req, res) => {
       });
     }
 
-    const validModels = ["gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3.1-flash-lite"];
-    const targetModel = validModels.includes(selectedModel) ? selectedModel : "gemini-3.8-flash";
+    const validModels = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.1-pro-preview"];
+    const targetModel = validModels.includes(selectedModel) ? selectedModel : "gemini-3.1-flash-lite";
 
     // Initialize Gemini SDK server-side
     const ai = new GoogleGenAI({
@@ -133,7 +238,11 @@ ${subjectHint ? `使用者補充科目線索：${subjectHint}` : ""}
 2. 【冊別】：精確指出年級與冊別，例如：「國一上 (第1冊)」、「國二上 (第3冊)」、「國三會考複習」、「高一 (第1冊)」、「高二選修物理(上)」。
 3. 【章節】：精確指出所屬章節名稱，例如：「第2章 平方根與畢氏定理」、「第1章 乘法公式與多項式」、「第三章 一元二次方程式」、「第二章 牛頓運動定律」。
 4. 【單元】：精確指出所屬小節或主題，例如：「2-1 平方根的意義與估算」、「1-2 多項式的四則運算」、「3-2 配方法與公式解」。
-5. 【數學與科學公式規範】：若題目題幹、選項或推導步驟包含數學式、物理符號或方程式，請一律使用標準 LaTeX 格式並以 $...$（行內公式）或 $$...$$（獨立置中公式）包裹（例如 $x^2 - 4x + 3 = 0$、$\\frac{a}{b}$、$\\sqrt{x}$、$\\Delta = b^2 - 4ac$、$\\pm$ 等），以便前端 KaTeX 精準印刷級排版。
+5. 【數學與科學公式規範】：
+   - 若題目題幹、選項或推導步驟包含數學式、物理符號或方程式，請一律使用標準 LaTeX 格式並以 $...$（行內公式）或 $$...$$（獨立置中公式）包裹（例如 $x^2 - 4x + 3 = 0$、$\\frac{a}{b}$、$\\sqrt{x}$、$\\Delta = b^2 - 4ac$、$\\pm$ 等）。
+   - 帶分數請明確寫為標準 LaTeX，例如 $-7\\frac{6}{9}$、$\\frac{5}{9}$，並務必以 $...$ 包裹。
+   - 若有選項，請標準格式排列，例如：(A) $-7\\frac{6}{9}$ (B) $-7\\frac{5}{9}$ (C) $-7\\frac{4}{9}$ (D) $-7\\frac{3}{9}$。
+   - JSON 字串中所有反斜線請務必合法雙重轉義（例如 \\\\frac{a}{b}），切勿寫成裸露未轉義反斜線。
 
 請務必嚴格輸出合法的繁體中文 JSON 格式，不要加入額外 Markdown 外框或解釋：
 {
@@ -141,7 +250,7 @@ ${subjectHint ? `使用者補充科目線索：${subjectHint}` : ""}
   "冊別": "例如：國二上 (第3冊) 或 高一 (第1冊) 或 國三會考複習",
   "章節": "例如：第2章 平方根與畢氏定理 或 第3章 一元二次方程式",
   "單元": "例如：2-1 平方根的意義與近似值 或 3-2 公式解",
-  "題目文字": "完整、精確辨識出的題目題幹、選項（若有A、B、C、D請分行條列）及條件數據",
+  "題目文字": "完整、精確辨識出的題目題幹、選項（若有A、B、C、D請分行條列並以 $...$ 包裹分數式）及條件數據",
   "題型": "單選題/多選題/填空題/計算題/綜合題",
   "答案": "正確標準答案（例如：(C) 或 x = 3 或 80 J）",
   "核心考點": "本題考核的核心公式、定理或觀念定義",
@@ -150,42 +259,45 @@ ${subjectHint ? `使用者補充科目線索：${subjectHint}` : ""}
   "關鍵技巧": "解題關鍵口訣、速解法或審題注意點"
 }`;
 
-    const response = await ai.models.generateContent({
-      model: targetModel,
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType || "image/jpeg",
-              data: cleanBase64,
+    const { response, modelUsed, attempts, fallbackUsed } = await generateContentWithRetry(
+      ai,
+      targetModel,
+      {
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: mimeType || "image/jpeg",
+                data: cleanBase64,
+              },
             },
-          },
-          {
-            text: promptText,
-          },
-        ],
-      },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            科目: { type: Type.STRING, description: "學科科目，如數學、物理、化學等" },
-            冊別: { type: Type.STRING, description: "年級與教材冊別，例如：國二上 (第3冊) 或 高一 (第1冊)" },
-            章節: { type: Type.STRING, description: "章節名稱，例如：第2章 平方根與畢氏定理" },
-            單元: { type: Type.STRING, description: "對應小節或單元名稱，例如：2-1 平方根" },
-            題目文字: { type: Type.STRING, description: "辨識出的完整題幹與選項文字" },
-            題型: { type: Type.STRING, description: "題型種類" },
-            答案: { type: Type.STRING, description: "本題標準答案" },
-            核心考點: { type: Type.STRING, description: "關鍵知識點" },
-            易錯陷阱: { type: Type.STRING, description: "學生常錯痛點" },
-            詳解步驟: { type: Type.STRING, description: "詳細解題流程" },
-            關鍵技巧: { type: Type.STRING, description: "答題技巧" },
-          },
-          required: ["科目", "單元", "題目文字", "詳解步驟"],
+            {
+              text: promptText,
+            },
+          ],
         },
-      },
-    });
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              科目: { type: Type.STRING, description: "學科科目，如數學、物理、化學等" },
+              冊別: { type: Type.STRING, description: "年級與教材冊別，例如：國二上 (第3冊) 或 高一 (第1冊)" },
+              章節: { type: Type.STRING, description: "章節名稱，例如：第2章 平方根與畢氏定理" },
+              單元: { type: Type.STRING, description: "對應小節或單元名稱，例如：2-1 平方根" },
+              題目文字: { type: Type.STRING, description: "辨識出的完整題幹與選項文字" },
+              題型: { type: Type.STRING, description: "題型種類" },
+              答案: { type: Type.STRING, description: "本題標準答案" },
+              核心考點: { type: Type.STRING, description: "關鍵知識點" },
+              易錯陷阱: { type: Type.STRING, description: "學生常錯痛點" },
+              詳解步驟: { type: Type.STRING, description: "詳細解題流程" },
+              關鍵技巧: { type: Type.STRING, description: "答題技巧" },
+            },
+            required: ["科目", "單元", "題目文字", "詳解步驟"],
+          },
+        },
+      }
+    );
 
     const responseText = response.text || "{}";
     let parsedData;
@@ -201,15 +313,18 @@ ${subjectHint ? `使用者補充科目線索：${subjectHint}` : ""}
       success: true,
       data: parsedData,
       keySource: isUsingCustomKey ? "custom_byok" : "server_default",
-      modelUsed: targetModel,
+      modelUsed,
+      attempts,
+      fallbackUsed,
     });
   } catch (error: any) {
     console.error("AI Analysis error:", error);
-    const errMsg = error?.message || "AI 辨識過程中發生錯誤";
-    const isKeyProblem = errMsg.includes("API_KEY_INVALID") || errMsg.includes("quota") || errMsg.includes("403") || errMsg.includes("429");
-    return res.status(500).json({
-      error: errMsg,
+    const { message: friendlyMessage, isKeyProblem, isTransient } = formatErrorMessage(error);
+    return res.status(isTransient ? 503 : 500).json({
+      error: friendlyMessage,
       isKeyProblem,
+      isTransient,
+      rawError: error?.message,
     });
   }
 });
@@ -228,7 +343,7 @@ app.post("/api/generate-similar-questions", async (req, res) => {
       difficulty = "中等",
       variationType = "similar", // "similar" (同觀念情境改編) | "easier" (基礎觀念打底) | "harder" (進階挑戰深化)
       customApiKey,
-      selectedModel = "gemini-3.8-flash",
+      selectedModel = "gemini-3.1-flash-lite",
     } = req.body;
 
     if (!questionText && !coreConcepts) {
@@ -249,8 +364,8 @@ app.post("/api/generate-similar-questions", async (req, res) => {
       });
     }
 
-    const validModels = ["gemini-3.8-flash", "gemini-3.1-pro-preview", "gemini-3.1-flash-lite"];
-    const targetModel = validModels.includes(selectedModel) ? selectedModel : "gemini-3.8-flash";
+    const validModels = ["gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-3.1-pro-preview"];
+    const targetModel = validModels.includes(selectedModel) ? selectedModel : "gemini-3.1-flash-lite";
 
     const ai = new GoogleGenAI({
       apiKey: effectiveApiKey,
@@ -288,26 +403,29 @@ ${questionText || "（無題幹文字，請依據上述考點與科目設計經�
 5. 若題目或詳解包含數學式或方程式，請一律使用標準 LaTeX 格式並以 $...$ 或 $$...$$ 包裹。
 6. 請提供「變形重點說明」，用簡短的一兩句話向學生指出這道練習題與原本錯題有什麼異同（例如：「數字由整數改為帶分數，並反轉未知數的位置」）。`;
 
-    const response = await ai.models.generateContent({
-      model: targetModel,
-      contents: promptText,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            題目文字: { type: Type.STRING, description: "原創新題幹與選項" },
-            答案: { type: Type.STRING, description: "本練習題標準答案" },
-            核心考點: { type: Type.STRING, description: "對應的核心知識點" },
-            變形設計重點: { type: Type.STRING, description: "與原錯題的差異與改編方向說明" },
-            詳解步驟: { type: Type.STRING, description: "循序漸進的詳細推導算式或論述" },
-            解題技巧提示: { type: Type.STRING, description: "下筆關鍵思維點撥" },
-            難度: { type: Type.STRING, description: "基礎、中等 或 挑戰" },
+    const { response, modelUsed, attempts, fallbackUsed } = await generateContentWithRetry(
+      ai,
+      targetModel,
+      {
+        contents: promptText,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              題目文字: { type: Type.STRING, description: "原創新題幹與選項" },
+              答案: { type: Type.STRING, description: "本練習題標準答案" },
+              核心考點: { type: Type.STRING, description: "對應的核心知識點" },
+              變形設計重點: { type: Type.STRING, description: "與原錯題的差異與改編方向說明" },
+              詳解步驟: { type: Type.STRING, description: "循序漸進的詳細推導算式或論述" },
+              解題技巧提示: { type: Type.STRING, description: "下筆關鍵思維點撥" },
+              難度: { type: Type.STRING, description: "基礎、中等 或 挑戰" },
+            },
+            required: ["題目文字", "答案", "詳解步驟", "變形設計重點"],
           },
-          required: ["題目文字", "答案", "詳解步驟", "變形設計重點"],
         },
-      },
-    });
+      }
+    );
 
     const responseText = response.text || "{}";
     let parsedData;
@@ -321,13 +439,18 @@ ${questionText || "（無題幹文字，請依據上述考點與科目設計經�
     return res.json({
       success: true,
       data: parsedData,
-      modelUsed: targetModel,
+      modelUsed,
+      attempts,
+      fallbackUsed,
     });
   } catch (error: any) {
     console.error("Generate similar question error:", error);
-    const errMsg = error?.message || "生成相似題型時發生錯誤";
-    return res.status(500).json({
-      error: errMsg,
+    const { message: friendlyMessage, isKeyProblem, isTransient } = formatErrorMessage(error);
+    return res.status(isTransient ? 503 : 500).json({
+      error: friendlyMessage,
+      isKeyProblem,
+      isTransient,
+      rawError: error?.message,
     });
   }
 });

@@ -8,6 +8,26 @@
   }
 }
 
+/* =========================================================
+   KaTeX Math Display Enhancements
+   Ensure fraction lines and radical lines are crisp and normal
+   without breaking KaTeX's baseline and vertical layout engine
+   ========================================================= */
+.katex .frac-line {
+  border-bottom-width: max(1.2px, 0.06em) !important;
+  border-bottom-style: solid !important;
+}
+
+.katex .sqrt-line {
+  border-top-width: max(1.2px, 0.06em) !important;
+  border-top-style: solid !important;
+}
+
+.katex .overline .overline-line {
+  border-bottom-width: max(1.2px, 0.06em) !important;
+  border-bottom-style: solid !important;
+}
+
 /* 5mm crisp math grid paper for Cornell mistake notes */
 .math-grid-bg {
   background-image: 

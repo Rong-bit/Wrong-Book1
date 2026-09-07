@@ -25,11 +25,16 @@ import {
   ChevronRight,
   FileQuestion,
   Calculator,
+  Upload,
+  AlertCircle,
+  Image as ImageIcon,
+  Maximize2,
 } from "lucide-react";
 import { QuestionItem, ViewLayout, SimilarQuestionVariant } from "../types";
 import { generateSimilarQuestion } from "../services/aiService";
 import { MathRenderer } from "./MathRenderer";
 import { MathToolbar } from "./MathToolbar";
+import { normalizeImageSrc, compressImage } from "../utils/imageUtils";
 
 interface QuestionCardProps {
   question: QuestionItem;
@@ -41,8 +46,10 @@ interface QuestionCardProps {
   onMoveUp: (index: number) => void;
   onMoveDown: (index: number) => void;
   onUpdateQuestion: (id: string, updated: Partial<QuestionItem>) => void;
+  onOpenCalibration?: (question: QuestionItem) => void;
   onAddSimilarAsQuestion?: (similar: SimilarQuestionVariant, parentQ: QuestionItem) => void;
   onOpenByokModal?: () => void;
+  onRetryAnalysis?: (id: string) => void;
 }
 
 export const QuestionCard: React.FC<QuestionCardProps> = ({
@@ -51,12 +58,14 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   totalCount,
   layout,
   onOpenImageControl,
+  onOpenCalibration,
   onDelete,
   onMoveUp,
   onMoveDown,
   onUpdateQuestion,
   onAddSimilarAsQuestion,
   onOpenByokModal,
+  onRetryAnalysis,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedSubject, setEditedSubject] = useState(question.subject || "");
@@ -76,10 +85,33 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   const [revealedVariantAnswers, setRevealedVariantAnswers] = useState<{ [id: string]: boolean }>({});
   const [addedVariantsMap, setAddedVariantsMap] = useState<{ [id: string]: boolean }>({});
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const [imageLoadError, setImageLoadError] = useState(false);
+  const replaceImageInputRef = useRef<HTMLInputElement>(null);
   const questionTextareaRef = useRef<HTMLTextAreaElement>(null);
   const explanationTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [showQuestionMathToolbar, setShowQuestionMathToolbar] = useState(false);
   const [showExplanationMathToolbar, setShowExplanationMathToolbar] = useState(false);
+
+  const handleReplaceImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const compressed = await compressImage(file);
+      onUpdateQuestion(question.id, {
+        imageBase64: compressed,
+        imageSettings: {
+          ...question.imageSettings,
+          includeInExport: true,
+          zoom: 100,
+        },
+      });
+      setImageLoadError(false);
+    } catch (err) {
+      console.error("Failed to replace image:", err);
+    } finally {
+      e.target.value = "";
+    }
+  };
 
   const handleSaveEdit = () => {
     onUpdateQuestion(question.id, {
@@ -338,53 +370,198 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
         </div>
       </div>
 
+      {/* Hidden file input for replacing or adding this question's image */}
+      <input
+        ref={replaceImageInputRef}
+        type="file"
+        accept="image/*,.heic,.heif,image/heic,image/heif"
+        className="hidden"
+        onChange={handleReplaceImageFile}
+      />
+
       {/* Image Preview with Interactive Trigger */}
       {question.imageBase64 && question.imageSettings.includeInExport && (
         <div className="mb-4">
-          <div
-            className={`w-full flex ${
-              question.imageSettings.align === "left"
-                ? "justify-start"
-                : question.imageSettings.align === "right"
-                ? "justify-end"
-                : "justify-center"
-            }`}
+          {imageLoadError ? (
+            <div className="p-3.5 rounded-xl border border-amber-300 bg-amber-50/80 text-amber-900 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+                <div>
+                  <div className="font-bold text-amber-950">考題截圖載入異常</div>
+                  <div className="text-[11px] text-amber-800">
+                    截圖暫存可能已過期、格式不相容或原圖資料受損。您可以直接重新上傳或替換圖片。
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => replaceImageInputRef.current?.click()}
+                  className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg shadow-xs flex items-center gap-1.5 transition active:scale-95"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  重新上傳截圖
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onUpdateQuestion(question.id, { imageBase64: "" })}
+                  className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 rounded-lg transition"
+                >
+                  移除截圖
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div
+                className={`w-full flex ${
+                  question.imageSettings.align === "left"
+                    ? "justify-start"
+                    : question.imageSettings.align === "right"
+                    ? "justify-end"
+                    : "justify-center"
+                }`}
+              >
+                <div
+                  onClick={() => onOpenImageControl(question)}
+                  className="group relative cursor-pointer inline-block rounded-xl overflow-hidden border border-slate-200/80 bg-slate-50 transition hover:shadow-md max-w-full"
+                  title="點擊圖片開啟控制面板 (放大、縮小、旋轉、刪除)"
+                >
+                  <img
+                    src={normalizeImageSrc(question.imageBase64)}
+                    alt="題目截圖"
+                    onError={() => setImageLoadError(true)}
+                    onLoad={() => setImageLoadError(false)}
+                    className="max-h-72 w-auto object-contain transition-transform duration-200 select-none block"
+                    style={{
+                      transform: `rotate(${question.imageSettings.rotation}deg) scale(${
+                        question.imageSettings.zoom / 100
+                      })`,
+                      transformOrigin: "center center",
+                    }}
+                  />
+                  {/* Hover overlay hint */}
+                  <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 text-white text-xs font-semibold backdrop-blur-xs">
+                    <Sliders className="w-4 h-4" />
+                    點擊開啟圖片控制面板 (縮放 / 旋轉 / 排版)
+                  </div>
+                </div>
+              </div>
+              <div className="mt-1 flex items-center justify-center flex-wrap gap-2 text-[11px] text-slate-400">
+                <span>縮放：{question.imageSettings.zoom}%</span>
+                <span>·</span>
+                <span>旋轉：{question.imageSettings.rotation}°</span>
+                <span>·</span>
+                {onOpenCalibration && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => onOpenCalibration(question)}
+                      className="text-indigo-600 hover:text-indigo-700 hover:underline inline-flex items-center gap-1 font-semibold transition"
+                      title="四點透視校正（拉正斜拍考卷）與自由框選裁切"
+                    >
+                      <Maximize2 className="w-3 h-3" /> 透視拉正 / 裁切
+                    </button>
+                    <span>·</span>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onOpenImageControl(question)}
+                  className="text-sky-600 hover:underline inline-flex items-center gap-0.5 font-medium"
+                >
+                  <Sliders className="w-3 h-3" /> 調整圖片
+                </button>
+                <span>·</span>
+                <button
+                  type="button"
+                  onClick={() => replaceImageInputRef.current?.click()}
+                  className="text-slate-500 hover:text-sky-600 inline-flex items-center gap-1 font-medium hover:underline transition"
+                  title="點擊更換此題的原題截圖"
+                >
+                  <Upload className="w-3 h-3" /> 更換圖片
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Button to attach screenshot if no image currently exists */}
+      {!question.imageBase64 && (
+        <div className="mb-3 flex justify-end">
+          <button
+            type="button"
+            onClick={() => replaceImageInputRef.current?.click()}
+            className="text-[11px] text-slate-400 hover:text-sky-600 flex items-center gap-1 font-medium transition hover:bg-slate-100 px-2 py-1 rounded-lg"
+            title="為此題上傳考卷截圖或相片"
           >
-            <div
-              onClick={() => onOpenImageControl(question)}
-              className="group relative cursor-pointer inline-block rounded-xl overflow-hidden border border-slate-200/80 bg-slate-50 transition hover:shadow-md"
-              title="點擊圖片開啟控制面板 (放大、縮小、旋轉、刪除)"
-            >
-              <img
-                src={question.imageBase64}
-                alt="題目截圖"
-                className="max-h-64 object-contain transition-transform duration-200 select-none"
-                style={{
-                  transform: `rotate(${question.imageSettings.rotation}deg) scale(${
-                    question.imageSettings.zoom / 100
-                  })`,
-                  transformOrigin: "center center",
-                }}
-              />
-              {/* Hover overlay hint */}
-              <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 text-white text-xs font-semibold backdrop-blur-xs">
-                <Sliders className="w-4 h-4" />
-                點擊開啟圖片控制面板 (縮放 / 旋轉 / 排版)
+            <Upload className="w-3 h-3" /> 附加考題截圖
+          </button>
+        </div>
+      )}
+
+      {/* Analyzing Progress State */}
+      {question.status === "analyzing" && (
+        <div className="mb-4 p-3.5 bg-sky-50/80 border border-sky-200 rounded-xl flex items-center justify-between gap-3 text-xs text-sky-900 animate-pulse">
+          <div className="flex items-center gap-2.5 font-semibold">
+            <Loader2 className="w-4 h-4 animate-spin text-sky-600 shrink-0" />
+            <span>AI 考題解析中...（已內建 503 尖峰自動重試與備援模型防護）</span>
+          </div>
+          <span className="text-[11px] text-sky-700 shrink-0">通常需 3~8 秒</span>
+        </div>
+      )}
+
+      {/* Error & Retry Banner */}
+      {question.status === "error" && (
+        <div className="mb-4 p-3.5 bg-amber-50/90 border border-amber-300 rounded-xl text-xs space-y-2.5">
+          <div className="flex items-start gap-2 text-amber-900">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold text-amber-950">
+                {question.errorMessage?.includes("503") ||
+                question.errorMessage?.includes("尖峰") ||
+                question.errorMessage?.includes("高負載")
+                  ? "Google AI 雲端模型目前正處於全球尖峰負載 (503)"
+                  : "考題辨識未完全成功"}
+              </div>
+              <div className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                {question.errorMessage || "伺服器暫時忙碌或未取得完整回傳，請點擊下方重新辨識。"}
               </div>
             </div>
           </div>
-          <div className="mt-1 flex items-center justify-center gap-2 text-[11px] text-slate-400">
-            <span>縮放：{question.imageSettings.zoom}%</span>
-            <span>·</span>
-            <span>旋轉：{question.imageSettings.rotation}°</span>
-            <span>·</span>
+          <div className="flex items-center gap-2 pt-1 border-t border-amber-200/60 flex-wrap">
+            {onRetryAnalysis && question.imageBase64 && (
+              <button
+                type="button"
+                onClick={() => onRetryAnalysis(question.id)}
+                className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-2xs transition cursor-pointer"
+                title="再次呼叫 AI 辨識（自動帶入重試與備援模型）"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                重新辨識 (Retry)
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => onOpenImageControl(question)}
-              className="text-sky-600 hover:underline inline-flex items-center gap-0.5 font-medium"
+              onClick={() => setIsEditing(true)}
+              className="px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer"
             >
-              <Sliders className="w-3 h-3" /> 調整圖片
+              <Edit3 className="w-3.5 h-3.5" />
+              手動輸入題目
             </button>
+            {onOpenByokModal &&
+              (question.errorMessage?.includes("金鑰") ||
+                question.errorMessage?.includes("Key") ||
+                question.errorMessage?.includes("403")) && (
+                <button
+                  type="button"
+                  onClick={onOpenByokModal}
+                  className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-300 rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer"
+                >
+                  檢查 API Key
+                </button>
+              )}
           </div>
         </div>
       )}
@@ -821,15 +998,24 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
 
                 {/* Error Banner */}
                 {similarError && (
-                  <div className="mt-2.5 p-2 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-center justify-between">
-                    <span>{similarError}</span>
-                    <button
-                      type="button"
-                      onClick={() => setSimilarError(null)}
-                      className="text-rose-500 hover:text-rose-800 text-[11px] font-bold"
-                    >
-                      關閉
-                    </button>
+                  <div className="mt-2.5 p-2.5 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-800 flex items-center justify-between gap-2 flex-wrap">
+                    <span className="flex-1 leading-relaxed">{similarError}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={handleGenerateSimilar}
+                        className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded font-bold text-[11px] flex items-center gap-1 transition shadow-2xs"
+                      >
+                        <RefreshCw className="w-3 h-3" /> 立即重試
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSimilarError(null)}
+                        className="text-rose-500 hover:text-rose-800 text-[11px] font-bold px-1"
+                      >
+                        關閉
+                      </button>
+                    </div>
                   </div>
                 )}
 

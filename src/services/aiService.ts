@@ -17,8 +17,14 @@ const STORAGE_KEY_MODEL = "custom_gemini_model_preference";
 
 export const AVAILABLE_MODELS = [
   {
+    id: "gemini-3.1-flash-lite",
+    name: "Gemini 3.1 Flash Lite (穩定首選)",
+    badge: "極致響應與尖峰抗塞",
+    description: "輕量高吞吐多模態模型，連線極速穩定，不受雲端尖峰負載影響",
+  },
+  {
     id: "gemini-3.8-flash",
-    name: "Gemini 3.8 Flash (推薦)",
+    name: "Gemini 3.8 Flash",
     badge: "速度與多模態平衡",
     description: "適合絕大多數中學與高中各學科考題，速度極快，考點歸納精準",
   },
@@ -27,12 +33,6 @@ export const AVAILABLE_MODELS = [
     name: "Gemini 3.1 Pro Preview",
     badge: "深層推導與高等數理",
     description: "適合難度較高之奧數、競賽題、多重步驟物理幾何推導",
-  },
-  {
-    id: "gemini-3.1-flash-lite",
-    name: "Gemini 3.1 Flash Lite",
-    badge: "極致響應與低延遲",
-    description: "輕量化多模態模型，適合快速大量匯入題目",
   },
 ];
 
@@ -51,8 +51,8 @@ export function saveStoredApiKey(key: string): void {
 }
 
 export function getStoredModel(): string {
-  if (typeof window === "undefined") return "gemini-3.8-flash";
-  return localStorage.getItem(STORAGE_KEY_MODEL) || "gemini-3.8-flash";
+  if (typeof window === "undefined") return "gemini-3.1-flash-lite";
+  return localStorage.getItem(STORAGE_KEY_MODEL) || "gemini-3.1-flash-lite";
 }
 
 export function saveStoredModel(model: string): void {
@@ -150,10 +150,22 @@ export async function analyzeQuestionImage(
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
-    const message = errData.error || `伺服器回應錯誤 (${response.status})`;
+    let message = errData.error || `伺服器回應錯誤 (${response.status})`;
+    const isTransient =
+      Boolean(errData.isTransient) ||
+      response.status === 503 ||
+      message.includes("503") ||
+      message.includes("high demand") ||
+      message.includes("Spikes in demand");
+
+    if (isTransient && !errData.error) {
+      message = "Google AI 雲端服務目前處於尖峰高負載 (503)，請稍候 5~10 秒後再次嘗試。";
+    }
+
     const error: any = new Error(message);
     error.isKeyProblem = errData.isKeyProblem;
     error.needKey = errData.needKey;
+    error.isTransient = isTransient;
     throw error;
   }
 
@@ -207,9 +219,21 @@ export async function generateSimilarQuestion(
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
-    const message = errData.error || `生成相似題失敗 (${response.status})`;
+    let message = errData.error || `生成相似題失敗 (${response.status})`;
+    const isTransient =
+      Boolean(errData.isTransient) ||
+      response.status === 503 ||
+      message.includes("503") ||
+      message.includes("high demand") ||
+      message.includes("Spikes in demand");
+
+    if (isTransient && !errData.error) {
+      message = "Google AI 雲端服務目前處於尖峰高負載 (503)，請稍候 5~10 秒後再次嘗試。";
+    }
+
     const error: any = new Error(message);
     error.needKey = errData.needKey;
+    error.isTransient = isTransient;
     throw error;
   }
 

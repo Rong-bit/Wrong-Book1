@@ -28,6 +28,8 @@ import { ImageControlModal } from "./components/ImageControlModal";
 import { ByokModal } from "./components/ByokModal";
 import { PdfExportModal } from "./components/PdfExportModal";
 import { BackupModal } from "./components/BackupModal";
+import { ImageCalibrationModal } from "./components/ImageCalibrationModal";
+import { compressImage, normalizeImageSrc } from "./utils/imageUtils";
 
 const STORAGE_QUESTIONS_KEY = "digital_notebook_questions_v1";
 
@@ -36,7 +38,24 @@ export default function App() {
     try {
       const saved = localStorage.getItem(STORAGE_QUESTIONS_KEY);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed: QuestionItem[] = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((q) => {
+            // Repair sample questions if they have outdated/broken/empty image
+            if (q.id === "sample-1" && (!q.imageBase64 || q.imageBase64.includes("utf8") || q.imageBase64.startsWith("data:image/svg"))) {
+              const fresh = initialSampleQuestions.find((s) => s.id === "sample-1");
+              if (fresh) return { ...q, imageBase64: fresh.imageBase64 };
+            }
+            if (q.id === "sample-2" && (!q.imageBase64 || q.imageBase64.includes("utf8") || q.imageBase64.startsWith("data:image/svg"))) {
+              const fresh = initialSampleQuestions.find((s) => s.id === "sample-2");
+              if (fresh) return { ...q, imageBase64: fresh.imageBase64 };
+            }
+            if (q.imageBase64) {
+              return { ...q, imageBase64: normalizeImageSrc(q.imageBase64) };
+            }
+            return q;
+          });
+        }
       }
     } catch (e) {
       console.warn("Failed reading saved questions:", e);
@@ -78,12 +97,23 @@ export default function App() {
     columns: 1,
   });
 
-  // Keep localStorage synced
+  // Keep localStorage synced safely
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_QUESTIONS_KEY, JSON.stringify(questions));
     } catch (e) {
-      console.warn("Storage quota exceeded or error:", e);
+      console.warn("Storage quota exceeded, attempting lightweight backup:", e);
+      try {
+        const lightweight = questions.map((q) => {
+          if (q.imageBase64 && q.imageBase64.length > 500000) {
+            return { ...q, imageBase64: "" };
+          }
+          return q;
+        });
+        localStorage.setItem(STORAGE_QUESTIONS_KEY, JSON.stringify(lightweight));
+      } catch (fallbackErr) {
+        console.error("Secondary localStorage write failed:", fallbackErr);
+      }
     }
   }, [questions]);
 
@@ -181,9 +211,106 @@ export default function App() {
     []
   );
 
+  const [autoCalibrateOnCapture, setAutoCalibrateOnCapture] = useState<boolean>(() => {
+    try {
+      const val = localStorage.getItem("ai_exam_auto_calibrate");
+      return val === null ? true : val === "true";
+    } catch {
+      return true;
+    }
+  });
+
+  const handleToggleAutoCalibrate = (val: boolean) => {
+    setAutoCalibrateOnCapture(val);
+    try {
+      localStorage.setItem("ai_exam_auto_calibrate", String(val));
+    } catch (e) {
+      console.warn("Saving auto calibrate setting failed", e);
+    }
+  };
+
+  const [calibrationModal, setCalibrationModal] = useState<{
+    isOpen: boolean;
+    imageSrc: string;
+    subjectHint?: string;
+    targetQuestionId?: string;
+    initialMode?: "perspective" | "crop";
+  }>({
+    isOpen: false,
+    imageSrc: "",
+  });
+
+  const handleImageSelected = useCallback(
+    (base64Data: string, subjectHint?: string) => {
+      if (autoCalibrateOnCapture) {
+        setCalibrationModal({
+          isOpen: true,
+          imageSrc: base64Data,
+          subjectHint,
+          initialMode: "perspective",
+        });
+      } else {
+        processNewImage(base64Data, subjectHint);
+      }
+    },
+    [autoCalibrateOnCapture, processNewImage]
+  );
+
+  const handleCalibrationConfirm = (processedBase64: string) => {
+    if (calibrationModal.targetQuestionId) {
+      const targetId = calibrationModal.targetQuestionId;
+      handleUpdateQuestion(targetId, {
+        imageBase64: processedBase64,
+        imageSettings: {
+          zoom: 100,
+          rotation: 0,
+          align: "center",
+          includeInExport: true,
+        },
+      });
+      setSelectedQuestionForImageModal((prev) =>
+        prev && prev.id === targetId
+          ? {
+              ...prev,
+              imageBase64: processedBase64,
+              imageSettings: {
+                ...prev.imageSettings,
+                zoom: 100,
+                rotation: 0,
+              },
+            }
+          : null
+      );
+    } else {
+      processNewImage(processedBase64, calibrationModal.subjectHint);
+    }
+    setCalibrationModal({ isOpen: false, imageSrc: "" });
+  };
+
+  const handleCalibrationSkip = () => {
+    if (!calibrationModal.targetQuestionId && calibrationModal.imageSrc) {
+      processNewImage(calibrationModal.imageSrc, calibrationModal.subjectHint);
+    }
+    setCalibrationModal({ isOpen: false, imageSrc: "" });
+  };
+
+  const handleOpenCalibrationForQuestion = (question: QuestionItem) => {
+    let imgSrc = normalizeImageSrc(question.imageBase64);
+    if (!imgSrc && question.id.startsWith("sample-")) {
+      const sample = initialSampleQuestions.find((s) => s.id === question.id);
+      if (sample) imgSrc = sample.imageBase64;
+    }
+    setCalibrationModal({
+      isOpen: true,
+      imageSrc: imgSrc,
+      targetQuestionId: question.id,
+      initialMode: "perspective",
+    });
+  };
+
   // Global paste event listener for Ctrl+V
   useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
+    const handlePaste = async (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
 
@@ -193,17 +320,25 @@ export default function App() {
           e.preventDefault();
           const file = item.getAsFile();
           if (file) {
-            setPasteToast("已偵測到剪貼簿截圖，正在進行 AI 結構化分析...");
-            setTimeout(() => setPasteToast(null), 3500);
+            setPasteToast("已偵測到剪貼簿截圖，正在載入...");
+            setTimeout(() => setPasteToast(null), 3000);
 
-            const reader = new FileReader();
-            reader.onload = (uploadEvent) => {
-              const base64 = uploadEvent.target?.result as string;
-              if (base64) {
-                processNewImage(base64);
+            try {
+              const compressed = await compressImage(file);
+              if (compressed) {
+                handleImageSelected(compressed);
               }
-            };
-            reader.readAsDataURL(file);
+            } catch (err) {
+              console.warn("Paste image compression failed, using reader fallback:", err);
+              const reader = new FileReader();
+              reader.onload = (uploadEvent) => {
+                const base64 = uploadEvent.target?.result as string;
+                if (base64) {
+                  handleImageSelected(base64);
+                }
+              };
+              reader.readAsDataURL(file);
+            }
           }
           break;
         }
@@ -212,7 +347,7 @@ export default function App() {
 
     window.addEventListener("paste", handlePaste);
     return () => window.removeEventListener("paste", handlePaste);
-  }, [processNewImage]);
+  }, [handleImageSelected]);
 
   // Question manipulation handlers
   const handleDeleteQuestion = (id: string) => {
@@ -251,6 +386,74 @@ export default function App() {
           : q
       )
     );
+  };
+
+  const handleRetryAnalysis = async (questionId: string) => {
+    const targetQ = questions.find((q) => q.id === questionId);
+    if (!targetQ || !targetQ.imageBase64) return;
+
+    setQuestions((prev) =>
+      prev.map((item) =>
+        item.id === questionId
+          ? {
+              ...item,
+              status: "analyzing",
+              errorMessage: undefined,
+              questionText: "AI 正在重新解析圖片考題（已啟用 503 尖峰自動重試與備援模型防護）...",
+              explanation: "AI 正在重新推導詳細解題步驟...",
+            }
+          : item
+      )
+    );
+
+    try {
+      const result = await analyzeQuestionImage(targetQ.imageBase64, targetQ.subject);
+      setQuestions((prev) =>
+        prev.map((item) => {
+          if (item.id === questionId) {
+            return {
+              ...item,
+              subject: result.科目 || item.subject || "未歸類",
+              gradeLevel: result.冊別 || item.gradeLevel || "",
+              chapter: result.章節 || item.chapter || "",
+              unit: result.單元 || item.unit || "未歸類單元",
+              questionText: result.題目文字 || "",
+              questionType: result.題型 || "綜合題",
+              answer: result.答案 || "",
+              coreConcepts: result.核心考點 || "",
+              commonPitfalls: result.易錯陷阱 || "",
+              explanation: result.詳解步驟 || "",
+              tips: result.關鍵技巧 || "",
+              status: "ready",
+              errorMessage: undefined,
+            };
+          }
+          return item;
+        })
+      );
+      setPasteToast("✨ 考題重新辨識成功！");
+      setTimeout(() => setPasteToast(null), 3000);
+    } catch (err: any) {
+      console.error("Retry analysis failed:", err);
+      const errMsg = err?.message || "辨識發生錯誤";
+      setQuestions((prev) =>
+        prev.map((item) => {
+          if (item.id === questionId) {
+            return {
+              ...item,
+              status: "error",
+              errorMessage: errMsg,
+              questionText: "題目圖片辨識未完成 (" + errMsg + ")。點擊下方可手動編輯或再次重試。",
+            };
+          }
+          return item;
+        })
+      );
+
+      if (errMsg.includes("Key") || errMsg.includes("金鑰")) {
+        setIsByokOpen(true);
+      }
+    }
   };
 
   const handleMoveUp = (index: number) => {
@@ -392,12 +595,14 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
         {/* Top Capture Area */}
         <CaptureZone
-          onImageSelected={processNewImage}
+          onImageSelected={handleImageSelected}
           onLoadSamples={handleLoadSamples}
           onOpenByok={() => setIsByokOpen(true)}
           hasCustomKey={hasCustomKey}
           isAnalyzing={isAnalyzing}
           questionCount={questions.length}
+          autoCalibrate={autoCalibrateOnCapture}
+          onToggleAutoCalibrate={handleToggleAutoCalibrate}
         />
 
         {/* Status Bar / Filter & Stats */}
@@ -546,12 +751,14 @@ export default function App() {
                 totalCount={filteredQuestions.length}
                 layout={layout}
                 onOpenImageControl={(question) => setSelectedQuestionForImageModal(question)}
+                onOpenCalibration={handleOpenCalibrationForQuestion}
                 onDelete={handleDeleteQuestion}
                 onMoveUp={handleMoveUp}
                 onMoveDown={handleMoveDown}
                 onUpdateQuestion={handleUpdateQuestion}
                 onAddSimilarAsQuestion={handleAddSimilarAsQuestion}
                 onOpenByokModal={() => setIsByokOpen(true)}
+                onRetryAnalysis={handleRetryAnalysis}
               />
             ))}
           </div>
@@ -565,12 +772,14 @@ export default function App() {
                 totalCount={filteredQuestions.length}
                 layout={layout}
                 onOpenImageControl={(question) => setSelectedQuestionForImageModal(question)}
+                onOpenCalibration={handleOpenCalibrationForQuestion}
                 onDelete={handleDeleteQuestion}
                 onMoveUp={handleMoveUp}
                 onMoveDown={handleMoveDown}
                 onUpdateQuestion={handleUpdateQuestion}
                 onAddSimilarAsQuestion={handleAddSimilarAsQuestion}
                 onOpenByokModal={() => setIsByokOpen(true)}
+                onRetryAnalysis={handleRetryAnalysis}
               />
             ))}
           </div>
@@ -608,6 +817,50 @@ export default function App() {
           onUpdateSettings={handleUpdateImageSettings}
           onDeleteQuestion={handleDeleteQuestion}
           onRemoveImageOnly={handleRemoveImageOnly}
+          onOpenCalibration={() => {
+            const q = selectedQuestionForImageModal;
+            setSelectedQuestionForImageModal(null);
+            handleOpenCalibrationForQuestion(q);
+          }}
+          onReplaceImage={(newBase64) => {
+            handleUpdateQuestion(selectedQuestionForImageModal.id, {
+              imageBase64: newBase64,
+              imageSettings: {
+                ...selectedQuestionForImageModal.imageSettings,
+                zoom: 100,
+                includeInExport: true,
+              },
+            });
+            setSelectedQuestionForImageModal((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    imageBase64: newBase64,
+                    imageSettings: { ...prev.imageSettings, zoom: 100, includeInExport: true },
+                  }
+                : null
+            );
+          }}
+        />
+      )}
+
+      {/* Perspective Correction and Cropping Modal */}
+      {calibrationModal.isOpen && calibrationModal.imageSrc && (
+        <ImageCalibrationModal
+          isOpen={calibrationModal.isOpen}
+          imageSrc={calibrationModal.imageSrc}
+          initialMode={calibrationModal.initialMode || "perspective"}
+          isExistingQuestion={Boolean(calibrationModal.targetQuestionId)}
+          onConfirm={handleCalibrationConfirm}
+          onSkip={handleCalibrationSkip}
+          onReplaceTargetImage={(newImg) => {
+            if (calibrationModal.targetQuestionId) {
+              handleUpdateQuestion(calibrationModal.targetQuestionId, {
+                imageBase64: newImg,
+              });
+            }
+          }}
+          onClose={() => setCalibrationModal({ isOpen: false, imageSrc: "" })}
         />
       )}
 

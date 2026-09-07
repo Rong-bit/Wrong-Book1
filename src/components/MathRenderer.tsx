@@ -12,11 +12,79 @@ interface Segment {
 }
 
 /**
+ * Normalizes math text by:
+ * 1. Repairing corrupted control characters (e.g. \x0c -> \f from JSON escaping, \x08 -> \b)
+ * 2. Unifying unicode minus signs (− -> -) in math contexts
+ * 3. Auto-detecting and wrapping unwrapped LaTeX formulas (e.g. mixed fractions `-7 \frac{6}{9}`, `\frac{a}{b}`, `\sqrt{x}`) in $...$
+ */
+export function normalizeMathText(raw: string): string {
+  if (!raw) return "";
+
+  let text = raw;
+
+  // 1. Repair control characters caused by unescaped backslashes in JSON serialization:
+  // \x0c is Form Feed (0x0C) which happens when JSON parser interprets "\frac" as "\f" + "rac"
+  text = text.replace(/\x0c([a-zA-Z]+)/g, "\\f$1");
+  text = text.replace(/\x0crac/g, "\\frac");
+  text = text.replace(/\x0c/g, "\\frac");
+
+  // \x08 is Backspace (0x08) from "\beta", "\binom", "\bar"
+  text = text.replace(/\x08([a-zA-Z]+)/g, "\\b$1");
+
+  // \t (Tab) from "\text", "\theta", "\tau", "\times", "\tan", "\to", "\triangle"
+  text = text.replace(/\t(ext|heta|au|imes|an|riangle|o)\b/g, "\\t$1");
+
+  // \r (CR) from "\rho", "\right", "\rangle"
+  text = text.replace(/\r(ho|ight|angle)\b/g, "\\r$1");
+
+  // \n (NL) from "\nu", "\neq", "\neg", "\nabla"
+  text = text.replace(/(?<!\n)\n(u|eq|eg|abla)\b/g, "\\n$1");
+
+  // 2. Protect existing math blocks ($$...$$ and $...$) so we don't double-wrap or alter them
+  const mathPlaceholders: string[] = [];
+  const placeholderPrefix = "___MATH_TOKEN_";
+
+  const protectedText = text.replace(/\$\$[\s\S]+?\$\$|\$[^\$\n]+?\$/g, (match) => {
+    const idx = mathPlaceholders.length;
+    mathPlaceholders.push(match);
+    return `${placeholderPrefix}${idx}___`;
+  });
+
+  // 3. On the non-math portions, auto-wrap unwrapped mixed fractions and standard fractions:
+  // Supports:
+  // - Mixed fractions: `-7 \frac{6}{9}`, `−7 \frac{6}{9}`, `7 \frac{1}{2}`, `-7\frac{5}{9}`
+  // - Simple fractions: `\frac{6}{9}`, `-\frac{6}{9}`, `\dfrac{a}{b}`, `\tfrac{1}{3}`
+  let enriched = protectedText.replace(
+    /((?:[+-−]?\s*\d+\s*)?\\(?:d|t)?frac\{[^{}]+\}\{[^{}]+\})/g,
+    (match) => {
+      // Normalize unicode minus to standard ASCII minus in math mode
+      const normalizedMath = match.trim().replace(/−/g, "-");
+      return `$${normalizedMath}$`;
+    }
+  );
+
+  // Auto-wrap standalone \sqrt{...} or \sqrt[n]{...}
+  enriched = enriched.replace(
+    /(\\sqrt(?:\[[^\]]+\])?\{[^{}]+\})/g,
+    (match) => `$${match.trim().replace(/−/g, "-")}$`
+  );
+
+  // 4. Restore the protected math blocks
+  enriched = enriched.replace(new RegExp(`${placeholderPrefix}(\\d+)___`, "g"), (_, idxStr) => {
+    const idx = parseInt(idxStr, 10);
+    return mathPlaceholders[idx] ?? "";
+  });
+
+  return enriched;
+}
+
+/**
  * Parses raw text into text and LaTeX math blocks ($...$ or $$...$$)
  */
-function parseMathSegments(text: string): Segment[] {
-  if (!text) return [];
+function parseMathSegments(rawText: string): Segment[] {
+  if (!rawText) return [];
 
+  const text = normalizeMathText(rawText);
   const segments: Segment[] = [];
   // Regex to match $$block math$$ or $inline math$
   // $$[\s\S]+?$$ matches display mode formulas
@@ -67,8 +135,16 @@ function parseMathSegments(text: string): Segment[] {
  * Safely renders LaTeX via KaTeX
  */
 function renderKatexHtml(latex: string, displayMode: boolean): string {
+  // Clean any remaining control characters or unicode minus
+  const cleanLatex = latex
+    .replace(/\x0c([a-zA-Z]+)/g, "\\f$1")
+    .replace(/\x0crac/g, "\\frac")
+    .replace(/\x0c/g, "\\frac")
+    .replace(/\x08([a-zA-Z]+)/g, "\\b$1")
+    .replace(/−/g, "-");
+
   try {
-    return katex.renderToString(latex, {
+    return katex.renderToString(cleanLatex, {
       displayMode,
       throwOnError: false,
       output: "htmlAndMathml",
@@ -97,7 +173,7 @@ export const MathRenderer: React.FC<MathRendererProps> = ({ content, className =
           return (
             <span
               key={`math-block-${idx}`}
-              className="block my-2.5 overflow-x-auto text-center"
+              className="block my-2 overflow-x-auto text-center"
               dangerouslySetInnerHTML={{ __html: html }}
             />
           );

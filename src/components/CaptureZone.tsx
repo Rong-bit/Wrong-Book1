@@ -9,7 +9,9 @@ import {
   CheckCircle2,
   HelpCircle,
   Key,
+  Loader2,
 } from "lucide-react";
+import { compressImage, isSupportedImageFile, isHeic } from "../utils/imageUtils";
 
 interface CaptureZoneProps {
   onImageSelected: (base64: string, subjectHint?: string) => void;
@@ -18,6 +20,8 @@ interface CaptureZoneProps {
   hasCustomKey?: boolean;
   isAnalyzing: boolean;
   questionCount: number;
+  autoCalibrate?: boolean;
+  onToggleAutoCalibrate?: (val: boolean) => void;
 }
 
 export const CaptureZone: React.FC<CaptureZoneProps> = ({
@@ -27,24 +31,42 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
   hasCustomKey = false,
   isAnalyzing,
   questionCount,
+  autoCalibrate = true,
+  onToggleAutoCalibrate,
 }) => {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState<string>("");
+  const [isConvertingHeic, setIsConvertingHeic] = useState(false);
 
-  const handleFile = (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      alert("請選擇圖片格式檔案 (JPG / PNG / WebP 等)");
+  const handleFile = async (file: File) => {
+    if (!isSupportedImageFile(file)) {
+      alert("請選擇圖片格式檔案 (支援 JPG、PNG、WebP、HEIC / HEIF 等)");
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      if (e.target?.result && typeof e.target.result === "string") {
-        onImageSelected(e.target.result, selectedSubject || undefined);
+
+    if (isHeic(file)) {
+      setIsConvertingHeic(true);
+    }
+
+    try {
+      const compressed = await compressImage(file);
+      if (compressed) {
+        onImageSelected(compressed, selectedSubject || undefined);
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.warn("Image compression failed, using FileReader fallback:", err);
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (e.target?.result && typeof e.target.result === "string") {
+          onImageSelected(e.target.result, selectedSubject || undefined);
+        }
+      };
+      reader.readAsDataURL(file);
+    } finally {
+      setIsConvertingHeic(false);
+    }
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -66,12 +88,12 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-5 mb-6">
-      {/* Hidden inputs */}
+      {/* Hidden inputs with full image format support including HEIC/HEIF */}
       <input
         ref={cameraInputRef}
         id="camera-capture-input"
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif,image/heic,image/heif"
         capture="environment"
         className="hidden"
         onChange={handleFileInputChange}
@@ -80,7 +102,7 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
         ref={galleryInputRef}
         id="gallery-file-input"
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif,image/heic,image/heif"
         className="hidden"
         onChange={handleFileInputChange}
       />
@@ -160,7 +182,7 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
             <ClipboardPaste className="w-6 h-6" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="font-bold text-sm text-slate-800">
                 電腦截圖後，在頁面任意處按下
               </span>
@@ -168,10 +190,19 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
                 Ctrl + V
               </kbd>
               <span className="text-xs text-slate-500">(Mac 為 ⌘+V)</span>
+              <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                支援 HEIC / JPG / PNG
+              </span>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              截圖後直接貼上，系統自動擷取剪貼簿圖片，並透過 Gemini AI 解析科目、單元與詳解。
+              截圖後直接貼上，支援 iPhone/iPad 的 HEIC 拍照照片自動轉碼，並透過 Gemini AI 解析科目、單元與詳解。
             </p>
+            {isConvertingHeic && (
+              <div className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-800 text-xs font-medium animate-pulse">
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600 shrink-0" />
+                <span>正在轉碼 iPhone HEIC 照片為高畫質格式，請稍候...</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -216,15 +247,33 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
         </div>
       </div>
 
-      {/* Quick Hints */}
-      <div className="mt-3 flex items-center justify-between text-[11px] text-slate-500 px-1">
-        <div className="flex items-center gap-1.5">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-          <span>點擊題目圖片可開啟控制面板：自由縮放 (40%~200%)、順時針旋轉、對齊與刪除</span>
-        </div>
-        <div className="flex items-center gap-1 text-slate-400">
-          <HelpCircle className="w-3.5 h-3.5" />
-          <span>支援 B5 與 A4 高清考卷/錯題本無失真 PDF 導出</span>
+      {/* Auto Calibration Toggle & Feature Banner */}
+      <div className="mt-3.5 pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+        <label className="inline-flex items-center gap-2 cursor-pointer select-none group">
+          <input
+            type="checkbox"
+            checked={autoCalibrate}
+            onChange={(e) => onToggleAutoCalibrate?.(e.target.checked)}
+            className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 border-slate-300 transition cursor-pointer"
+          />
+          <span className="font-semibold text-slate-700 group-hover:text-slate-900 transition flex items-center gap-1.5">
+            <span>📷 拍照或選圖後，自動開啟「四點透視拉正與自由裁切」</span>
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800">
+              推薦啟用
+            </span>
+          </span>
+        </label>
+
+        <div className="flex items-center gap-3 text-[11px] text-slate-500">
+          <span className="flex items-center gap-1 text-slate-600">
+            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+            <span>四點拉正歪斜考卷 · 自由框選精準題目</span>
+          </span>
+          <span className="hidden md:inline text-slate-300">|</span>
+          <span className="hidden md:flex items-center gap-1 text-slate-400">
+            <HelpCircle className="w-3.5 h-3.5 shrink-0" />
+            <span>B5 / A4 高清試卷導出</span>
+          </span>
         </div>
       </div>
     </div>

@@ -1,23 +1,196 @@
 import { QuestionItem } from "../types";
 
-// Generate clean SVG-based sample question image clippings
+// Generate clean Canvas-based or base64 SVG sample question image clippings
 function createSampleImage(title: string, problem: string, diagramSvg: string = ""): string {
+  if (typeof document !== "undefined") {
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = 680;
+      canvas.height = 280;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        // Base exam paper clipping background
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, 680, 280);
+
+        // Grid pattern
+        ctx.strokeStyle = "#f1f5f9";
+        ctx.lineWidth = 1;
+        for (let x = 15; x < 680; x += 20) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, 280);
+          ctx.stroke();
+        }
+        for (let y = 15; y < 280; y += 20) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(680, y);
+          ctx.stroke();
+        }
+
+        // Dashed border
+        ctx.strokeStyle = "#cbd5e1";
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.strokeRect(6, 6, 668, 268);
+        ctx.setLineDash([]);
+
+        // Badge
+        ctx.fillStyle = title.includes("數學") ? "#0284c7" : "#0d9488";
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(20, 20, 84, 28, 5);
+        } else {
+          ctx.rect(20, 20, 84, 28);
+        }
+        ctx.fill();
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 13px -apple-system, BlinkMacSystemFont, 'Noto Sans TC', sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(title, 62, 34);
+
+        // Problem text
+        ctx.fillStyle = "#0f172a";
+        ctx.font = "bold 15px -apple-system, BlinkMacSystemFont, 'Noto Sans TC', sans-serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText(problem, 20, 80);
+
+        // Inner Card for diagram / options
+        ctx.fillStyle = "#f8fafc";
+        ctx.strokeStyle = "#e2e8f0";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        if (ctx.roundRect) {
+          ctx.roundRect(20, 100, 640, 136, 6);
+        } else {
+          ctx.rect(20, 100, 640, 136);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        if (title.includes("數學")) {
+          // Math choices
+          ctx.font = "14px -apple-system, BlinkMacSystemFont, sans-serif";
+          ctx.fillStyle = "#334155";
+          ctx.fillText("(A) k > 4 或 k < -1", 40, 140);
+          ctx.fillText("(B) -1 < k < 4", 40, 180);
+          ctx.fillText("(C) k > 3 或 k < -2", 240, 140);
+          ctx.fillText("(D) -2 < k < 3", 240, 180);
+
+          // Focus box
+          ctx.fillStyle = "#fef2f2";
+          ctx.strokeStyle = "#fecaca";
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(440, 120, 200, 76, 6);
+          } else {
+            ctx.rect(440, 120, 200, 76);
+          }
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = "#dc2626";
+          ctx.font = "bold 13px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("【考點：判別式 D > 0】", 540, 150);
+          ctx.font = "12px sans-serif";
+          ctx.fillStyle = "#991b1b";
+          ctx.fillText("b² - 4ac > 0", 540, 175);
+        } else {
+          // Physics
+          ctx.strokeStyle = "#475569";
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(40, 190);
+          ctx.lineTo(260, 190);
+          ctx.stroke();
+
+          // Block
+          ctx.fillStyle = "#38bdf8";
+          ctx.strokeStyle = "#0284c7";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          if (ctx.roundRect) {
+            ctx.roundRect(80, 145, 60, 42, 4);
+          } else {
+            ctx.rect(80, 145, 60, 42);
+          }
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = "#0f172a";
+          ctx.font = "bold 13px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("2 kg", 110, 171);
+
+          // Force arrow
+          ctx.strokeStyle = "#ef4444";
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.moveTo(145, 166);
+          ctx.lineTo(215, 166);
+          ctx.stroke();
+
+          ctx.fillStyle = "#ef4444";
+          ctx.beginPath();
+          ctx.moveTo(215, 161);
+          ctx.lineTo(225, 166);
+          ctx.lineTo(215, 171);
+          ctx.fill();
+
+          ctx.font = "bold 12px sans-serif";
+          ctx.fillText("F = 10 N →", 185, 155);
+
+          // Options
+          ctx.textAlign = "left";
+          ctx.font = "14px sans-serif";
+          ctx.fillStyle = "#334155";
+          ctx.fillText("(A) 100 J", 320, 145);
+          ctx.fillText("(B) 200 J", 320, 180);
+          ctx.fillText("(C) 400 J", 450, 145);
+          ctx.fillText("(D) 800 J", 450, 180);
+        }
+
+        // Footer
+        ctx.textAlign = "right";
+        ctx.font = "11px monospace";
+        ctx.fillStyle = "#94a3b8";
+        ctx.fillText("考卷拍照截圖 (支援四點拉正校正與裁切)", 656, 258);
+
+        return canvas.toDataURL("image/png");
+      }
+    } catch (e) {
+      console.warn("Canvas sample question generation fallback:", e);
+    }
+  }
+
+  // Fallback to UTF-8 base64 SVG
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="260" viewBox="0 0 600 260">
-    <defs>
-      <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
-        <path d="M 20 0 L 0 0 0 20" fill="none" stroke="#f1f5f9" stroke-width="1"/>
-      </pattern>
-    </defs>
     <rect width="600" height="260" fill="#ffffff" rx="8"/>
-    <rect width="600" height="260" fill="url(#grid)" rx="8"/>
     <rect x="1" y="1" width="598" height="258" fill="none" stroke="#cbd5e1" stroke-width="1.5" stroke-dasharray="4 4" rx="8"/>
     <rect x="20" y="20" width="80" height="26" rx="4" fill="#0284c7" />
-    <text x="60" y="37" font-family="-apple-system, sans-serif" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${title}</text>
-    <text x="20" y="75" font-family="-apple-system, sans-serif" font-size="16" font-weight="600" fill="#0f172a">${problem}</text>
+    <text x="60" y="37" font-family="sans-serif" font-size="13" font-weight="bold" fill="#ffffff" text-anchor="middle">${title}</text>
+    <text x="20" y="75" font-family="sans-serif" font-size="16" font-weight="600" fill="#0f172a">${problem}</text>
     ${diagramSvg}
     <text x="580" y="245" font-family="monospace" font-size="11" fill="#94a3b8" text-anchor="end">考卷截圖擷取 (Ctrl+V / 拍照)</text>
   </svg>`;
-  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+  try {
+    const encoded =
+      typeof window !== "undefined" && window.btoa
+        ? window.btoa(
+            encodeURIComponent(svg).replace(/%([0-9A-F]{2})/g, (_, p1) =>
+              String.fromCharCode(parseInt(p1, 16))
+            )
+          )
+        : Buffer.from(svg).toString("base64");
+    return `data:image/svg+xml;base64,${encoded}`;
+  } catch {
+    return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
+  }
 }
 
 export const initialSampleQuestions: QuestionItem[] = [
