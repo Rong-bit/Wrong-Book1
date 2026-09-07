@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   ChevronUp,
   ChevronDown,
@@ -24,9 +24,12 @@ import {
   RefreshCw,
   ChevronRight,
   FileQuestion,
+  Calculator,
 } from "lucide-react";
 import { QuestionItem, ViewLayout, SimilarQuestionVariant } from "../types";
 import { generateSimilarQuestion } from "../services/aiService";
+import { MathRenderer } from "./MathRenderer";
+import { MathToolbar } from "./MathToolbar";
 
 interface QuestionCardProps {
   question: QuestionItem;
@@ -73,6 +76,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   const [revealedVariantAnswers, setRevealedVariantAnswers] = useState<{ [id: string]: boolean }>({});
   const [addedVariantsMap, setAddedVariantsMap] = useState<{ [id: string]: boolean }>({});
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
+  const questionTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const explanationTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [showQuestionMathToolbar, setShowQuestionMathToolbar] = useState(false);
+  const [showExplanationMathToolbar, setShowExplanationMathToolbar] = useState(false);
 
   const handleSaveEdit = () => {
     onUpdateQuestion(question.id, {
@@ -437,27 +444,107 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold text-slate-700 mb-1">
-              題目文字內容
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[11px] font-bold text-slate-700">
+                題目文字內容
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowQuestionMathToolbar(!showQuestionMathToolbar)}
+                className={`text-[11px] font-semibold px-2 py-0.5 rounded-lg border transition flex items-center gap-1 ${
+                  showQuestionMathToolbar
+                    ? "bg-sky-600 text-white border-sky-600 shadow-2xs"
+                    : "bg-white text-sky-700 border-sky-200 hover:bg-sky-50"
+                }`}
+              >
+                <Calculator className="w-3 h-3" />
+                {showQuestionMathToolbar ? "隱藏公式工具列" : "📐 數學公式工具列"}
+              </button>
+            </div>
+
+            {showQuestionMathToolbar && (
+              <div className="mb-2">
+                <MathToolbar
+                  textareaRef={questionTextareaRef}
+                  value={editedText}
+                  onChange={setEditedText}
+                />
+              </div>
+            )}
+
             <textarea
+              ref={questionTextareaRef}
               rows={4}
               value={editedText}
               onChange={(e) => setEditedText(e.target.value)}
-              className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white leading-relaxed"
+              className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white leading-relaxed font-sans"
+              placeholder="支援輸入數學公式，例如 $x^2 - 4x + 3 = 0$ 或點擊上方工具列一鍵插入"
             />
+
+            {/* Live Math Preview */}
+            {editedText && (
+              <div className="mt-1.5 p-2.5 bg-sky-50/40 rounded-lg border border-sky-200/80 text-xs">
+                <div className="text-[10px] text-sky-800 font-bold mb-1 flex items-center gap-1">
+                  <Calculator className="w-3 h-3 text-sky-600" />
+                  即時排版預覽 (KaTeX)
+                </div>
+                <div className="text-slate-800 font-sans leading-relaxed">
+                  <MathRenderer content={editedText} />
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold text-slate-700 mb-1">
-              詳細推導步驟
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="text-[11px] font-bold text-slate-700">
+                詳細推導步驟
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowExplanationMathToolbar(!showExplanationMathToolbar)}
+                className={`text-[11px] font-semibold px-2 py-0.5 rounded-lg border transition flex items-center gap-1 ${
+                  showExplanationMathToolbar
+                    ? "bg-sky-600 text-white border-sky-600 shadow-2xs"
+                    : "bg-white text-sky-700 border-sky-200 hover:bg-sky-50"
+                }`}
+              >
+                <Calculator className="w-3 h-3" />
+                {showExplanationMathToolbar ? "隱藏公式工具列" : "📐 數學公式工具列"}
+              </button>
+            </div>
+
+            {showExplanationMathToolbar && (
+              <div className="mb-2">
+                <MathToolbar
+                  textareaRef={explanationTextareaRef}
+                  value={editedExplanation}
+                  onChange={setEditedExplanation}
+                />
+              </div>
+            )}
+
             <textarea
+              ref={explanationTextareaRef}
               rows={4}
               value={editedExplanation}
               onChange={(e) => setEditedExplanation(e.target.value)}
-              className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white leading-relaxed"
+              className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white leading-relaxed font-sans"
+              placeholder="支援輸入計算過程與 LaTeX 算式，例如 $\Delta = b^2 - 4ac$"
             />
+
+            {/* Live Math Preview */}
+            {editedExplanation && (
+              <div className="mt-1.5 p-2.5 bg-sky-50/40 rounded-lg border border-sky-200/80 text-xs">
+                <div className="text-[10px] text-sky-800 font-bold mb-1 flex items-center gap-1">
+                  <Calculator className="w-3 h-3 text-sky-600" />
+                  即時推導預覽 (KaTeX)
+                </div>
+                <div className="text-slate-800 font-sans leading-relaxed">
+                  <MathRenderer content={editedExplanation} />
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -493,8 +580,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
       ) : (
         <div className="space-y-4">
           {/* Question Text */}
-          <div className="text-sm leading-relaxed text-slate-800 whitespace-pre-line">
-            {question.questionText}
+          <div className="text-sm leading-relaxed text-slate-800 font-sans">
+            <MathRenderer content={question.questionText} />
           </div>
 
           {/* Exam Paper Mode: Blank workspace & answer preview toggle */}
@@ -527,7 +614,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
 
               {showAnswerInPaper && question.answer && (
                 <div className="mt-2 p-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-900 font-sans">
-                  <span className="font-bold">參考答案：</span> {question.answer}
+                  <span className="font-bold">參考答案：</span> <MathRenderer content={question.answer} />
                 </div>
               )}
             </div>
@@ -543,8 +630,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                     <span className="font-bold text-emerald-900 block mb-0.5">
                       標準答案
                     </span>
-                    <span className="text-emerald-800 font-semibold">
-                      {question.answer}
+                    <span className="text-emerald-800 font-semibold font-sans">
+                      <MathRenderer content={question.answer} />
                     </span>
                   </div>
                 )}
@@ -554,7 +641,9 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                       <Lightbulb className="w-3.5 h-3.5 text-sky-600" />
                       核心考點
                     </span>
-                    <span className="text-sky-800">{question.coreConcepts}</span>
+                    <span className="text-sky-800 font-sans">
+                      <MathRenderer content={question.coreConcepts} />
+                    </span>
                   </div>
                 )}
               </div>
@@ -565,9 +654,9 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                   <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                   <div>
                     <span className="font-bold block mb-0.5">易錯陷阱與概念盲區</span>
-                    <span className="whitespace-pre-line text-amber-800 leading-relaxed">
-                      {question.commonPitfalls}
-                    </span>
+                    <div className="text-amber-800 leading-relaxed font-sans">
+                      <MathRenderer content={question.commonPitfalls} />
+                    </div>
                   </div>
                 </div>
               )}
@@ -578,8 +667,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                   <span className="font-bold text-slate-900 block mb-1">
                     詳細解題步驟
                   </span>
-                  <div className="whitespace-pre-line text-slate-700">
-                    {question.explanation}
+                  <div className="text-slate-700 font-sans">
+                    <MathRenderer content={question.explanation} />
                   </div>
                 </div>
               )}
@@ -587,8 +676,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
               {/* Key Tips */}
               {question.tips && (
                 <div className="text-[11px] text-indigo-700 bg-indigo-50/60 p-2.5 rounded-lg border border-indigo-100 flex items-center gap-1.5">
-                  <span className="font-bold">解題技巧：</span>
-                  <span>{question.tips}</span>
+                  <span className="font-bold shrink-0">解題技巧：</span>
+                  <span className="font-sans"><MathRenderer content={question.tips} /></span>
                 </div>
               )}
 
@@ -610,7 +699,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                   )}
                 </div>
                 {question.myNotes ? (
-                  <p className="text-slate-600 italic">{question.myNotes}</p>
+                  <div className="text-slate-600 italic font-sans"><MathRenderer content={question.myNotes} /></div>
                 ) : (
                   <p className="text-slate-400 italic">尚無個人心得筆記，點擊鉛筆圖示即可填寫。</p>
                 )}
@@ -809,8 +898,8 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                           </div>
 
                           {/* Variant Question Text */}
-                          <div className="text-xs text-slate-900 leading-relaxed whitespace-pre-line bg-slate-50/50 p-2.5 rounded-lg border border-slate-200/60 font-sans">
-                            {v.questionText}
+                          <div className="text-xs text-slate-900 leading-relaxed bg-slate-50/50 p-2.5 rounded-lg border border-slate-200/60 font-sans">
+                            <MathRenderer content={v.questionText} />
                           </div>
 
                           {/* Answer & Explanation Toggle */}
@@ -834,11 +923,11 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                             {isRevealed && (
                               <div className="mt-2 p-2.5 bg-indigo-50/60 rounded-lg border border-indigo-200 text-xs space-y-1.5 animate-in fade-in duration-150">
                                 <div className="flex items-baseline gap-1.5">
-                                  <span className="font-bold text-emerald-800">
+                                  <span className="font-bold text-emerald-800 shrink-0">
                                     【標準答案】：
                                   </span>
-                                  <span className="font-semibold text-emerald-950">
-                                    {v.answer}
+                                  <span className="font-semibold text-emerald-950 font-sans">
+                                    <MathRenderer content={v.answer} />
                                   </span>
                                 </div>
                                 {v.explanation && (
@@ -846,15 +935,15 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                                     <span className="font-bold text-indigo-950 block mb-0.5">
                                       【詳細解題步驟】：
                                     </span>
-                                    <div className="whitespace-pre-line leading-relaxed text-slate-600">
-                                      {v.explanation}
+                                    <div className="leading-relaxed text-slate-600 font-sans">
+                                      <MathRenderer content={v.explanation} />
                                     </div>
                                   </div>
                                 )}
                                 {v.tips && (
-                                  <div className="text-[10px] text-amber-800 bg-amber-50 p-1.5 rounded border border-amber-200/60">
+                                  <div className="text-[10px] text-amber-800 bg-amber-50 p-1.5 rounded border border-amber-200/60 font-sans">
                                     <span className="font-bold">思考點撥：</span>
-                                    {v.tips}
+                                    <MathRenderer content={v.tips} />
                                   </div>
                                 )}
                               </div>

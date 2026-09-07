@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { PaperSettings, QuestionItem, PaperSize } from "../types";
 import { exportToHighDefPdf } from "../services/pdfService";
+import { MathRenderer } from "./MathRenderer";
 
 interface PdfExportModalProps {
   isOpen: boolean;
@@ -731,7 +732,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                       <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-1 py-0.5 rounded mr-1">
                                         (此題無截圖照片，自動顯示文字)
                                       </span>
-                                      {q.questionText}
+                                      <MathRenderer content={q.questionText} />
                                     </div>
                                   )
                                 ) : (
@@ -761,7 +762,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                         </div>
                                       )}
                                     <div className="text-xs text-slate-900 leading-relaxed whitespace-pre-line">
-                                      {q.questionText}
+                                      <MathRenderer content={q.questionText} />
                                     </div>
                                   </>
                                 )}
@@ -910,7 +911,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                               <span className="text-xs text-amber-700 font-bold bg-amber-50 px-1 py-0.5 rounded mr-1">
                                 (此題無截圖照片，自動顯示文字)
                               </span>
-                              {q.questionText}
+                              <MathRenderer content={q.questionText} />
                             </div>
                           )
                         ) : (
@@ -941,7 +942,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                 </div>
                               )}
                             <div className="text-sm leading-relaxed whitespace-pre-line text-slate-900">
-                              {q.questionText}
+                              <MathRenderer content={q.questionText} />
                             </div>
                           </>
                         )}
@@ -965,7 +966,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                   【參考答案】：
                                 </span>
                                 <span className="font-semibold text-emerald-900">
-                                  {q.answer}
+                                  <MathRenderer content={q.answer} />
                                 </span>
                               </div>
                             )}
@@ -974,13 +975,13 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                 <span className="font-bold text-sky-800">
                                   【核心考點】：
                                 </span>
-                                <span>{q.coreConcepts}</span>
+                                <span><MathRenderer content={q.coreConcepts} /></span>
                               </div>
                             )}
                             {q.commonPitfalls && (
                               <div className="text-amber-800">
                                 <span className="font-bold">【易錯陷阱】：</span>
-                                <span>{q.commonPitfalls}</span>
+                                <span><MathRenderer content={q.commonPitfalls} /></span>
                               </div>
                             )}
                             {q.explanation && (
@@ -989,7 +990,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                   【詳細推導步驟】：
                                 </span>
                                 <div className="whitespace-pre-line text-slate-600">
-                                  {q.explanation}
+                                  <MathRenderer content={q.explanation} />
                                 </div>
                               </div>
                             )}
@@ -1045,13 +1046,13 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                             {q.chapter ? ` · ${q.chapter}` : ""} · {q.unit}】
                           </span>
                           <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
-                            標準答案：{q.answer || "詳見解題過程"}
+                            標準答案：<MathRenderer content={q.answer || "詳見解題過程"} />
                           </span>
                         </div>
                         {q.coreConcepts && (
                           <div className="mb-1 text-slate-700">
                             <span className="font-bold text-sky-800">核心考點：</span>
-                            {q.coreConcepts}
+                            <MathRenderer content={q.coreConcepts} />
                           </div>
                         )}
                         {q.variationPoint && (
@@ -1063,14 +1064,14 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                         {q.commonPitfalls && (
                           <div className="mb-1.5 text-amber-800">
                             <span className="font-bold">易錯陷阱：</span>
-                            {q.commonPitfalls}
+                            <MathRenderer content={q.commonPitfalls} />
                           </div>
                         )}
                         <div className="text-slate-600 whitespace-pre-line leading-relaxed pt-1 border-t border-slate-200/60">
                           <span className="font-bold text-slate-800 block mb-0.5">
                             詳細推導：
                           </span>
-                          {q.explanation}
+                          <MathRenderer content={q.explanation} />
                         </div>
                       </div>
                     ))}

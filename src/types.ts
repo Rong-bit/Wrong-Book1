@@ -69,3 +69,14 @@ export interface PaperSettings {
 }
 
 export type ViewLayout = "notebook" | "paper" | "grid";
+
+export interface BackupData {
+  version: number;
+  appName: string;
+  exportedAt: string;
+  timestamp: number;
+  questionCount: number;
+  subjects: string[];
+  questions: QuestionItem[];
+  paperSettings?: PaperSettings;
+}

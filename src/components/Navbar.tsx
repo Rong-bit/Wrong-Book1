@@ -8,6 +8,7 @@ import {
   Grid,
   CheckCircle2,
   Sparkles,
+  HardDrive,
 } from "lucide-react";
 import { ViewLayout } from "../types";
 
@@ -16,6 +17,7 @@ interface NavbarProps {
   onLayoutChange: (layout: ViewLayout) => void;
   onOpenByok: () => void;
   onOpenExportPdf: () => void;
+  onOpenBackup: () => void;
   hasCustomKey: boolean;
   maskedCustomKey?: string;
   questionCount: number;
@@ -29,6 +31,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onLayoutChange,
   onOpenByok,
   onOpenExportPdf,
+  onOpenBackup,
   hasCustomKey,
   maskedCustomKey,
   questionCount,
@@ -129,6 +132,18 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">(BYOK)</span>
               </span>
             )}
+          </button>
+
+          {/* Backup / Restore Button */}
+          <button
+            id="open-backup-btn"
+            type="button"
+            onClick={onOpenBackup}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition flex items-center gap-1.5 shadow-2xs"
+            title="題庫備份與還原 (下載 / 匯入 .json 檔案)"
+          >
+            <HardDrive className="w-3.5 h-3.5 text-sky-600" />
+            <span className="hidden sm:inline">檔案備份</span>
           </button>
 
           {/* Export PDF Button */}

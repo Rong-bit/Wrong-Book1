@@ -12,6 +12,7 @@ import {
   AlertCircle,
   Loader2,
   CheckCircle,
+  HardDrive,
 } from "lucide-react";
 import { QuestionItem, PaperSettings, ViewLayout, ImageSettings, SimilarQuestionVariant } from "./types";
 import { initialSampleQuestions } from "./data/sampleQuestions";
@@ -26,6 +27,7 @@ import { QuestionCard } from "./components/QuestionCard";
 import { ImageControlModal } from "./components/ImageControlModal";
 import { ByokModal } from "./components/ByokModal";
 import { PdfExportModal } from "./components/PdfExportModal";
+import { BackupModal } from "./components/BackupModal";
 
 const STORAGE_QUESTIONS_KEY = "digital_notebook_questions_v1";
 
@@ -50,6 +52,7 @@ export default function App() {
     useState<QuestionItem | null>(null);
   const [isByokOpen, setIsByokOpen] = useState<boolean>(false);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState<boolean>(false);
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState<boolean>(false);
   const [hasCustomKey, setHasCustomKey] = useState<boolean>(false);
   const [pasteToast, setPasteToast] = useState<string | null>(null);
   const [isConfirmingClearAll, setIsConfirmingClearAll] = useState<boolean>(false);
@@ -323,6 +326,33 @@ export default function App() {
     setQuestions([]);
   };
 
+  const handleRestoreQuestions = (
+    restoredQuestions: QuestionItem[],
+    mode: "merge" | "overwrite"
+  ) => {
+    if (mode === "overwrite") {
+      setQuestions(restoredQuestions);
+      setPasteToast(`✨ 已成功完全還原 ${restoredQuestions.length} 道考題！`);
+    } else {
+      // Merge mode: keep existing questions, append new ones avoiding duplicate IDs
+      setQuestions((prev) => {
+        const existingIds = new Set(prev.map((q) => q.id));
+        const newItems = restoredQuestions.map((q) => {
+          if (existingIds.has(q.id)) {
+            return {
+              ...q,
+              id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+            };
+          }
+          return q;
+        });
+        return [...prev, ...newItems];
+      });
+      setPasteToast(`✨ 已成功合併匯入 ${restoredQuestions.length} 道考題！`);
+    }
+    setTimeout(() => setPasteToast(null), 3500);
+  };
+
   // Subjects for filtering
   const availableSubjects = Array.from(
     new Set(questions.map((q) => q.subject).filter(Boolean))
@@ -341,6 +371,7 @@ export default function App() {
         onLayoutChange={setLayout}
         onOpenByok={() => setIsByokOpen(true)}
         onOpenExportPdf={() => setIsPdfModalOpen(true)}
+        onOpenBackup={() => setIsBackupModalOpen(true)}
         hasCustomKey={hasCustomKey}
         maskedCustomKey={getMaskedKey(getStoredApiKey())}
         questionCount={questions.length}
@@ -409,6 +440,16 @@ export default function App() {
 
           {/* Quick Actions */}
           <div className="flex items-center gap-2 self-end sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setIsBackupModalOpen(true)}
+              className="px-2.5 py-1 text-xs text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-lg transition font-semibold flex items-center gap-1 border border-sky-200/80"
+              title="備份題庫為 .json 檔案，或從本機備份檔還原"
+            >
+              <HardDrive className="w-3.5 h-3.5 text-sky-600" />
+              <span>備份 / 還原</span>
+            </button>
+
             {questions.length > 0 && (
               <>
                 <button
@@ -584,6 +625,15 @@ export default function App() {
         settings={paperSettings}
         onClose={() => setIsPdfModalOpen(false)}
         onUpdateSettings={setPaperSettings}
+      />
+
+      {/* Backup & Restore Modal */}
+      <BackupModal
+        isOpen={isBackupModalOpen}
+        onClose={() => setIsBackupModalOpen(false)}
+        questions={questions}
+        paperSettings={paperSettings}
+        onRestoreQuestions={handleRestoreQuestions}
       />
     </div>
   );
