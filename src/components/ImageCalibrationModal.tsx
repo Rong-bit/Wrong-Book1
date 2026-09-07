@@ -22,6 +22,9 @@ import {
   ArrowRight,
   ChevronRight,
   CornerDownLeft,
+  Wand2,
+  ChevronDown,
+  SunMedium,
 } from "lucide-react";
 import {
   Point,
@@ -31,6 +34,8 @@ import {
   rotateImage,
   normalizeImageSrc,
   compressImage,
+  removeShadowsAndBinarize,
+  ShadowRemovalMode,
 } from "../utils/imageUtils";
 
 interface ImageCalibrationModalProps {
@@ -64,6 +69,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const [history, setHistory] = useState<string[]>([]);
   const [mode, setMode] = useState<CalibrationMode>(initialMode || "perspective");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingText, setProcessingText] = useState<string>("正在處理影像...");
   const [naturalDimensions, setNaturalDimensions] = useState<{ width: number; height: number }>({ width: 800, height: 600 });
   const [aspectRatioMode, setAspectRatioMode] = useState<AspectRatioMode>("free");
   const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({ width: 880, height: 480 });
@@ -299,6 +305,32 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setCropBox({ x: 0.05, y: 0.05, w: 0.9, h: 0.9 });
     } catch (err) {
       console.error("Apply crop failed:", err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Remove shadows and binarize: pure white background and crisp black text
+  const handleRemoveShadows = async (shadowMode: ShadowRemovalMode = "pure_bw") => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    setProcessingText(
+      shadowMode === "pure_bw"
+        ? "正在去除陰影，轉為純白底黑字..."
+        : shadowMode === "clean_gray"
+        ? "正在平整光線，轉換為清爽灰階..."
+        : "正在去除陰影並保留彩色筆跡..."
+    );
+    try {
+      const enhanced = await removeShadowsAndBinarize(currentImage, {
+        mode: shadowMode,
+        contrast: 1.25,
+        whiteLevel: 0.88,
+        blackLevel: 0.46,
+      });
+      pushHistory(enhanced);
+    } catch (err) {
+      console.error("Remove shadows failed:", err);
     } finally {
       setIsProcessing(false);
     }
@@ -863,8 +895,60 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             )}
           </div>
 
-          {/* Right: Zoom, Rotate and Undo Tools */}
-          <div className="flex items-center gap-1.5 ml-auto">
+          {/* Right: Shadow Removal, Zoom, Rotate and Undo Tools */}
+          <div className="flex items-center gap-1.5 ml-auto flex-wrap">
+            {/* Shadow Removal / Paper Whitening Quick Actions */}
+            <div className="flex items-center gap-0.5 bg-amber-50/90 p-0.5 rounded-lg border border-amber-200 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => handleRemoveShadows("pure_bw")}
+                disabled={isProcessing}
+                className="px-2.5 py-1 rounded-md text-[11px] font-bold text-amber-950 bg-amber-200/80 hover:bg-amber-300 active:scale-95 transition flex items-center gap-1.5 cursor-pointer"
+                title="去除所有陰影、黃光與暗角，將紙張底色轉為 100% 純白，文字強化為深黑"
+              >
+                <Wand2 className="w-3.5 h-3.5 text-amber-700" />
+                <span>去除陰影 (純白底黑字)</span>
+              </button>
+
+              <div className="relative group">
+                <button
+                  type="button"
+                  className="p-1 rounded-md text-amber-800 hover:bg-amber-200/70 transition text-[11px]"
+                  title="選擇更多去陰影模式"
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </button>
+                <div className="absolute right-0 top-full mt-1 hidden group-hover:flex flex-col bg-white rounded-xl shadow-xl border border-slate-200 py-1 w-44 z-50 animate-in fade-in">
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveShadows("pure_bw")}
+                    className="px-3 py-1.5 text-left text-xs font-semibold text-slate-800 hover:bg-amber-50 flex items-center gap-2"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-slate-950" />
+                    純白底黑字 (強烈推薦)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveShadows("clean_gray")}
+                    className="px-3 py-1.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-slate-400" />
+                    清爽灰階 (保留筆觸)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveShadows("clean_color")}
+                    className="px-3 py-1.5 text-left text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  >
+                    <span className="w-2 h-2 rounded-full bg-rose-500" />
+                    彩色去陰影 (保留紅筆)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="w-px h-4 bg-slate-200 mx-0.5 hidden sm:block" />
+
             {/* Zoom Controls */}
             <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
               <button
@@ -1026,7 +1110,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           {isProcessing && (
             <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-xs flex flex-col items-center justify-center text-white z-40">
               <RefreshCw className="w-8 h-8 animate-spin text-sky-400 mb-2" />
-              <div className="text-sm font-bold">正在執行透視校正運算...</div>
+              <div className="text-sm font-bold">{processingText}</div>
             </div>
           )}
         </div>
@@ -1080,6 +1164,18 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 </button>
               </>
             )}
+
+            {/* Quick Pure White B&W Button in footer */}
+            <button
+              type="button"
+              onClick={() => handleRemoveShadows("pure_bw")}
+              disabled={isProcessing}
+              className="px-3 py-2 rounded-xl text-xs font-bold text-amber-950 bg-amber-100 hover:bg-amber-200 active:scale-95 transition border border-amber-300/90 flex items-center gap-1.5 shadow-2xs cursor-pointer"
+              title="消除手機陰影與檯燈光影，轉換為純白底黑字"
+            >
+              <Wand2 className="w-3.5 h-3.5 text-amber-700" />
+              <span>去除陰影 (白底黑字)</span>
+            </button>
 
             {history.length > 0 && (
               <span className="text-[11px] text-slate-500 font-medium hidden md:inline ml-1">

@@ -620,3 +620,230 @@ export async function rotateImage(
     img.src = normalizeImageSrc(imageSrc);
   });
 }
+
+export type ShadowRemovalMode = "pure_bw" | "clean_gray" | "clean_color";
+
+export interface ShadowRemovalOptions {
+  mode?: ShadowRemovalMode;
+  contrast?: number; // 1.0 - 1.8 default 1.25
+  whiteLevel?: number; // 0.80 - 0.95 default 0.88
+  blackLevel?: number; // 0.35 - 0.60 default 0.46
+  quality?: number; // jpeg quality default 0.92
+}
+
+/**
+ * 試卷照片去除陰影演算法：將黃光、檯燈與手機陰影去除，轉為純白底黑字（掃描儀高對比文件效果）
+ * 演算法步驟：
+ * 1. 降採樣估算背景光照場 (Downsample Illumination Map)
+ * 2. 形態學局部最大值濾波 (Local Max Dilation) 消除細黑字筆畫，萃取紙張底色
+ * 3. 盒狀平滑模糊 (Smooth Box Blur) 獲得連續背景光照曲面
+ * 4. 雙線性插值估算每個畫素的局部背景亮度並作反射率除法正規化 (Ratio = Y / Background)
+ * 5. 自適應閥值與平滑抗鋸齒曲線映射，使紙張底色 100% 潔白 (#FFFFFF)，筆墨字跡深黑 (#000000)
+ */
+export async function removeShadowsAndBinarize(
+  imageSrc: string,
+  options: ShadowRemovalOptions = {}
+): Promise<string> {
+  const {
+    mode = "pure_bw",
+    contrast = 1.25,
+    whiteLevel = 0.88,
+    blackLevel = 0.46,
+    quality = 0.92,
+  } = options;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    if (imageSrc.startsWith("http://") || imageSrc.startsWith("https://")) {
+      img.crossOrigin = "anonymous";
+    }
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        if (!w || !h) {
+          resolve(imageSrc);
+          return;
+        }
+
+        // Full resolution canvas
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) {
+          resolve(imageSrc);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const data = imgData.data;
+
+        // Downscale to estimate illumination (approx 120-160px max dimension)
+        const scaleFactor = Math.min(1, 140 / Math.max(w, h));
+        const sw = Math.max(16, Math.round(w * scaleFactor));
+        const sh = Math.max(16, Math.round(h * scaleFactor));
+
+        const sCanvas = document.createElement("canvas");
+        sCanvas.width = sw;
+        sCanvas.height = sh;
+        const sCtx = sCanvas.getContext("2d", { willReadFrequently: true });
+        if (!sCtx) {
+          resolve(imageSrc);
+          return;
+        }
+        sCtx.drawImage(img, 0, 0, sw, sh);
+        const sData = sCtx.getImageData(0, 0, sw, sh);
+        const sPixels = sData.data;
+
+        // Extract grayscale buffer for illumination
+        const illum = new Float32Array(sw * sh);
+        for (let i = 0; i < sw * sh; i++) {
+          const idx = i * 4;
+          // Grayscale luminance
+          illum[i] = 0.299 * sPixels[idx] + 0.587 * sPixels[idx + 1] + 0.114 * sPixels[idx + 2];
+        }
+
+        // Morphological dilation (local max filter radius = 2) on downscaled map
+        // This fills in dark text and thin lines with surrounding paper color
+        const dilated = new Float32Array(sw * sh);
+        const r = 2;
+        for (let y = 0; y < sh; y++) {
+          const yMin = Math.max(0, y - r);
+          const yMax = Math.min(sh - 1, y + r);
+          for (let x = 0; x < sw; x++) {
+            const xMin = Math.max(0, x - r);
+            const xMax = Math.min(sw - 1, x + r);
+            let maxVal = 0;
+            for (let ny = yMin; ny <= yMax; ny++) {
+              const rowOffset = ny * sw;
+              for (let nx = xMin; nx <= xMax; nx++) {
+                const val = illum[rowOffset + nx];
+                if (val > maxVal) maxVal = val;
+              }
+            }
+            dilated[y * sw + x] = maxVal;
+          }
+        }
+
+        // Smooth box blur (radius = 3) on the dilated illumination map
+        const blurred = new Float32Array(sw * sw ? sw * sh : 0);
+        const blurR = 3;
+        for (let y = 0; y < sh; y++) {
+          const yMin = Math.max(0, y - blurR);
+          const yMax = Math.min(sh - 1, y + blurR);
+          for (let x = 0; x < sw; x++) {
+            const xMin = Math.max(0, x - blurR);
+            const xMax = Math.min(sw - 1, x + blurR);
+            let sum = 0;
+            let count = 0;
+            for (let ny = yMin; ny <= yMax; ny++) {
+              const rowOffset = ny * sw;
+              for (let nx = xMin; nx <= xMax; nx++) {
+                sum += dilated[rowOffset + nx];
+                count++;
+              }
+            }
+            blurred[y * sw + x] = sum / (count || 1);
+          }
+        }
+
+        // Bilinear sample helper from blurred illumination map
+        const getIllum = (nx: number, ny: number): number => {
+          const px = nx * (sw - 1);
+          const py = ny * (sh - 1);
+          const x0 = Math.floor(px);
+          const y0 = Math.floor(py);
+          const x1 = Math.min(sw - 1, x0 + 1);
+          const y1 = Math.min(sh - 1, y0 + 1);
+          const fx = px - x0;
+          const fy = py - y0;
+
+          const v00 = blurred[y0 * sw + x0];
+          const v10 = blurred[y0 * sw + x1];
+          const v01 = blurred[y1 * sw + x0];
+          const v11 = blurred[y1 * sw + x1];
+
+          const top = v00 + fx * (v10 - v00);
+          const bottom = v01 + fx * (v11 - v01);
+          const result = top + fy * (bottom - top);
+          return Math.max(30, result);
+        };
+
+        const range = Math.max(0.01, whiteLevel - blackLevel);
+
+        // Transform each pixel
+        for (let y = 0; y < h; y++) {
+          const ny = y / (h - 1 || 1);
+          const rowOffset = y * w * 4;
+
+          for (let x = 0; x < w; x++) {
+            const nx = x / (w - 1 || 1);
+            const idx = rowOffset + x * 4;
+
+            const r = data[idx];
+            const g = data[idx + 1];
+            const b = data[idx + 2];
+
+            const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+            const bg = getIllum(nx, ny);
+
+            // Normalized ratio (paper is approx 1.0, dark ink is < 0.6)
+            const ratio = lum / bg;
+
+            if (mode === "pure_bw") {
+              // Whitening threshold: anything above whiteLevel is pure 255 white
+              // Black threshold: anything below blackLevel is 0 deep black
+              let t = (ratio - blackLevel) / range;
+              if (t <= 0) t = 0;
+              else if (t >= 1) t = 1;
+              else {
+                t = Math.pow(t, contrast);
+              }
+              const val = Math.round(t * 255);
+              data[idx] = val;
+              data[idx + 1] = val;
+              data[idx + 2] = val;
+            } else if (mode === "clean_gray") {
+              let t = ratio >= whiteLevel ? 1 : Math.pow(Math.max(0, ratio / whiteLevel), contrast);
+              const val = Math.min(255, Math.max(0, Math.round(t * 255)));
+              data[idx] = val;
+              data[idx + 1] = val;
+              data[idx + 2] = val;
+            } else if (mode === "clean_color") {
+              const factor = 255 / bg;
+              let nr = Math.min(255, r * factor);
+              let ng = Math.min(255, g * factor);
+              let nb = Math.min(255, b * factor);
+
+              if (ratio >= whiteLevel) {
+                nr = 255;
+                ng = 255;
+                nb = 255;
+              } else {
+                const normLum = 0.299 * nr + 0.587 * ng + 0.114 * nb;
+                const t = Math.max(0, Math.min(1, (normLum - 40) / (255 * whiteLevel - 40)));
+                const inkBoost = Math.pow(t, contrast);
+                nr = Math.round(nr * inkBoost);
+                ng = Math.round(ng * inkBoost);
+                nb = Math.round(nb * inkBoost);
+              }
+
+              data[idx] = Math.min(255, Math.max(0, nr));
+              data[idx + 1] = Math.min(255, Math.max(0, ng));
+              data[idx + 2] = Math.min(255, Math.max(0, nb));
+            }
+          }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      } catch (err) {
+        console.error("Shadow removal failed:", err);
+        resolve(imageSrc);
+      }
+    };
+    img.onerror = () => resolve(imageSrc);
+    img.src = normalizeImageSrc(imageSrc);
+  });
+}

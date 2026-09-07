@@ -1,6 +1,6 @@
 {
   "name": "數位錯題本與自組考卷系統",
-  "description": "支援剪貼簿截圖貼上 (Ctrl+V) 與手機拍照辨識、四點透視拉正校正歪斜考卷、自由框選裁切、Gemini AI 自動分析科目單元與詳解、KaTeX 數學公式排版、本機 JSON 檔案備份與還原、並支援高清 B5/A4 考卷與康奈爾錯題本 PDF 導出。",
+  "description": "支援剪貼簿截圖貼上 (Ctrl+V) 與手機拍照辨識、試卷去除陰影純白底黑字、四點透視拉正校正歪斜考卷、自由框選裁切、Gemini AI 自動分析科目單元與詳解、KaTeX 數學公式排版、本機 JSON 檔案備份與還原、並支援高清 B5/A4 考卷與康奈爾錯題本 PDF 導出。",
   "requestFramePermissions": [
     "camera"
   ],

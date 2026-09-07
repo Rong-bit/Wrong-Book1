@@ -16,9 +16,15 @@ import {
   AlertCircle,
   Maximize2,
   Loader2,
+  Wand2,
 } from "lucide-react";
 import { ImageSettings } from "../types";
-import { normalizeImageSrc, compressImage } from "../utils/imageUtils";
+import {
+  normalizeImageSrc,
+  compressImage,
+  removeShadowsAndBinarize,
+  ShadowRemovalMode,
+} from "../utils/imageUtils";
 
 interface ImageControlModalProps {
   isOpen: boolean;
@@ -48,9 +54,29 @@ export const ImageControlModal: React.FC<ImageControlModalProps> = ({
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [previewError, setPreviewError] = useState(false);
   const [isReplacing, setIsReplacing] = useState(false);
+  const [isProcessingFilter, setIsProcessingFilter] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
+
+  const handleApplyShadowRemoval = async (shadowMode: ShadowRemovalMode = "pure_bw") => {
+    if (!onReplaceImage || isProcessingFilter) return;
+    setIsProcessingFilter(true);
+    try {
+      const enhanced = await removeShadowsAndBinarize(imageSrc, {
+        mode: shadowMode,
+        contrast: 1.25,
+        whiteLevel: 0.88,
+        blackLevel: 0.46,
+      });
+      onReplaceImage(enhanced);
+      setPreviewError(false);
+    } catch (err) {
+      console.error("Shadow removal failed in ImageControlModal:", err);
+    } finally {
+      setIsProcessingFilter(false);
+    }
+  };
 
   const handleZoomChange = (newZoom: number) => {
     const clamped = Math.max(40, Math.min(200, newZoom));
@@ -287,6 +313,55 @@ export const ImageControlModal: React.FC<ImageControlModalProps> = ({
                   <AlignRight className="w-3.5 h-3.5 mr-1" /> 靠右
                 </button>
               </div>
+            </div>
+          </div>
+
+          {/* Shadow Removal & Whitening Filter */}
+          <div className="p-3.5 rounded-xl bg-gradient-to-r from-amber-50 to-orange-50/70 border border-amber-200/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                <Wand2 className="w-4 h-4 text-amber-600" />
+                去除考卷陰影 (轉為純白底黑字)
+              </div>
+              <div className="text-[11px] text-amber-800/90 mt-0.5">
+                消除拍照陰影、發黃背景與檯燈暗角，提高文字黑度與列印清晰度
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+              <button
+                type="button"
+                onClick={() => handleApplyShadowRemoval("pure_bw")}
+                disabled={isProcessingFilter}
+                className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 active:scale-95 transition shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                title="純白底黑字 (強烈推薦)"
+              >
+                {isProcessingFilter ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Wand2 className="w-3.5 h-3.5" />
+                )}
+                <span>一鍵白底黑字</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleApplyShadowRemoval("clean_gray")}
+                disabled={isProcessingFilter}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 active:scale-95 transition cursor-pointer disabled:opacity-50"
+                title="平整光線，保留手寫灰度"
+              >
+                灰階去陰影
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleApplyShadowRemoval("clean_color")}
+                disabled={isProcessingFilter}
+                className="px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 active:scale-95 transition cursor-pointer disabled:opacity-50"
+                title="去陰影但保留紅筆批改顏色"
+              >
+                彩色去陰影
+              </button>
             </div>
           </div>
 
