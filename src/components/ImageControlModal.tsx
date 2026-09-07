@@ -1,0 +1,293 @@
+import React from "react";
+import {
+  X,
+  ZoomIn,
+  ZoomOut,
+  RotateCw,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  Trash2,
+  Image as ImageIcon,
+  Check,
+  Eye,
+  EyeOff,
+} from "lucide-react";
+import { ImageSettings } from "../types";
+
+interface ImageControlModalProps {
+  isOpen: boolean;
+  questionId: string;
+  imageSrc: string;
+  settings: ImageSettings;
+  onClose: () => void;
+  onUpdateSettings: (newSettings: ImageSettings) => void;
+  onDeleteQuestion: (id: string) => void;
+  onRemoveImageOnly?: (id: string) => void;
+}
+
+export const ImageControlModal: React.FC<ImageControlModalProps> = ({
+  isOpen,
+  questionId,
+  imageSrc,
+  settings,
+  onClose,
+  onUpdateSettings,
+  onDeleteQuestion,
+  onRemoveImageOnly,
+}) => {
+  if (!isOpen) return null;
+
+  const handleZoomChange = (newZoom: number) => {
+    const clamped = Math.max(40, Math.min(200, newZoom));
+    onUpdateSettings({ ...settings, zoom: clamped });
+  };
+
+  const handleRotate = () => {
+    const nextRotation = (settings.rotation + 90) % 360;
+    onUpdateSettings({ ...settings, rotation: nextRotation });
+  };
+
+  const handleAlign = (align: "left" | "center" | "right") => {
+    onUpdateSettings({ ...settings, align });
+  };
+
+  const handleToggleInclude = () => {
+    onUpdateSettings({ ...settings, includeInExport: !settings.includeInExport });
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full p-6 border border-slate-200 relative flex flex-col max-h-[90vh]">
+        {/* Header */}
+        <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-100">
+              <ImageIcon className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-800">圖片控制面板</h3>
+              <p className="text-xs text-slate-500">調整題幹圖片之大小比例、方向與考卷排版屬性</p>
+            </div>
+          </div>
+          <button
+            id="close-image-modal-btn"
+            onClick={onClose}
+            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Live Preview Area */}
+        <div className="my-4 p-4 rounded-xl bg-slate-100 border border-slate-200/80 overflow-hidden flex items-center justify-center min-h-[220px] max-h-[320px] relative">
+          <div
+            className={`w-full flex ${
+              settings.align === "left"
+                ? "justify-start"
+                : settings.align === "right"
+                ? "justify-end"
+                : "justify-center"
+            }`}
+          >
+            <img
+              src={imageSrc}
+              alt="題目截圖預覽"
+              className="rounded-lg shadow-sm border border-slate-300 max-h-[260px] object-contain transition-transform duration-200"
+              style={{
+                transform: `rotate(${settings.rotation}deg) scale(${settings.zoom / 100})`,
+                transformOrigin: "center center",
+              }}
+            />
+          </div>
+          <div className="absolute bottom-2 right-2 px-2 py-1 rounded bg-black/60 text-white text-[11px] font-mono backdrop-blur-xs">
+            {settings.zoom}% · {settings.rotation}°
+          </div>
+        </div>
+
+        {/* Controls */}
+        <div className="space-y-4 overflow-y-auto pr-1">
+          {/* Zoom Controls */}
+          <div>
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-1.5">
+              <span className="flex items-center gap-1.5">
+                <ZoomIn className="w-4 h-4 text-sky-600" />
+                縮放比例 ({settings.zoom}%)
+              </span>
+              <div className="flex items-center gap-1">
+                {[50, 75, 100, 125, 150].map((val) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => handleZoomChange(val)}
+                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+                      settings.zoom === val
+                        ? "bg-sky-600 text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    }`}
+                  >
+                    {val}%
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => handleZoomChange(settings.zoom - 10)}
+                className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
+                title="縮小 10%"
+              >
+                <ZoomOut className="w-4 h-4" />
+              </button>
+              <input
+                id="image-zoom-slider"
+                type="range"
+                min="40"
+                max="200"
+                step="5"
+                value={settings.zoom}
+                onChange={(e) => handleZoomChange(Number(e.target.value))}
+                className="w-full accent-sky-600 cursor-pointer"
+              />
+              <button
+                type="button"
+                onClick={() => handleZoomChange(settings.zoom + 10)}
+                className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100"
+                title="放大 10%"
+              >
+                <ZoomIn className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Rotate & Alignment */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* Rotate */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                圖片旋轉方向
+              </label>
+              <button
+                id="rotate-image-btn"
+                type="button"
+                onClick={handleRotate}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-semibold rounded-xl border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition active:scale-95"
+              >
+                <RotateCw className="w-4 h-4 text-indigo-600" />
+                順時針旋轉 90° (目前: {settings.rotation}°)
+              </button>
+            </div>
+
+            {/* Alignment */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                對齊排版位置
+              </label>
+              <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => handleAlign("left")}
+                  className={`flex-1 flex items-center justify-center py-1.5 rounded-lg text-xs font-medium transition ${
+                    settings.align === "left"
+                      ? "bg-white text-sky-700 shadow-xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <AlignLeft className="w-3.5 h-3.5 mr-1" /> 靠左
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAlign("center")}
+                  className={`flex-1 flex items-center justify-center py-1.5 rounded-lg text-xs font-medium transition ${
+                    settings.align === "center"
+                      ? "bg-white text-sky-700 shadow-xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <AlignCenter className="w-3.5 h-3.5 mr-1" /> 置中
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAlign("right")}
+                  className={`flex-1 flex items-center justify-center py-1.5 rounded-lg text-xs font-medium transition ${
+                    settings.align === "right"
+                      ? "bg-white text-sky-700 shadow-xs"
+                      : "text-slate-600 hover:text-slate-900"
+                  }`}
+                >
+                  <AlignRight className="w-3.5 h-3.5 mr-1" /> 靠右
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Toggle include in export */}
+          <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              {settings.includeInExport ? (
+                <Eye className="w-4 h-4 text-emerald-600" />
+              ) : (
+                <EyeOff className="w-4 h-4 text-slate-400" />
+              )}
+              <span className="text-xs font-medium text-slate-800">
+                PDF 考卷/筆記本匯出時保留此截圖
+              </span>
+            </div>
+            <button
+              id="toggle-export-image-btn"
+              type="button"
+              onClick={handleToggleInclude}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
+                settings.includeInExport
+                  ? "bg-emerald-100 text-emerald-800 border border-emerald-300"
+                  : "bg-slate-200 text-slate-600"
+              }`}
+            >
+              {settings.includeInExport ? "顯示於考卷" : "已隱藏截圖"}
+            </button>
+          </div>
+        </div>
+
+        {/* Footer Actions */}
+        <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <button
+              id="delete-question-from-modal-btn"
+              type="button"
+              onClick={() => {
+                if (window.confirm("確定要將這道題目從錯題本中刪除嗎？")) {
+                  onDeleteQuestion(questionId);
+                  onClose();
+                }
+              }}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-600 hover:bg-rose-50 border border-rose-200 flex items-center gap-1.5 transition"
+            >
+              <Trash2 className="w-3.5 h-3.5" /> 刪除此題
+            </button>
+            {onRemoveImageOnly && (
+              <button
+                type="button"
+                onClick={() => {
+                  onRemoveImageOnly(questionId);
+                  onClose();
+                }}
+                className="px-3 py-1.5 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100 border border-slate-200 transition"
+              >
+                僅移除圖片
+              </button>
+            )}
+          </div>
+          <button
+            id="confirm-image-settings-btn"
+            type="button"
+            onClick={onClose}
+            className="px-5 py-2 rounded-xl text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 flex items-center gap-1.5 shadow-xs transition"
+          >
+            <Check className="w-4 h-4" /> 完成設定
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
