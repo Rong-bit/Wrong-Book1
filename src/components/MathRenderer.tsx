@@ -40,6 +40,9 @@ export function normalizeMathText(raw: string): string {
   // \n (NL) from "\nu", "\neq", "\neg", "\nabla"
   text = text.replace(/(?<!\n)\n(u|eq|eg|abla)\b/g, "\\n$1");
 
+  // Nested $I_a$ inside \frac{...} or {...} would close the outer $...$ too early
+  text = text.replace(/\{\$([^$]+)\$\}/g, "{$1}");
+
   // 2. Protect existing math blocks ($$...$$ and $...$) so we don't double-wrap or alter them
   const mathPlaceholders: string[] = [];
   const placeholderPrefix = "___MATH_TOKEN_";
@@ -55,9 +58,8 @@ export function normalizeMathText(raw: string): string {
   // - Mixed fractions: `-7 \frac{6}{9}`, `−7 \frac{6}{9}`, `7 \frac{1}{2}`, `-7\frac{5}{9}`
   // - Simple fractions: `\frac{6}{9}`, `-\frac{6}{9}`, `\dfrac{a}{b}`, `\tfrac{1}{3}`
   let enriched = protectedText.replace(
-    /((?:[+-−]?\s*\d+\s*)?\\(?:d|t)?frac\{[^{}]+\}\{[^{}]+\})/g,
+    /((?:[+-−]?\s*\d+\s*)?\\(?:d|t)?frac\{(?:[^{}]|\{[^{}]*\})+\}\{(?:[^{}]|\{[^{}]*\})+\})/g,
     (match) => {
-      // Normalize unicode minus to standard ASCII minus in math mode
       const normalizedMath = match.trim().replace(/−/g, "-");
       return `$${normalizedMath}$`;
     }
@@ -68,6 +70,10 @@ export function normalizeMathText(raw: string): string {
     /(\\sqrt(?:\[[^\]]+\])?\{[^{}]+\})/g,
     (match) => `$${match.trim().replace(/−/g, "-")}$`
   );
+
+  // Auto-wrap bare \times and \text{...} left outside $...$
+  enriched = enriched.replace(/\\times/g, "$\\times$");
+  enriched = enriched.replace(/(\\text\{[^{}]*\})/g, "$$$1$");
 
   // 4. Restore the protected math blocks
   enriched = enriched.replace(new RegExp(`${placeholderPrefix}(\\d+)___`, "g"), (_, idxStr) => {
