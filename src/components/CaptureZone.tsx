@@ -7,7 +7,6 @@ import {
   BookOpen,
   Image as ImageIcon,
   CheckCircle2,
-  HelpCircle,
   Key,
   Loader2,
 } from "lucide-react";
@@ -268,11 +267,6 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
           <span className="flex items-center gap-1 text-slate-600">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
             <span>四點拉正歪斜考卷 · 自由框選精準題目</span>
-          </span>
-          <span className="hidden md:inline text-slate-300">|</span>
-          <span className="hidden md:flex items-center gap-1 text-slate-400">
-            <HelpCircle className="w-3.5 h-3.5 shrink-0" />
-            <span>B5 / A4 高清試卷導出</span>
           </span>
         </div>
       </div>
