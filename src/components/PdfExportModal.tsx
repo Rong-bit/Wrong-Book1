@@ -169,7 +169,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
               版面規格與排版風格
             </div>
             <p className="md:hidden text-[11px] text-slate-500 leading-relaxed">
-              請向下滑動，標題、班級姓名與題目呈現方式在下方
+              請向下滑動，標題、年級、姓名與題目呈現方式在下方
             </p>
 
             {/* Paper Size */}
@@ -385,7 +385,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   onChange={(e) =>
                     onUpdateSettings({ ...settings, subtitle: e.target.value })
                   }
-                  placeholder="例：範圍：一元二次方程式 · 牛頓運動定律"
+                  placeholder="例：第1章 一元二次方程式"
                   className="w-full px-3 py-1.5 rounded-lg border border-slate-300 focus:bg-white"
                 />
               </div>
@@ -393,7 +393,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">
-                    班級 / 年級
+                    年級
                   </label>
                   <input
                     type="text"
@@ -401,7 +401,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                     onChange={(e) =>
                       onUpdateSettings({ ...settings, gradeClass: e.target.value })
                     }
-                    placeholder="例：九年級"
+                    placeholder="例：國三上"
                     className="w-full px-3 py-1.5 rounded-lg border border-slate-300 focus:bg-white"
                   />
                 </div>
@@ -606,7 +606,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                         </div>
                         <div className="flex items-center gap-3 text-[11px] text-slate-700">
                           <span>
-                            班級：<u>&nbsp;{settings.gradeClass || "________"}&nbsp;</u>
+                            年級：<u>&nbsp;{settings.gradeClass || "________"}&nbsp;</u>
                           </span>
                           <span>
                             姓名：<u>&nbsp;{settings.studentName || "____________"}&nbsp;</u>
@@ -838,7 +838,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                     <div className="flex items-center justify-between text-xs font-sans border-t border-slate-300 pt-2 px-2 text-slate-700">
                       <div className="flex gap-4">
                         <span>
-                          班級：<u>&nbsp;{settings.gradeClass || "________"}&nbsp;</u>
+                          年級：<u>&nbsp;{settings.gradeClass || "________"}&nbsp;</u>
                         </span>
                         <span>
                           座號：<u>&nbsp;{settings.seatNumber || "____"}&nbsp;</u>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Sparkles,
   BookOpen,
@@ -30,6 +30,35 @@ import { ImageCalibrationModal } from "./components/ImageCalibrationModal";
 import { compressImage, normalizeImageSrc } from "./utils/imageUtils";
 
 const STORAGE_QUESTIONS_KEY = "digital_notebook_questions_v1";
+
+function uniquePaperParts(values: Array<string | undefined>): string[] {
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const raw of values) {
+    const value = raw?.trim();
+    if (!value || value === "分析中..." || value === "未歸類") continue;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    parts.push(value);
+  }
+  return parts;
+}
+
+function gradeLabelFromLevel(gradeLevel?: string): string {
+  const value = gradeLevel?.trim();
+  if (!value) return "";
+  return value.replace(/\s*[（(].*$/, "").trim();
+}
+
+function buildPaperMetaFromQuestions(questions: QuestionItem[]) {
+  const source = questions.filter((q) => q.status !== "analyzing");
+  const chapters = uniquePaperParts(source.map((q) => q.chapter));
+  const grades = uniquePaperParts(source.map((q) => gradeLabelFromLevel(q.gradeLevel)));
+  return {
+    subtitle: chapters.join(" · "),
+    gradeClass: grades.join("、"),
+  };
+}
 
 export default function App() {
   const [questions, setQuestions] = useState<QuestionItem[]>(() => {
@@ -76,9 +105,9 @@ export default function App() {
 
   const [paperSettings, setPaperSettings] = useState<PaperSettings>({
     title: "錯題訂正本",
-    subtitle: "命題範圍：數學科一元二次方程式 · 物理科牛頓運動定律",
+    subtitle: "",
     school: "",
-    gradeClass: "九年級",
+    gradeClass: "",
     studentName: "",
     seatNumber: "",
     paperSize: "B5",
@@ -559,10 +588,33 @@ export default function App() {
     new Set(questions.map((q) => q.subject).filter(Boolean))
   );
 
-  const filteredQuestions = questions.filter((q) => {
-    if (selectedSubjectFilter === "全部") return true;
-    return q.subject === selectedSubjectFilter;
-  });
+  const filteredQuestions = useMemo(() => {
+    return questions.filter((q) => {
+      if (selectedSubjectFilter === "全部") return true;
+      return q.subject === selectedSubjectFilter;
+    });
+  }, [questions, selectedSubjectFilter]);
+
+  const paperMeta = useMemo(
+    () => buildPaperMetaFromQuestions(filteredQuestions),
+    [filteredQuestions]
+  );
+
+  useEffect(() => {
+    setPaperSettings((prev) => {
+      if (
+        prev.subtitle === paperMeta.subtitle &&
+        prev.gradeClass === paperMeta.gradeClass
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        subtitle: paperMeta.subtitle,
+        gradeClass: paperMeta.gradeClass,
+      };
+    });
+  }, [paperMeta]);
 
   return (
     <div className="min-h-dvh w-full max-w-full min-w-0 bg-slate-50 flex flex-col selection:bg-sky-100 selection:text-sky-900">
