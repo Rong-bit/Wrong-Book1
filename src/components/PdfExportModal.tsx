@@ -627,12 +627,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                             {/* LEFT SIDEBAR: Metadata & Mistake Reason Analysis */}
                             <div className="w-48 sm:w-52 shrink-0 bg-slate-50 border-r border-slate-300 p-2.5 flex flex-col justify-between text-[11px] font-sans">
                               <div className="space-y-2">
-                                {/* Date and Subject / Source */}
+                                {/* Subject / Source */}
                                 <div>
-                                  <div className="flex items-center justify-between text-slate-500 text-[10px] font-mono border-b border-slate-200 pb-0.5 mb-1">
-                                    <span className="font-bold tracking-wider text-slate-700">DATE</span>
-                                    <span>____ / ___ / ___</span>
-                                  </div>
                                   <div className="font-semibold text-slate-800 flex items-center gap-1">
                                     <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-100 text-sky-800 font-bold">
                                       {q.subject || "科目"}
