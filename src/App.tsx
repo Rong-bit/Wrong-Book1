@@ -6,13 +6,11 @@ import {
   Plus,
   RefreshCw,
   Trash2,
-  FileDown,
   LayoutGrid,
   FileText,
   AlertCircle,
   Loader2,
   CheckCircle,
-  HardDrive,
 } from "lucide-react";
 import { QuestionItem, PaperSettings, ViewLayout, ImageSettings, SimilarQuestionVariant } from "./types";
 import { initialSampleQuestions } from "./data/sampleQuestions";
@@ -592,7 +590,7 @@ export default function App() {
       )}
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 pb-24">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
         {/* Top Capture Area */}
         <CaptureZone
           onImageSelected={handleImageSelected}
@@ -645,16 +643,6 @@ export default function App() {
 
           {/* Quick Actions */}
           <div className="flex items-center gap-2 self-end sm:self-auto">
-            <button
-              type="button"
-              onClick={() => setIsBackupModalOpen(true)}
-              className="px-2.5 py-1 text-xs text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-lg transition font-semibold flex items-center gap-1 border border-sky-200/80"
-              title="備份題庫為 .json 檔案，或從本機備份檔還原"
-            >
-              <HardDrive className="w-3.5 h-3.5 text-sky-600" />
-              <span>備份 / 還原</span>
-            </button>
-
             {questions.length > 0 && (
               <>
                 <button
@@ -785,26 +773,6 @@ export default function App() {
           </div>
         )}
       </main>
-
-      {/* Floating Bottom Quick Bar for PDF Export */}
-      {questions.length > 0 && !isPdfModalOpen && !isBackupModalOpen && !isByokOpen && !calibrationModal.isOpen && (
-        <div className="sticky bottom-[max(1rem,env(safe-area-inset-bottom))] mx-auto z-30 no-print w-fit">
-          <div className="bg-slate-900/90 text-white backdrop-blur-md px-5 py-2.5 rounded-2xl shadow-xl flex items-center gap-4 border border-slate-700">
-            <span className="text-xs font-medium text-slate-300">
-              共 <strong className="text-white font-bold">{questions.length}</strong> 道試題
-            </span>
-            <div className="h-4 w-px bg-slate-700" />
-            <button
-              type="button"
-              onClick={() => setIsPdfModalOpen(true)}
-              className="text-xs font-bold text-sky-400 hover:text-sky-300 flex items-center gap-1.5 transition"
-            >
-              <FileDown className="w-4 h-4" />
-              立即產生 B5 / A4 高清考卷 PDF
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Image Control Modal */}
       {selectedQuestionForImageModal && (
