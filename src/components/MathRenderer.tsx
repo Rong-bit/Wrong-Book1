@@ -43,6 +43,15 @@ export function normalizeMathText(raw: string): string {
   // Nested $I_a$ inside \frac{...} or {...} would close the outer $...$ too early
   text = text.replace(/\{\$([^$]+)\$\}/g, "{$1}");
 
+  // Markdown leftover: I\_p -> I_p
+  text = text.replace(/\\_/g, "_");
+
+  // Broken \frac{100}{\text{A}}{4} -> \frac{100\text{A}}{4}
+  text = text.replace(
+    /\\frac\{([^{}]+)\}\{\\text\{([^{}]+)\}\}\{([^{}]+)\}/g,
+    "\\frac{$1\\text{$2}}{$3}"
+  );
+
   // 2. Protect existing math blocks ($$...$$ and $...$) so we don't double-wrap or alter them
   const mathPlaceholders: string[] = [];
   const placeholderPrefix = "___MATH_TOKEN_";
@@ -71,15 +80,19 @@ export function normalizeMathText(raw: string): string {
     (match) => `$${match.trim().replace(/−/g, "-")}$`
   );
 
-  // Auto-wrap bare \times and \text{...} left outside $...$
+  // Auto-wrap bare \times. Do not wrap \text{...} on its own — that splits
+  // \frac{100 \text{A}}{4} into invalid \frac{100}{\text{A}}{4}.
   enriched = enriched.replace(/\\times/g, "$\\times$");
-  enriched = enriched.replace(/(\\text\{[^{}]*\})/g, "$$$1$");
+  enriched = enriched.replace(/(\d+)\s*\\text\{([^{}]*)\}/g, "$$$1\\text{$2}$");
 
   // 4. Restore the protected math blocks
   enriched = enriched.replace(new RegExp(`${placeholderPrefix}(\\d+)___`, "g"), (_, idxStr) => {
     const idx = parseInt(idxStr, 10);
     return mathPlaceholders[idx] ?? "";
   });
+
+  // Put "2. …" "3. …" on their own lines when the source ran them together
+  enriched = enriched.replace(/(?<!\n)\s+(?=([2-9]|[1-9]\d)[.、．]\s)/g, "\n\n");
 
   return enriched;
 }

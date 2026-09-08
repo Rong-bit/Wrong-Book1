@@ -844,7 +844,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                   <span className="font-bold text-slate-900 block mb-1">
                     詳細解題步驟
                   </span>
-                  <div className="text-slate-700 font-sans min-w-0 break-words">
+                  <div className="text-slate-700 font-sans min-w-0 break-words space-y-2">
                     <MathRenderer content={question.explanation} />
                   </div>
                 </div>
