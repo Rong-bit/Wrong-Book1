@@ -102,7 +102,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
   return (
     <div className="app-screen-overlay bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="app-screen-sheet bg-slate-100 rounded-2xl shadow-2xl max-w-6xl border border-slate-300">
+      <div className="app-screen-sheet bg-slate-100 rounded-2xl shadow-2xl border border-slate-300">
         {/* Top Header */}
         <div className="px-4 py-3 md:px-6 md:py-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
