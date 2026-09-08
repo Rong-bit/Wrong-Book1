@@ -104,7 +104,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     <div className="app-screen-overlay bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="app-screen-sheet bg-slate-100 rounded-2xl shadow-2xl max-w-6xl border border-slate-300">
         {/* Top Header */}
-        <div className="px-6 py-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
+        <div className="px-4 py-3 md:px-6 md:py-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center border border-sky-200">
               <FileText className="w-5 h-5" />
@@ -120,7 +120,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                     : "自組測驗卷"}
                 </span>
               </h3>
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-slate-500 hidden sm:block">
                 支援康乃爾雙欄訂正、5mm 數學方格微網格、艾賓浩斯 5 次複習打卡，符合 B5 / A4 高清輸出
               </p>
             </div>
@@ -161,13 +161,16 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
         )}
 
         {/* Content Body: Left Settings Panel + Right Live Paper Preview */}
-        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+        <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden">
           {/* Settings Sidebar */}
-          <div className="w-full md:w-84 bg-white border-r border-slate-200 p-5 overflow-y-auto shrink-0 space-y-4 text-xs">
+          <div className="w-full md:w-84 bg-white border-r border-slate-200 p-5 space-y-4 text-xs md:overflow-y-auto md:shrink-0">
             <div className="flex items-center gap-1.5 font-bold text-slate-800 text-sm pb-1 border-b border-slate-100">
               <Settings2 className="w-4 h-4 text-sky-600" />
               版面規格與排版風格
             </div>
+            <p className="md:hidden text-[11px] text-slate-500 leading-relaxed">
+              請向下滑動，標題、班級姓名與題目呈現方式在下方
+            </p>
 
             {/* Paper Size */}
             <div>
@@ -567,7 +570,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
           </div>
 
           {/* Live Preview Canvas View */}
-          <div className="flex-1 bg-slate-300/80 p-4 md:p-8 overflow-y-auto flex flex-col items-center">
+          <div className="flex-1 min-h-[50vh] md:min-h-0 bg-slate-300/80 p-4 md:p-8 md:overflow-y-auto flex flex-col items-center">
             <div ref={previewRef} id="printable-paper-container" className="w-full flex flex-col items-center">
               {/* CORNELL MODE RENDERING */}
               {settings.mode === "cornell" ? (
