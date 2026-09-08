@@ -101,8 +101,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     (settings.includeImages ? "both" : "textOnly");
 
   return (
-    <div className="fixed inset-0 z-50 h-[100dvh] max-h-[100dvh] flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-2 md:p-6 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:pb-6 animate-in fade-in duration-200">
-      <div className="bg-slate-100 rounded-2xl shadow-2xl max-w-6xl w-full h-full max-h-full flex flex-col overflow-hidden border border-slate-300">
+    <div className="app-screen-overlay bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
+      <div className="app-screen-sheet bg-slate-100 rounded-2xl shadow-2xl max-w-6xl border border-slate-300">
         {/* Top Header */}
         <div className="px-6 py-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -1088,7 +1088,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
         </div>
 
         {/* Modal Bottom Footer Actions */}
-        <div className="px-4 py-3 md:px-6 md:py-3.5 bg-white border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0">
+        <div className="app-safe-footer px-4 pt-3 md:px-6 md:pt-3.5 bg-white border-t border-slate-200 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2.5 shrink-0">
           <div className="text-[11px] sm:text-xs text-slate-500 flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
             <span>已加入 {questions.length} 道試題</span>
             <span className="hidden sm:inline">·</span>

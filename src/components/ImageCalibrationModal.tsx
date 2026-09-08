@@ -752,8 +752,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 h-[100dvh] max-h-[100dvh] flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-2 sm:p-4 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:pb-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-5xl w-full flex flex-col h-full max-h-full sm:max-h-[860px] overflow-hidden border border-slate-200">
+    <div className="app-screen-overlay bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="app-screen-sheet bg-white rounded-2xl shadow-2xl max-w-5xl sm:h-[min(860px,100%)] sm:max-h-[860px] sm:self-center border border-slate-200">
         {/* Modal Header */}
         <div className="px-4 sm:px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-white shrink-0 gap-2">
           <div className="flex items-center gap-2.5 min-w-0">
@@ -1116,7 +1116,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         </div>
 
         {/* Modal Footer / Action Bar */}
-        <div className="px-4 sm:px-6 py-3 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0 z-10">
+        <div className="app-safe-footer px-4 sm:px-6 pt-3 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0 z-10">
           <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
             {/* Mode Actions & Step progression */}
             {mode === "perspective" ? (

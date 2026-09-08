@@ -8,6 +8,53 @@
   }
 }
 
+/* Full-screen modals must use the small viewport so iOS Safari chrome
+   cannot cover footer buttons. Children stretch inside padding (do not
+   set height: 100% on the sheet — that ignores parent padding). */
+.app-screen-overlay {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 0;
+  z-index: 50;
+  height: 100vh;
+  height: 100svh;
+  max-height: 100vh;
+  max-height: 100svh;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  box-sizing: border-box;
+  padding-top: max(0.5rem, env(safe-area-inset-top, 0px));
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  padding-bottom: max(2.5rem, env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 768px) {
+  .app-screen-overlay {
+    padding: 1.5rem;
+  }
+}
+
+.app-screen-sheet {
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-safe-footer {
+  padding-bottom: max(1.25rem, calc(env(safe-area-inset-bottom, 0px) + 0.75rem));
+}
+
+@media (min-width: 768px) {
+  .app-safe-footer {
+    padding-bottom: 0.875rem;
+  }
+}
+
 /* =========================================================
    KaTeX Math Display Enhancements
    Ensure fraction lines and radical lines are crisp and normal
