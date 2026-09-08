@@ -565,7 +565,7 @@ export default function App() {
   });
 
   return (
-    <div className="min-h-dvh w-full bg-slate-50 flex flex-col selection:bg-sky-100 selection:text-sky-900">
+    <div className="min-h-dvh w-full max-w-full min-w-0 bg-slate-50 flex flex-col selection:bg-sky-100 selection:text-sky-900">
       {/* Navigation Bar */}
       <Navbar
         currentLayout={layout}
@@ -590,7 +590,7 @@ export default function App() {
       )}
 
       {/* Main Container */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-3 sm:px-6 py-4 sm:py-6">
+      <main className="flex-1 w-full min-w-0 max-w-full md:max-w-7xl mx-auto px-3 md:px-6 py-4 sm:py-6">
         {/* Top Capture Area */}
         <CaptureZone
           onImageSelected={handleImageSelected}
@@ -751,7 +751,7 @@ export default function App() {
             ))}
           </div>
         ) : (
-          <div className="space-y-5 w-full max-w-4xl mx-auto">
+          <div className="space-y-5 w-full min-w-0 md:max-w-4xl md:mx-auto">
             {filteredQuestions.map((q, idx) => (
               <QuestionCard
                 key={q.id}

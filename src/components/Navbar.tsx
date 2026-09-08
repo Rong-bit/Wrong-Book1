@@ -40,16 +40,16 @@ export const Navbar: React.FC<NavbarProps> = ({
   availableSubjects,
 }) => {
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-2xs no-print">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-2 sm:gap-4 w-full">
+    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-2xs no-print w-full overflow-hidden">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-2 w-full min-w-0">
         {/* Logo & Title */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-sky-500/10">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-sky-500/10 shrink-0">
             <BookOpen className="w-5 h-5" />
           </div>
-          <div>
+          <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h1 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+              <h1 className="text-base sm:text-lg font-black text-slate-900 tracking-tight truncate">
                 數位錯題本
               </h1>
               <span className="hidden sm:inline-block text-[11px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-800">
@@ -106,13 +106,13 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Right Actions */}
-        <div className="flex items-center gap-2 sm:gap-2.5">
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
           {/* BYOK Button */}
           <button
             id="open-byok-btn"
             type="button"
             onClick={onOpenByok}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition flex items-center gap-1.5 shadow-2xs ${
+            className={`p-2 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold border transition flex items-center gap-1.5 shadow-2xs ${
               hasCustomKey
                 ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300 ring-1 ring-emerald-200"
                 : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
@@ -121,16 +121,19 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Key className={`w-3.5 h-3.5 ${hasCustomKey ? "text-emerald-600" : "text-amber-600"}`} />
             {hasCustomKey ? (
-              <span className="flex items-center gap-1.5">
+              <span className="hidden sm:flex items-center gap-1.5">
                 <span className="hidden md:inline text-emerald-900 font-bold">自備金鑰:</span>
                 <span className="font-mono text-[11px] text-emerald-700">{maskedCustomKey || "已啟用"}</span>
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
               </span>
             ) : (
-              <span className="flex items-center gap-1">
+              <span className="hidden sm:flex items-center gap-1">
                 <span>自備金鑰</span>
-                <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">(BYOK)</span>
+                <span className="text-[10px] text-slate-400 font-mono hidden md:inline">(BYOK)</span>
               </span>
+            )}
+            {hasCustomKey && (
+              <span className="sm:hidden w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             )}
           </button>
 
@@ -139,7 +142,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             id="open-backup-btn"
             type="button"
             onClick={onOpenBackup}
-            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition flex items-center gap-1.5 shadow-2xs"
+            className="p-2 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition flex items-center gap-1.5 shadow-2xs"
             title="題庫備份與還原 (下載 / 匯入 .json 檔案)"
           >
             <HardDrive className="w-3.5 h-3.5 text-sky-600" />
@@ -152,10 +155,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             type="button"
             disabled={questionCount === 0}
             onClick={onOpenExportPdf}
-            className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 active:scale-95 transition shadow-xs flex items-center gap-2 disabled:opacity-40"
+            className="px-2.5 sm:px-4 py-2 rounded-xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 active:scale-95 transition shadow-xs flex items-center gap-1.5 sm:gap-2 disabled:opacity-40"
           >
             <FileDown className="w-4 h-4 text-sky-400" />
-            <span>匯出考卷 (B5/A4)</span>
+            <span className="sm:hidden">匯出</span>
+            <span className="hidden sm:inline">匯出考卷 (B5/A4)</span>
             <span className="px-1.5 py-0.2 rounded-full bg-slate-800 text-[10px] text-sky-300">
               {questionCount}
             </span>

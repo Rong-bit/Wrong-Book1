@@ -169,14 +169,14 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
         }}
         onDragLeave={() => setIsDragOver(false)}
         onDrop={handleDrop}
-        className={`mt-4 rounded-xl border-2 border-dashed p-5 transition-all duration-200 flex flex-col md:flex-row items-center justify-between gap-4 ${
+        className={`mt-4 rounded-xl border-2 border-dashed p-4 sm:p-5 transition-all duration-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 w-full min-w-0 ${
           isDragOver
             ? "border-sky-500 bg-sky-50/70 scale-[1.005]"
             : "border-slate-300/90 bg-slate-50/60 hover:bg-slate-50"
         }`}
       >
         {/* Left: Ctrl+V Guidance */}
-        <div className="flex items-center gap-3.5">
+        <div className="flex items-start sm:items-center gap-3.5 min-w-0 w-full">
           <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 shadow-xs flex items-center justify-center text-sky-600 shrink-0">
             <ClipboardPaste className="w-6 h-6" />
           </div>
@@ -206,7 +206,7 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
         </div>
 
         {/* Right: Buttons */}
-        <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+        <div className="flex items-center gap-2.5 w-full md:w-auto md:shrink-0 flex-wrap">
           {/* Mobile Camera input capture */}
           <button
             id="mobile-camera-btn"
