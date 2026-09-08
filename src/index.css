@@ -69,6 +69,13 @@
   border-bottom-style: solid !important;
 }
 
+/* Keep long formulas inside the card on mobile instead of overflowing */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+}
+
 /* 5mm crisp math grid paper for Cornell mistake notes */
 .math-grid-bg {
   background-image: 

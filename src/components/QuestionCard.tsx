@@ -222,7 +222,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   return (
     <div
       id={`question-card-${question.id}`}
-      className={`bg-white rounded-2xl border transition-all duration-200 ${
+      className={`bg-white rounded-2xl border transition-all duration-200 overflow-hidden min-w-0 ${
         question.isSimilarVariant
           ? "border-amber-300 bg-amber-50/20 shadow-xs p-5"
           : isExamPaper
@@ -840,11 +840,11 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
 
               {/* Detailed Step-by-Step Explanation */}
               {question.explanation && (
-                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs leading-relaxed text-slate-700">
+                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs leading-relaxed text-slate-700 min-w-0 overflow-x-auto">
                   <span className="font-bold text-slate-900 block mb-1">
                     詳細解題步驟
                   </span>
-                  <div className="text-slate-700 font-sans">
+                  <div className="text-slate-700 font-sans min-w-0 break-words">
                     <MathRenderer content={question.explanation} />
                   </div>
                 </div>
@@ -1121,7 +1121,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                                     <span className="font-bold text-indigo-950 block mb-0.5">
                                       【詳細解題步驟】：
                                     </span>
-                                    <div className="leading-relaxed text-slate-600 font-sans">
+                                    <div className="leading-relaxed text-slate-600 font-sans min-w-0 break-words overflow-x-auto">
                                       <MathRenderer content={v.explanation} />
                                     </div>
                                   </div>

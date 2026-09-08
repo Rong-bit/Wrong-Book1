@@ -162,11 +162,15 @@ export const MathRenderer: React.FC<MathRendererProps> = ({ content, className =
 
   // If there are no math segments (pure text), still preserve line breaks
   if (segments.length === 1 && segments[0].type === "text") {
-    return <span className={`whitespace-pre-line ${className}`}>{content}</span>;
+    return (
+      <span className={`block max-w-full min-w-0 whitespace-pre-line break-words ${className}`}>
+        {content}
+      </span>
+    );
   }
 
   return (
-    <span className={`inline-math-container leading-relaxed ${className}`}>
+    <span className={`block max-w-full min-w-0 break-words leading-relaxed ${className}`}>
       {segments.map((seg, idx) => {
         if (seg.type === "block-math") {
           const html = renderKatexHtml(seg.value, true);
@@ -184,15 +188,14 @@ export const MathRenderer: React.FC<MathRendererProps> = ({ content, className =
           return (
             <span
               key={`math-inline-${idx}`}
-              className="inline-block mx-0.5 align-middle"
+              className="inline-block max-w-full overflow-x-auto align-middle mx-0.5"
               dangerouslySetInnerHTML={{ __html: html }}
             />
           );
         }
 
-        // Plain text with line breaks preserved
         return (
-          <span key={`text-${idx}`} className="whitespace-pre-line">
+          <span key={`text-${idx}`} className="whitespace-pre-line break-words">
             {seg.value}
           </span>
         );
