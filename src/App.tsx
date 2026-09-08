@@ -874,7 +874,7 @@ export default function App() {
       {/* PDF Export & Print Modal */}
       <PdfExportModal
         isOpen={isPdfModalOpen}
-        questions={questions}
+        questions={filteredQuestions}
         settings={paperSettings}
         onClose={() => setIsPdfModalOpen(false)}
         onUpdateSettings={setPaperSettings}
