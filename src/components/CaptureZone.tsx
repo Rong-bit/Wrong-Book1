@@ -86,7 +86,7 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-5 mb-6">
+    <div className="bg-white rounded-2xl border border-slate-200/90 shadow-xs p-5 mb-6 w-full">
       {/* Hidden inputs with full image format support including HEIC/HEIF */}
       <input
         ref={cameraInputRef}
