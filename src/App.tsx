@@ -575,7 +575,7 @@ export default function App() {
         onOpenBackup={() => setIsBackupModalOpen(true)}
         hasCustomKey={hasCustomKey}
         maskedCustomKey={getMaskedKey(getStoredApiKey())}
-        questionCount={questions.length}
+        questionCount={filteredQuestions.length}
         selectedFilter={selectedSubjectFilter}
         onFilterChange={setSelectedSubjectFilter}
         availableSubjects={availableSubjects}
