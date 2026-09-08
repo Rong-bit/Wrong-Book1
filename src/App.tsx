@@ -592,7 +592,7 @@ export default function App() {
       )}
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 pb-24">
         {/* Top Capture Area */}
         <CaptureZone
           onImageSelected={handleImageSelected}
@@ -788,7 +788,7 @@ export default function App() {
 
       {/* Floating Bottom Quick Bar for PDF Export */}
       {questions.length > 0 && (
-        <div className="sticky bottom-4 mx-auto z-30 no-print">
+        <div className="sticky bottom-[max(1rem,env(safe-area-inset-bottom))] mx-auto z-30 no-print w-fit">
           <div className="bg-slate-900/90 text-white backdrop-blur-md px-5 py-2.5 rounded-2xl shadow-xl flex items-center gap-4 border border-slate-700">
             <span className="text-xs font-medium text-slate-300">
               共 <strong className="text-white font-bold">{questions.length}</strong> 道試題

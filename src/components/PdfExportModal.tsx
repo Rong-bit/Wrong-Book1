@@ -101,8 +101,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     (settings.includeImages ? "both" : "textOnly");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-2 md:p-6 animate-in fade-in duration-200">
-      <div className="bg-slate-100 rounded-2xl shadow-2xl max-w-6xl w-full h-[95vh] flex flex-col overflow-hidden border border-slate-300">
+    <div className="fixed inset-0 z-50 h-[100dvh] max-h-[100dvh] flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-2 md:p-6 pb-[max(0.5rem,env(safe-area-inset-bottom))] md:pb-6 animate-in fade-in duration-200">
+      <div className="bg-slate-100 rounded-2xl shadow-2xl max-w-6xl w-full h-full max-h-full flex flex-col overflow-hidden border border-slate-300">
         {/* Top Header */}
         <div className="px-6 py-4 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
@@ -1088,14 +1088,14 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
         </div>
 
         {/* Modal Bottom Footer Actions */}
-        <div className="px-6 py-3.5 bg-white border-t border-slate-200 flex items-center justify-between shrink-0">
-          <div className="text-xs text-slate-500 flex items-center gap-2">
+        <div className="px-4 py-3 md:px-6 md:py-3.5 bg-white border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0">
+          <div className="text-[11px] sm:text-xs text-slate-500 flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
             <span>已加入 {questions.length} 道試題</span>
-            <span>·</span>
+            <span className="hidden sm:inline">·</span>
             <span>
               規格：{settings.paperSize} ({settings.paperSize === "B5" ? "182×257mm" : "210×297mm"})
             </span>
-            <span>·</span>
+            <span className="hidden sm:inline">·</span>
             <span className="font-semibold text-slate-700">
               {settings.mode === "cornell"
                 ? `康乃爾訂正本 (${cornellPages.length} 頁)`
@@ -1103,8 +1103,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 ? "錯題精讀本"
                 : "自組測驗卷"}
             </span>
-            <span>·</span>
-            <span className="text-slate-600">
+            <span className="hidden sm:inline">·</span>
+            <span className="text-slate-600 hidden sm:inline">
               {displayMode === "imageOnly"
                 ? "僅截圖照片 (無文字)"
                 : displayMode === "both"
@@ -1112,28 +1112,29 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 : "純文字"}
             </span>
             {progressText && (
-              <span className="text-sky-600 font-semibold flex items-center gap-1 animate-pulse ml-2">
+              <span className="text-sky-600 font-semibold flex items-center gap-1 animate-pulse sm:ml-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" /> {progressText}
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-stretch sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
             <button
               id="print-browser-btn"
               type="button"
               onClick={handlePrint}
-              className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition flex items-center gap-1.5 shadow-xs"
+              className="flex-1 sm:flex-none px-3 sm:px-4 py-2.5 sm:py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition flex items-center justify-center gap-1.5 shadow-xs"
             >
-              <Printer className="w-4 h-4 text-slate-600" />
-              瀏覽器原生列印 (或另存 PDF)
+              <Printer className="w-4 h-4 text-slate-600 shrink-0" />
+              <span className="sm:hidden">原生列印</span>
+              <span className="hidden sm:inline">瀏覽器原生列印 (或另存 PDF)</span>
             </button>
             <button
               id="download-highdef-pdf-btn"
               type="button"
               disabled={isExporting}
               onClick={handleDownloadPdf}
-              className="px-5 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:scale-95 rounded-xl transition flex items-center gap-1.5 shadow-md disabled:opacity-50"
+              className="flex-1 sm:flex-none px-4 sm:px-5 py-2.5 sm:py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:scale-95 rounded-xl transition flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
             >
               {isExporting ? (
                 <>
@@ -1142,8 +1143,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 </>
               ) : (
                 <>
-                  <Download className="w-4 h-4" />
-                  下載高清 {settings.paperSize} PDF 檔案
+                  <Download className="w-4 h-4 shrink-0" />
+                  <span className="sm:hidden">下載 {settings.paperSize} PDF</span>
+                  <span className="hidden sm:inline">下載高清 {settings.paperSize} PDF 檔案</span>
                 </>
               )}
             </button>
