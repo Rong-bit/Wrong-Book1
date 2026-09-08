@@ -40,17 +40,33 @@ export function normalizeMathText(raw: string): string {
   // \n (NL) from "\nu", "\neq", "\neg", "\nabla"
   text = text.replace(/(?<!\n)\n(u|eq|eg|abla)\b/g, "\\n$1");
 
-  // Nested $I_a$ inside \frac{...} or {...} would close the outer $...$ too early
-  text = text.replace(/\{\$([^$]+)\$\}/g, "{$1}");
-
   // Markdown leftover: I\_p -> I_p
   text = text.replace(/\\_/g, "_");
+
+  // Nested $I_a$ inside \frac{...} or {...} would close the outer $...$ too early
+  text = text.replace(/\{\$([^$]+)\$\}/g, "{$1}");
 
   // Broken \frac{100}{\text{A}}{4} -> \frac{100\text{A}}{4}
   text = text.replace(
     /\\frac\{([^{}]+)\}\{\\text\{([^{}]+)\}\}\{([^{}]+)\}/g,
     "\\frac{$1\\text{$2}}{$3}"
   );
+
+  // Split "2. …" "3. …" before pairing $...$, otherwise one `$` can swallow later steps
+  text = text.replace(/(?<!\n)\s+(?=([2-9]|[1-9]\d)[.、．]\s)/g, "\n\n");
+
+  // One formula per line: drop extra trailing $$, then close an unmatched opening $
+  text = text
+    .split("\n")
+    .map((line) => {
+      let lineText = line.replace(/\$\$+\s*$/g, "$");
+      const dollarCount = (lineText.match(/(?<!\\)\$/g) || []).length;
+      if (dollarCount % 2 === 1) {
+        lineText += "$";
+      }
+      return lineText;
+    })
+    .join("\n");
 
   // 2. Protect existing math blocks ($$...$$ and $...$) so we don't double-wrap or alter them
   const mathPlaceholders: string[] = [];
@@ -62,10 +78,7 @@ export function normalizeMathText(raw: string): string {
     return `${placeholderPrefix}${idx}___`;
   });
 
-  // 3. On the non-math portions, auto-wrap unwrapped mixed fractions and standard fractions:
-  // Supports:
-  // - Mixed fractions: `-7 \frac{6}{9}`, `−7 \frac{6}{9}`, `7 \frac{1}{2}`, `-7\frac{5}{9}`
-  // - Simple fractions: `\frac{6}{9}`, `-\frac{6}{9}`, `\dfrac{a}{b}`, `\tfrac{1}{3}`
+  // 3. Auto-wrap leftover LaTeX that was never inside $...$
   let enriched = protectedText.replace(
     /((?:[+-−]?\s*\d+\s*)?\\(?:d|t)?frac\{(?:[^{}]|\{[^{}]*\})+\}\{(?:[^{}]|\{[^{}]*\})+\})/g,
     (match) => {
@@ -74,25 +87,18 @@ export function normalizeMathText(raw: string): string {
     }
   );
 
-  // Auto-wrap standalone \sqrt{...} or \sqrt[n]{...}
   enriched = enriched.replace(
     /(\\sqrt(?:\[[^\]]+\])?\{[^{}]+\})/g,
     (match) => `$${match.trim().replace(/−/g, "-")}$`
   );
 
-  // Auto-wrap bare \times. Do not wrap \text{...} on its own — that splits
-  // \frac{100 \text{A}}{4} into invalid \frac{100}{\text{A}}{4}.
   enriched = enriched.replace(/\\times/g, "$\\times$");
-  enriched = enriched.replace(/(\d+)\s*\\text\{([^{}]*)\}/g, "$$$1\\text{$2}$");
 
   // 4. Restore the protected math blocks
   enriched = enriched.replace(new RegExp(`${placeholderPrefix}(\\d+)___`, "g"), (_, idxStr) => {
     const idx = parseInt(idxStr, 10);
     return mathPlaceholders[idx] ?? "";
   });
-
-  // Put "2. …" "3. …" on their own lines when the source ran them together
-  enriched = enriched.replace(/(?<!\n)\s+(?=([2-9]|[1-9]\d)[.、．]\s)/g, "\n\n");
 
   return enriched;
 }
@@ -183,7 +189,7 @@ export const MathRenderer: React.FC<MathRendererProps> = ({ content, className =
   if (segments.length === 1 && segments[0].type === "text") {
     return (
       <span className={`block max-w-full min-w-0 whitespace-pre-line break-words ${className}`}>
-        {content}
+        {segments[0].value}
       </span>
     );
   }
