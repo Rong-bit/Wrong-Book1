@@ -77,7 +77,7 @@ export default function App() {
   const [isConfirmingClearAll, setIsConfirmingClearAll] = useState<boolean>(false);
 
   const [paperSettings, setPaperSettings] = useState<PaperSettings>({
-    title: "經典錯題強化與訂正筆記本",
+    title: "錯題訂正本",
     subtitle: "命題範圍：數學科一元二次方程式 · 物理科牛頓運動定律",
     school: "",
     gradeClass: "九年級",

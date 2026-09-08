@@ -370,7 +370,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   onChange={(e) =>
                     onUpdateSettings({ ...settings, title: e.target.value })
                   }
-                  placeholder="例：經典錯題強化與訂正筆記本"
+                  placeholder="例：錯題訂正本"
                   className="w-full px-3 py-1.5 rounded-lg border border-slate-300 focus:bg-white"
                 />
               </div>
@@ -592,7 +592,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                         <div>
                           <div className="flex items-center gap-2">
                             <h1 className="text-base font-black tracking-wider text-slate-900">
-                              {settings.title || "錯題訂正與強化筆記本"}
+                              {settings.title || "錯題訂正本"}
                             </h1>
                             <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-bold tracking-widest">
                               CORNELL NOTE
