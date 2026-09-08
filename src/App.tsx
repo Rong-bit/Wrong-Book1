@@ -787,7 +787,7 @@ export default function App() {
       </main>
 
       {/* Floating Bottom Quick Bar for PDF Export */}
-      {questions.length > 0 && (
+      {questions.length > 0 && !isPdfModalOpen && !isBackupModalOpen && !isByokOpen && !calibrationModal.isOpen && (
         <div className="sticky bottom-[max(1rem,env(safe-area-inset-bottom))] mx-auto z-30 no-print w-fit">
           <div className="bg-slate-900/90 text-white backdrop-blur-md px-5 py-2.5 rounded-2xl shadow-xl flex items-center gap-4 border border-slate-700">
             <span className="text-xs font-medium text-slate-300">
