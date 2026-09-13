@@ -6,7 +6,7 @@
  *   "name@school.edu.tw",
  */
 export const MEMBER_EMAILS: string[] = [
-  "hjr640511@gmail.com
+  "hjr640511@gmail.com"
 ];
 
 export function normalizeMemberEmail(email: string): string {
