@@ -316,6 +316,225 @@ export interface CropRect {
   height: number;
 }
 
+export const FALLBACK_PERSPECTIVE_CORNERS: [Point, Point, Point, Point] = [
+  { x: 0.06, y: 0.06 },
+  { x: 0.94, y: 0.06 },
+  { x: 0.94, y: 0.94 },
+  { x: 0.06, y: 0.94 },
+];
+
+function clampByteIndex(v: number, max: number) {
+  return v < 0 ? 0 : v > max ? max : v;
+}
+
+function otsuThreshold(values: Float32Array): number {
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < values.length; i++) {
+    hist[Math.max(0, Math.min(255, values[i] | 0))] += 1;
+  }
+  const total = values.length;
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0;
+  let wB = 0;
+  let maxVar = 0;
+  let threshold = 160;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (wB === 0) continue;
+    const wF = total - wB;
+    if (wF === 0) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const diff = mB - mF;
+    const v = wB * wF * diff * diff;
+    if (v > maxVar) {
+      maxVar = v;
+      threshold = t;
+    }
+  }
+  return threshold;
+}
+
+function blurLuminance(src: Float32Array, w: number, h: number, radius: number): Float32Array {
+  const tmp = new Float32Array(w * h);
+  const out = new Float32Array(w * h);
+  const diam = radius * 2 + 1;
+  for (let y = 0; y < h; y++) {
+    let acc = 0;
+    const row = y * w;
+    for (let x = -radius; x <= radius; x++) {
+      acc += src[row + clampByteIndex(x, w - 1)];
+    }
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = acc / diam;
+      acc +=
+        src[row + clampByteIndex(x + radius + 1, w - 1)] -
+        src[row + clampByteIndex(x - radius, w - 1)];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let acc = 0;
+    for (let y = -radius; y <= radius; y++) {
+      acc += tmp[clampByteIndex(y, h - 1) * w + x];
+    }
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = acc / diam;
+      acc +=
+        tmp[clampByteIndex(y + radius + 1, h - 1) * w + x] -
+        tmp[clampByteIndex(y - radius, h - 1) * w + x];
+    }
+  }
+  return out;
+}
+
+function quadArea(corners: [Point, Point, Point, Point]): number {
+  let area = 0;
+  for (let i = 0; i < 4; i++) {
+    const p = corners[i];
+    const q = corners[(i + 1) % 4];
+    area += p.x * q.y - q.x * p.y;
+  }
+  return Math.abs(area) / 2;
+}
+
+function isPlausiblePaperQuad(corners: [Point, Point, Point, Point]): boolean {
+  const [tl, tr, br, bl] = corners;
+  if (tr.x - tl.x < 0.12 || br.x - bl.x < 0.12) return false;
+  if (bl.y - tl.y < 0.12 || br.y - tr.y < 0.12) return false;
+  return quadArea(corners) >= 0.1;
+}
+
+/**
+ * Find the four near-white paper corners of an exam photo.
+ * Order: [Top-Left, Top-Right, Bottom-Right, Bottom-Left], normalized 0–1.
+ */
+export function detectNearWhitePaperCorners(
+  img: HTMLImageElement,
+  maxSide = 360
+): [Point, Point, Point, Point] {
+  const natW = img.naturalWidth || img.width;
+  const natH = img.naturalHeight || img.height;
+  if (natW < 16 || natH < 16) return FALLBACK_PERSPECTIVE_CORNERS;
+
+  const scale = Math.min(1, maxSide / Math.max(natW, natH));
+  const w = Math.max(48, Math.round(natW * scale));
+  const h = Math.max(48, Math.round(natH * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return FALLBACK_PERSPECTIVE_CORNERS;
+
+  ctx.drawImage(img, 0, 0, w, h);
+  const { data } = ctx.getImageData(0, 0, w, h);
+
+  const lum = new Float32Array(w * h);
+  const chroma = new Uint8Array(w * h);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    lum[p] = 0.299 * r + 0.587 * g + 0.114 * b;
+    const maxC = r > g ? (r > b ? r : b) : g > b ? g : b;
+    const minC = r < g ? (r < b ? r : b) : g < b ? g : b;
+    chroma[p] = maxC - minC;
+  }
+
+  const blurred = blurLuminance(lum, w, h, 2);
+  const paperLum = Math.min(200, Math.max(otsuThreshold(blurred), 145));
+  const maxChroma = 72;
+
+  const mask = new Uint8Array(w * h);
+  let paperCount = 0;
+  for (let i = 0; i < mask.length; i++) {
+    if (blurred[i] >= paperLum && chroma[i] <= maxChroma) {
+      mask[i] = 1;
+      paperCount += 1;
+    }
+  }
+
+  const cover = paperCount / mask.length;
+  // No distinct paper-vs-background corners: keep the 6% inset.
+  if (cover < 0.08 || cover > 0.97) return FALLBACK_PERSPECTIVE_CORNERS;
+
+  let minSum = Infinity;
+  let maxSum = -Infinity;
+  let minDiff = Infinity;
+  let maxDiff = -Infinity;
+  const tl = { x: 0, y: 0 };
+  const tr = { x: w - 1, y: 0 };
+  const br = { x: w - 1, y: h - 1 };
+  const bl = { x: 0, y: h - 1 };
+
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      if (!mask[i]) continue;
+      let neighbors = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          neighbors += mask[(y + dy) * w + (x + dx)];
+        }
+      }
+      if (neighbors < 6) continue;
+
+      const sum = x + y;
+      const diff = x - y;
+      if (sum < minSum) {
+        minSum = sum;
+        tl.x = x;
+        tl.y = y;
+      }
+      if (diff > maxDiff) {
+        maxDiff = diff;
+        tr.x = x;
+        tr.y = y;
+      }
+      if (sum > maxSum) {
+        maxSum = sum;
+        br.x = x;
+        br.y = y;
+      }
+      if (diff < minDiff) {
+        minDiff = diff;
+        bl.x = x;
+        bl.y = y;
+      }
+    }
+  }
+
+  if (!Number.isFinite(minSum) || !Number.isFinite(maxSum)) {
+    return FALLBACK_PERSPECTIVE_CORNERS;
+  }
+
+  const cx = (tl.x + tr.x + br.x + bl.x) / 4;
+  const cy = (tl.y + tr.y + br.y + bl.y) / 4;
+  const inset = Math.max(2, Math.hypot(w, h) * 0.01);
+
+  const pull = (p: { x: number; y: number }): Point => {
+    const dx = cx - p.x;
+    const dy = cy - p.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const t = Math.min(inset, len * 0.06);
+    return {
+      x: Math.min(0.995, Math.max(0.005, (p.x + (dx / len) * t) / w)),
+      y: Math.min(0.995, Math.max(0.005, (p.y + (dy / len) * t) / h)),
+    };
+  };
+
+  const corners: [Point, Point, Point, Point] = [
+    pull(tl),
+    pull(tr),
+    pull(br),
+    pull(bl),
+  ];
+
+  return isPlausiblePaperQuad(corners) ? corners : FALLBACK_PERSPECTIVE_CORNERS;
+}
+
 /**
  * Applies 4-point perspective warp (Homography) to straighten skewed test papers
  * corners order: [Top-Left, Top-Right, Bottom-Right, Bottom-Left]

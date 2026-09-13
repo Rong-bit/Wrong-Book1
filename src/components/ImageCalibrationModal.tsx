@@ -35,6 +35,8 @@ import {
   compressImage,
   removeShadowsAndBinarize,
   ShadowRemovalMode,
+  detectNearWhitePaperCorners,
+  FALLBACK_PERSPECTIVE_CORNERS,
 } from "../utils/imageUtils";
 
 interface ImageCalibrationModalProps {
@@ -140,12 +142,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   }, [containerSize, naturalDimensions, zoomScale]);
 
   // Normalized 4 corners for perspective: [TL, TR, BR, BL], values in [0, 1]
-  const [corners, setCorners] = useState<[Point, Point, Point, Point]>([
-    { x: 0.06, y: 0.06 }, // TL
-    { x: 0.94, y: 0.06 }, // TR
-    { x: 0.94, y: 0.94 }, // BR
-    { x: 0.06, y: 0.94 }, // BL
-  ]);
+  const [corners, setCorners] = useState<[Point, Point, Point, Point]>(
+    FALLBACK_PERSPECTIVE_CORNERS
+  );
 
   // Normalized crop rectangle: { x, y, width, height }, values in [0, 1]
   const [cropBox, setCropBox] = useState<{ x: number; y: number; w: number; h: number }>({
@@ -178,12 +177,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setHistory([]);
       setMode(initialMode || "perspective");
       setZoomScale(1);
-      setCorners([
-        { x: 0.06, y: 0.06 },
-        { x: 0.94, y: 0.06 },
-        { x: 0.94, y: 0.94 },
-        { x: 0.06, y: 0.94 },
-      ]);
+      setCorners(FALLBACK_PERSPECTIVE_CORNERS);
       setCropBox({ x: 0.08, y: 0.08, w: 0.84, h: 0.84 });
 
       // Immediate pre-decode test
@@ -199,6 +193,11 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           });
           setIsImageReady(true);
           setImageLoadError(false);
+          try {
+            setCorners(detectNearWhitePaperCorners(img));
+          } catch {
+            setCorners(FALLBACK_PERSPECTIVE_CORNERS);
+          }
         }
       };
       img.onerror = () => {
@@ -207,6 +206,18 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       img.src = normalized;
     }
   }, [isOpen, imageSrc, initialMode]);
+
+  const applyDetectedPaperCorners = (img: HTMLImageElement | null) => {
+    if (!img || !(img.naturalWidth || img.width)) {
+      setCorners(FALLBACK_PERSPECTIVE_CORNERS);
+      return;
+    }
+    try {
+      setCorners(detectNearWhitePaperCorners(img));
+    } catch {
+      setCorners(FALLBACK_PERSPECTIVE_CORNERS);
+    }
+  };
 
   // Read natural image dimensions on load
   const handleImageLoaded = (e: React.SyntheticEvent<HTMLImageElement>) => {
@@ -218,6 +229,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       });
       setIsImageReady(true);
       setImageLoadError(false);
+      if (mode === "perspective") {
+        applyDetectedPaperCorners(img);
+      }
     }
   };
 
@@ -237,12 +251,6 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const handleResetToOriginal = () => {
     setHistory([]);
     setCurrentImage(imageSrc);
-    setCorners([
-      { x: 0.06, y: 0.06 },
-      { x: 0.94, y: 0.06 },
-      { x: 0.94, y: 0.94 },
-      { x: 0.06, y: 0.94 },
-    ]);
     setCropBox({ x: 0.08, y: 0.08, w: 0.84, h: 0.84 });
   };
 
@@ -252,14 +260,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     try {
       const rotated = await rotateImage(currentImage, deg);
       pushHistory(rotated);
-      // Reset corners & crop for new aspect ratio
-      setCorners([
-        { x: 0.06, y: 0.06 },
-        { x: 0.94, y: 0.06 },
-        { x: 0.94, y: 0.94 },
-        { x: 0.06, y: 0.94 },
-      ]);
       setCropBox({ x: 0.08, y: 0.08, w: 0.84, h: 0.84 });
+      const probe = new Image();
+      probe.onload = () => applyDetectedPaperCorners(probe);
+      probe.src = rotated;
     } finally {
       setIsProcessing(false);
     }
@@ -862,21 +866,14 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <span className="hidden sm:inline-flex items-center gap-1 text-sky-700 bg-sky-50 px-2 py-1 rounded-md font-medium text-[11px]">
                   <Info className="w-3.5 h-3.5" />
-                  拖曳四角圓點對齊考卷四個角落，即可將歪斜拍照自動展平拉正
+                  拖曳四角圓點對齊考卷近白色紙角（開啟時會自動偵測），即可將歪斜拍照展平
                 </span>
                 <button
                   type="button"
-                  onClick={() =>
-                    setCorners([
-                      { x: 0.05, y: 0.05 },
-                      { x: 0.95, y: 0.05 },
-                      { x: 0.95, y: 0.95 },
-                      { x: 0.05, y: 0.95 },
-                    ])
-                  }
+                  onClick={() => applyDetectedPaperCorners(imgRef.current)}
                   className="px-2 py-1 text-slate-600 hover:bg-slate-100 rounded border border-slate-200 text-[11px] transition whitespace-nowrap"
                 >
-                  重置四角
+                  對齊紙角
                 </button>
               </div>
             ) : (
