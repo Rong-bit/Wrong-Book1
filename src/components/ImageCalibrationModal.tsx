@@ -28,7 +28,6 @@ import {
 } from "lucide-react";
 import {
   Point,
-  CropRect,
   applyPerspectiveCorrection,
   applyCrop,
   rotateImage,
@@ -120,9 +119,23 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       w = maxH * imgAspect;
     }
 
+    w *= zoomScale;
+    h *= zoomScale;
+
+    // Keep the box on the image aspect ratio. Independent min-width/min-height
+    // (e.g. forcing 120px tall on a wide strip) adds letterbox, and the crop
+    // overlay then no longer maps 1:1 onto pixels.
+    const minSide = 64;
+    const shortest = Math.min(w, h);
+    if (shortest > 0 && shortest < minSide) {
+      const bump = minSide / shortest;
+      w *= bump;
+      h *= bump;
+    }
+
     return {
-      width: Math.max(120, Math.round(w * zoomScale)),
-      height: Math.max(120, Math.round(h * zoomScale)),
+      width: Math.max(1, Math.round(w)),
+      height: Math.max(1, Math.round(h)),
     };
   }, [containerSize, naturalDimensions, zoomScale]);
 
@@ -257,8 +270,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     if (isProcessing || !imgRef.current) return;
     setIsProcessing(true);
     try {
-      const natW = naturalDimensions.width;
-      const natH = naturalDimensions.height;
+      const natW = imgRef.current.naturalWidth || naturalDimensions.width;
+      const natH = imgRef.current.naturalHeight || naturalDimensions.height;
       const realCorners: [Point, Point, Point, Point] = [
         { x: corners[0].x * natW, y: corners[0].y * natH },
         { x: corners[1].x * natW, y: corners[1].y * natH },
@@ -290,19 +303,19 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     if (isProcessing) return;
     setIsProcessing(true);
     try {
-      const natW = naturalDimensions.width;
-      const natH = naturalDimensions.height;
-      const cropRect: CropRect = {
-        x: cropBox.x * natW,
-        y: cropBox.y * natH,
-        width: cropBox.w * natW,
-        height: cropBox.h * natH,
-      };
-
-      const cropped = await applyCrop(currentImage, cropRect);
+      const cropped = await applyCrop(
+        currentImage,
+        {
+          x: cropBox.x,
+          y: cropBox.y,
+          width: cropBox.w,
+          height: cropBox.h,
+        },
+        0.92,
+        imgRef.current
+      );
       pushHistory(cropped);
-
-      setCropBox({ x: 0.05, y: 0.05, w: 0.9, h: 0.9 });
+      setCropBox({ x: 0, y: 0, w: 1, h: 1 });
     } catch (err) {
       console.error("Apply crop failed:", err);
     } finally {
@@ -1085,7 +1098,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                   alt="待校正考題"
                   onLoad={handleImageLoaded}
                   onError={() => setImageLoadError(true)}
-                  className="w-full h-full object-contain rounded-lg pointer-events-none block select-none bg-white"
+                  className="w-full h-full object-fill rounded-lg pointer-events-none block select-none bg-white"
                 />
 
                 {/* Render Perspective Overlay or Crop Overlay */}

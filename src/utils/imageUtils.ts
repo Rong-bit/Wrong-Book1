@@ -510,16 +510,67 @@ export async function applyPerspectiveCorrection(
   });
 }
 
+function cropLoadedImage(
+  img: HTMLImageElement,
+  cropRect: CropRect,
+  quality: number,
+  fallbackSrc: string
+): string {
+  const natW = img.naturalWidth || img.width || 800;
+  const natH = img.naturalHeight || img.height || 600;
+
+  const looksNormalized =
+    cropRect.x >= 0 &&
+    cropRect.y >= 0 &&
+    cropRect.width > 0 &&
+    cropRect.height > 0 &&
+    cropRect.x <= 1.0001 &&
+    cropRect.y <= 1.0001 &&
+    cropRect.width <= 1.0001 &&
+    cropRect.height <= 1.0001;
+
+  const rawX = looksNormalized ? cropRect.x * natW : cropRect.x;
+  const rawY = looksNormalized ? cropRect.y * natH : cropRect.y;
+  const rawW = looksNormalized ? cropRect.width * natW : cropRect.width;
+  const rawH = looksNormalized ? cropRect.height * natH : cropRect.height;
+
+  const cropX = Math.max(0, Math.min(natW - 5, Math.round(rawX)));
+  const cropY = Math.max(0, Math.min(natH - 5, Math.round(rawY)));
+  const cropW = Math.max(10, Math.min(natW - cropX, Math.round(rawW)));
+  const cropH = Math.max(10, Math.min(natH - cropY, Math.round(rawH)));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = cropW;
+  canvas.height = cropH;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return fallbackSrc;
+
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, cropW, cropH);
+  ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
 /**
- * Free cropping of a specified rectangle from an image
+ * Free cropping of a specified rectangle from an image.
+ * Prefer the on-screen img element so the crop matches what the user framed.
  */
 export async function applyCrop(
   imageSrc: string,
   cropRect: CropRect,
-  quality = 0.92
+  quality = 0.92,
+  sourceEl?: HTMLImageElement | null
 ): Promise<string> {
   const normSrc = normalizeImageSrc(imageSrc);
   if (!normSrc) return "";
+
+  if (sourceEl?.complete && (sourceEl.naturalWidth || sourceEl.width) > 0) {
+    try {
+      return cropLoadedImage(sourceEl, cropRect, quality, normSrc);
+    } catch (err) {
+      console.error("Crop from displayed image failed:", err);
+    }
+  }
 
   return new Promise((resolve) => {
     const img = new Image();
@@ -528,41 +579,7 @@ export async function applyCrop(
     }
     img.onload = () => {
       try {
-        const natW = img.naturalWidth || img.width || 800;
-        const natH = img.naturalHeight || img.height || 600;
-
-        // Auto-scale if cropRect was supplied as normalized [0, 1]
-        const isNorm = cropRect.width <= 1.05 && cropRect.height <= 1.05;
-        const rawX = isNorm ? cropRect.x * natW : cropRect.x;
-        const rawY = isNorm ? cropRect.y * natH : cropRect.y;
-        const rawW = isNorm ? cropRect.width * natW : cropRect.width;
-        const rawH = isNorm ? cropRect.height * natH : cropRect.height;
-
-        const cropX = Math.max(0, Math.min(natW - 5, Math.round(rawX)));
-        const cropY = Math.max(0, Math.min(natH - 5, Math.round(rawY)));
-        const cropW = Math.max(
-          10,
-          Math.min(natW - cropX, Math.round(rawW))
-        );
-        const cropH = Math.max(
-          10,
-          Math.min(natH - cropY, Math.round(rawH))
-        );
-
-        const canvas = document.createElement("canvas");
-        canvas.width = cropW;
-        canvas.height = cropH;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          resolve(normSrc);
-          return;
-        }
-
-        ctx.fillStyle = "#ffffff";
-        ctx.fillRect(0, 0, cropW, cropH);
-        ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-
-        resolve(canvas.toDataURL("image/jpeg", quality));
+        resolve(cropLoadedImage(img, cropRect, quality, normSrc));
       } catch (err) {
         console.error("Crop failed:", err);
         resolve(normSrc);
