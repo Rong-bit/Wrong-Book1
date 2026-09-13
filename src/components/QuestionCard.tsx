@@ -52,6 +52,50 @@ interface QuestionCardProps {
   onRetryAnalysis?: (id: string) => void;
 }
 
+function StudyFold({
+  title,
+  icon,
+  open,
+  onToggle,
+  children,
+  extra,
+  toneClass,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  open: boolean;
+  onToggle: () => void;
+  children: React.ReactNode;
+  extra?: React.ReactNode;
+  toneClass: string;
+}) {
+  return (
+    <div className={`rounded-xl border overflow-hidden ${toneClass}`}>
+      <div className="flex items-center gap-1 pr-1">
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex-1 min-w-0 flex items-center gap-2 px-3 py-2.5 text-left"
+        >
+          <span className="shrink-0">{icon}</span>
+          <span className="flex-1 min-w-0 text-xs font-bold">{title}</span>
+          <ChevronDown
+            className={`w-4 h-4 shrink-0 text-slate-400 transition-transform ${
+              open ? "rotate-180" : ""
+            }`}
+          />
+        </button>
+        {extra}
+      </div>
+      {open && (
+        <div className="px-3 pb-3 text-xs leading-relaxed font-sans">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export const QuestionCard: React.FC<QuestionCardProps> = ({
   question,
   index,
@@ -91,6 +135,13 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   const explanationTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [showQuestionMathToolbar, setShowQuestionMathToolbar] = useState(false);
   const [showExplanationMathToolbar, setShowExplanationMathToolbar] = useState(false);
+  const [openStudyFolds, setOpenStudyFolds] = useState<Record<string, boolean>>(
+    {}
+  );
+
+  const toggleStudyFold = (key: string) => {
+    setOpenStudyFolds((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const handleReplaceImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -807,88 +858,102 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
 
           {/* Notebook Mode: Rich learning badges */}
           {!isExamPaper && (
-            <div className="space-y-3 pt-2">
-              {/* Answer & Core Concept */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                {question.answer && (
-                  <div className="p-3 rounded-xl bg-emerald-50/80 border border-emerald-200/80 text-xs">
-                    <span className="font-bold text-emerald-900 block mb-0.5">
-                      標準答案
-                    </span>
-                    <span className="text-emerald-800 font-semibold font-sans">
-                      <MathRenderer content={question.answer} />
-                    </span>
-                  </div>
-                )}
-                {question.coreConcepts && (
-                  <div className="p-3 rounded-xl bg-sky-50/80 border border-sky-200/80 text-xs">
-                    <span className="font-bold text-sky-900 block mb-0.5 flex items-center gap-1">
-                      <Lightbulb className="w-3.5 h-3.5 text-sky-600" />
-                      核心考點
-                    </span>
-                    <span className="text-sky-800 font-sans">
-                      <MathRenderer content={question.coreConcepts} />
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Common Pitfalls */}
-              {question.commonPitfalls && (
-                <div className="p-3 rounded-xl bg-amber-50/70 border border-amber-200/80 text-xs text-amber-900 flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-bold block mb-0.5">易錯陷阱與概念盲區</span>
-                    <div className="text-amber-800 leading-relaxed font-sans">
-                      <MathRenderer content={question.commonPitfalls} />
-                    </div>
-                  </div>
+            <div className="space-y-2 pt-2">
+              {question.answer && (
+                <div className="p-3 rounded-xl bg-emerald-50/80 border border-emerald-200/80 text-xs">
+                  <span className="font-bold text-emerald-900 block mb-0.5">
+                    標準答案
+                  </span>
+                  <span className="text-emerald-800 font-semibold font-sans">
+                    <MathRenderer content={question.answer} />
+                  </span>
                 </div>
               )}
 
-              {/* Detailed Step-by-Step Explanation */}
+              {question.coreConcepts && (
+                <StudyFold
+                  title="核心考點"
+                  icon={<Lightbulb className="w-3.5 h-3.5 text-sky-600" />}
+                  open={Boolean(openStudyFolds.concepts)}
+                  onToggle={() => toggleStudyFold("concepts")}
+                  toneClass="bg-sky-50/80 border-sky-200/80 text-sky-900"
+                >
+                  <div className="text-sky-800">
+                    <MathRenderer content={question.coreConcepts} />
+                  </div>
+                </StudyFold>
+              )}
+
+              {question.commonPitfalls && (
+                <StudyFold
+                  title="易錯陷阱與概念盲區"
+                  icon={<AlertTriangle className="w-3.5 h-3.5 text-amber-600" />}
+                  open={Boolean(openStudyFolds.pitfalls)}
+                  onToggle={() => toggleStudyFold("pitfalls")}
+                  toneClass="bg-amber-50/70 border-amber-200/80 text-amber-900"
+                >
+                  <div className="text-amber-800">
+                    <MathRenderer content={question.commonPitfalls} />
+                  </div>
+                </StudyFold>
+              )}
+
               {question.explanation && (
-                <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs leading-relaxed text-slate-700 min-w-0 overflow-x-auto">
-                  <span className="font-bold text-slate-900 block mb-1">
-                    詳細解題步驟
-                  </span>
-                  <div className="text-slate-700 font-sans min-w-0 break-words space-y-2">
+                <StudyFold
+                  title="詳細解題步驟"
+                  icon={<BookOpen className="w-3.5 h-3.5 text-slate-500" />}
+                  open={Boolean(openStudyFolds.explanation)}
+                  onToggle={() => toggleStudyFold("explanation")}
+                  toneClass="bg-slate-50 border-slate-200 text-slate-900"
+                >
+                  <div className="text-slate-700 min-w-0 break-words space-y-2 overflow-x-auto">
                     <MathRenderer content={question.explanation} />
                   </div>
-                </div>
+                </StudyFold>
               )}
 
-              {/* Key Tips */}
               {question.tips && (
-                <div className="text-[11px] text-indigo-700 bg-indigo-50/60 p-2.5 rounded-lg border border-indigo-100 flex items-center gap-1.5">
-                  <span className="font-bold shrink-0">解題技巧：</span>
-                  <span className="font-sans"><MathRenderer content={question.tips} /></span>
-                </div>
+                <StudyFold
+                  title="解題技巧"
+                  icon={<Sparkles className="w-3.5 h-3.5 text-indigo-500" />}
+                  open={Boolean(openStudyFolds.tips)}
+                  onToggle={() => toggleStudyFold("tips")}
+                  toneClass="bg-indigo-50/60 border-indigo-100 text-indigo-900"
+                >
+                  <div className="text-indigo-800">
+                    <MathRenderer content={question.tips} />
+                  </div>
+                </StudyFold>
               )}
 
-              {/* Student Personal Notes */}
-              <div className="p-3 rounded-xl bg-slate-50/60 border border-dashed border-slate-300 text-xs">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="font-bold text-slate-700 flex items-center gap-1">
-                    <BookMarked className="w-3.5 h-3.5 text-slate-500" />
-                    我的訂正心得 / 覆盤筆記
-                  </span>
-                  {!question.myNotes && (
+              <StudyFold
+                title="我的訂正心得 / 覆盤筆記"
+                icon={<BookMarked className="w-3.5 h-3.5 text-slate-500" />}
+                open={Boolean(openStudyFolds.notes)}
+                onToggle={() => toggleStudyFold("notes")}
+                toneClass="bg-slate-50/60 border-dashed border-slate-300 text-slate-800"
+                extra={
+                  !question.myNotes ? (
                     <button
                       type="button"
                       onClick={() => setIsEditing(true)}
-                      className="text-sky-600 hover:underline text-[11px]"
+                      className="text-sky-600 hover:underline text-[11px] font-semibold shrink-0 px-2 py-1"
                     >
-                      + 新增覆盤心得
+                      + 新增
                     </button>
-                  )}
-                </div>
+                  ) : undefined
+                }
+              >
                 {question.myNotes ? (
-                  <div className="text-slate-600 italic font-sans"><MathRenderer content={question.myNotes} /></div>
+                  <div className="text-slate-600 italic">
+                    <MathRenderer content={question.myNotes} />
+                  </div>
                 ) : (
-                  <p className="text-slate-400 italic">尚無個人心得筆記，點擊鉛筆圖示即可填寫。</p>
+                  <p className="text-slate-400 italic">
+                    尚無個人心得筆記，點擊鉛筆圖示或「新增」即可填寫。
+                  </p>
                 )}
-              </div>
+              </StudyFold>
             </div>
           )}
 
