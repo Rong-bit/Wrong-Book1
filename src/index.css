@@ -193,6 +193,7 @@
   .paper-sheet-fit {
     overflow: hidden !important;
     min-height: 0 !important;
+    contain: size layout !important;
     page-break-inside: avoid !important;
     break-inside: avoid !important;
   }
@@ -231,30 +232,40 @@
     margin: 0;
   }
 
-  html[data-print-size="A4"] {
-    @page {
-      size: A4 portrait;
-      margin: 0;
-    }
+  @page paper-a4 {
+    size: A4 portrait;
+    margin: 0;
   }
 
-  html[data-print-size="A4"] .paper-sheet-fit {
+  @page paper-b5 {
+    size: 182mm 257mm;
+    margin: 0;
+  }
+
+  html[data-print-size="A4"] .paper-sheet-fit,
+  .paper-sheet-fit.paper-a4 {
+    page: paper-a4;
     width: 210mm !important;
-    height: 296mm !important;
-    max-height: 296mm !important;
+    height: 295mm !important;
+    max-height: 295mm !important;
   }
 
-  html[data-print-size="B5"] {
-    @page {
-      size: 182mm 257mm;
-      margin: 0;
-    }
-  }
-
-  html[data-print-size="B5"] .paper-sheet-fit {
+  html[data-print-size="B5"] .paper-sheet-fit,
+  .paper-sheet-fit.paper-b5 {
+    page: paper-b5;
     width: 182mm !important;
-    height: 256mm !important;
-    max-height: 256mm !important;
+    height: 255mm !important;
+    max-height: 255mm !important;
+  }
+
+  #printable-paper-container .katex {
+    font-size: 1em !important;
+  }
+
+  #printable-paper-container .katex-display {
+    display: inline-block !important;
+    margin: 0.1em 0.2em !important;
+    text-align: left !important;
   }
 }
 

@@ -64,9 +64,20 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     const root = document.documentElement;
     root.classList.add("printing-exam");
     root.setAttribute("data-print-size", settings.paperSize);
+
+    document.getElementById("exam-print-page-size")?.remove();
+    const pageStyle = document.createElement("style");
+    pageStyle.id = "exam-print-page-size";
+    pageStyle.textContent =
+      settings.paperSize === "B5"
+        ? "@page { size: 182mm 257mm; margin: 0; }"
+        : "@page { size: A4 portrait; margin: 0; }";
+    document.head.appendChild(pageStyle);
+
     const cleanup = () => {
       root.classList.remove("printing-exam");
       root.removeAttribute("data-print-size");
+      pageStyle.remove();
       window.removeEventListener("afterprint", cleanup);
     };
     window.addEventListener("afterprint", cleanup);
@@ -573,7 +584,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   {cornellPages.map(({ pageIndex, questions: pageQs }) => (
                     <div
                       key={`cornell-page-${pageIndex}`}
-                      className="paper-sheet paper-sheet-fit bg-white text-slate-900 shadow-xl transition-all duration-200 border border-slate-300 font-sans mb-8 relative flex flex-col justify-between"
+                      className={`paper-sheet paper-sheet-fit paper-${settings.paperSize.toLowerCase()} bg-white text-slate-900 shadow-xl transition-all duration-200 border border-slate-300 font-sans mb-8 relative flex flex-col justify-between`}
                       style={{
                         width: paperWidthStyle,
                         minHeight: paperHeightStyle,
