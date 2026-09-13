@@ -565,7 +565,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
           </div>
         </div>
         ) : (
-          <div className="flex-1 min-h-0 bg-slate-300/80 p-4 md:p-8 overflow-y-auto overflow-x-auto flex flex-col items-center">
+          <div className="print-preview-canvas flex-1 min-h-0 bg-slate-300/80 p-4 md:p-8 overflow-y-auto overflow-x-auto flex flex-col items-center">
             <div ref={previewRef} id="printable-paper-container" className="w-full flex flex-col items-center">
               {/* CORNELL MODE RENDERING */}
               {settings.mode === "cornell" ? (
@@ -573,7 +573,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   {cornellPages.map(({ pageIndex, questions: pageQs }) => (
                     <div
                       key={`cornell-page-${pageIndex}`}
-                      className="paper-sheet bg-white text-slate-900 shadow-xl transition-all duration-200 border border-slate-300 font-sans mb-8 relative flex flex-col justify-between"
+                      className="paper-sheet paper-sheet-fit bg-white text-slate-900 shadow-xl transition-all duration-200 border border-slate-300 font-sans mb-8 relative flex flex-col justify-between"
                       style={{
                         width: paperWidthStyle,
                         minHeight: paperHeightStyle,
