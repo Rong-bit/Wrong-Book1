@@ -125,34 +125,36 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Right Actions */}
         <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-          <button
-            id="open-byok-btn"
-            type="button"
-            onClick={onOpenByok}
-            className={`p-2 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold border transition flex items-center gap-1.5 shadow-2xs ${
-              hasCustomKey
-                ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300 ring-1 ring-emerald-200"
-                : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
-            }`}
-            title="設定自備 Gemini API 金鑰 (BYOK - Bring Your Own Key)"
-          >
-            <Key className={`w-3.5 h-3.5 ${hasCustomKey ? "text-emerald-600" : "text-amber-600"}`} />
-            {hasCustomKey ? (
-              <span className="hidden sm:flex items-center gap-1.5">
-                <span className="hidden md:inline text-emerald-900 font-bold">自備金鑰:</span>
-                <span className="font-mono text-[11px] text-emerald-700">{maskedCustomKey || "已啟用"}</span>
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              </span>
-            ) : (
-              <span className="hidden sm:flex items-center gap-1">
-                <span>自備金鑰</span>
-                <span className="text-[10px] text-slate-400 font-mono hidden md:inline">(BYOK)</span>
-              </span>
-            )}
-            {hasCustomKey && (
-              <span className="sm:hidden w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            )}
-          </button>
+          {currentPage === "home" && (
+            <button
+              id="open-byok-btn"
+              type="button"
+              onClick={onOpenByok}
+              className={`p-2 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold border transition flex items-center gap-1.5 shadow-2xs ${
+                hasCustomKey
+                  ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300 ring-1 ring-emerald-200"
+                  : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+              }`}
+              title="設定自備 Gemini API 金鑰 (BYOK - Bring Your Own Key)"
+            >
+              <Key className={`w-3.5 h-3.5 ${hasCustomKey ? "text-emerald-600" : "text-amber-600"}`} />
+              {hasCustomKey ? (
+                <span className="hidden sm:flex items-center gap-1.5">
+                  <span className="hidden md:inline text-emerald-900 font-bold">自備金鑰:</span>
+                  <span className="font-mono text-[11px] text-emerald-700">{maskedCustomKey || "已啟用"}</span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                </span>
+              ) : (
+                <span className="hidden sm:flex items-center gap-1">
+                  <span>自備金鑰</span>
+                  <span className="text-[10px] text-slate-400 font-mono hidden md:inline">(BYOK)</span>
+                </span>
+              )}
+              {hasCustomKey && (
+                <span className="sm:hidden w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              )}
+            </button>
+          )}
 
           {currentPage === "notebook" && (
             <>
