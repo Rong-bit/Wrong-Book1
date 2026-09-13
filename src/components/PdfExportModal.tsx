@@ -105,7 +105,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
             </div>
             <div>
               <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                高清 PDF 錯題本排版與匯出
+                {showPreview ? "預覽排版" : "高清 PDF 錯題本排版與匯出"}
                 <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">
                   {settings.mode === "cornell"
                     ? "康乃爾雙欄訂正本"
@@ -115,7 +115,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 </span>
               </h3>
               <p className="text-xs text-slate-500 hidden sm:block">
-                支援康乃爾雙欄訂正、5mm 數學方格微網格、艾賓浩斯 5 次複習打卡，符合 B5 / A4 高清輸出
+                {showPreview
+                  ? "確認紙張畫面無誤後，再按列印送給印表機"
+                  : "先調整規格，再另開畫面預覽康乃爾雙欄與紙張排版"}
               </p>
             </div>
           </div>
@@ -154,16 +156,15 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
           </div>
         )}
 
-        {/* Content Body: Left Settings Panel + Right Live Paper Preview */}
-        <div className="flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden">
-          {/* Settings Sidebar */}
-          <div className="w-full md:w-84 bg-white border-r border-slate-200 p-5 space-y-4 text-xs md:overflow-y-auto md:shrink-0 no-print">
+        {!showPreview ? (
+        <div className="flex-1 min-h-0 overflow-y-auto no-print bg-white">
+          <div className="w-full max-w-3xl mx-auto p-5 space-y-4 text-xs">
             <div className="flex items-center gap-1.5 font-bold text-slate-800 text-sm pb-1 border-b border-slate-100">
               <Settings2 className="w-4 h-4 text-sky-600" />
               版面規格與排版風格
             </div>
-            <p className="md:hidden text-[11px] text-slate-500 leading-relaxed">
-              請向下滑動，標題、年級、姓名與題目呈現方式在下方
+            <p className="text-[11px] text-slate-500 leading-relaxed">
+              調整完成後按「預覽排版」，會另開畫面顯示紙張。確認無誤後再列印。
             </p>
 
             {/* Paper Size */}
@@ -562,27 +563,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
               </label>
             </div>
           </div>
-
-          {/* Live Preview Canvas View */}
-          <div className="flex-1 min-h-[40vh] md:min-h-0 bg-slate-300/80 p-4 md:p-8 md:overflow-y-auto flex flex-col items-center">
-            {!showPreview ? (
-              <div className="flex-1 w-full min-h-[240px] flex flex-col items-center justify-center text-center px-6 no-print">
-                <div className="w-14 h-14 rounded-2xl bg-white border border-slate-200 text-sky-600 flex items-center justify-center mb-3 shadow-xs">
-                  <Eye className="w-6 h-6" />
-                </div>
-                <h4 className="text-sm font-bold text-slate-800">先調整排版規格</h4>
-                <p className="text-xs text-slate-500 mt-1.5 max-w-sm leading-relaxed">
-                  康乃爾雙欄畫面會在預覽時才出現，確認無誤後再按列印送給印表機。
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowPreview(true)}
-                  className="mt-4 px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 shadow-xs"
-                >
-                  預覽排版
-                </button>
-              </div>
-            ) : (
+        </div>
+        ) : (
+          <div className="flex-1 min-h-0 bg-slate-300/80 p-4 md:p-8 overflow-y-auto overflow-x-auto flex flex-col items-center">
             <div ref={previewRef} id="printable-paper-container" className="w-full flex flex-col items-center">
               {/* CORNELL MODE RENDERING */}
               {settings.mode === "cornell" ? (
@@ -1095,9 +1078,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 </div>
               )}
             </div>
-            )}
           </div>
-        </div>
+        )}
 
         {/* Modal Bottom Footer Actions */}
         <div className="app-safe-footer px-4 pt-3 md:px-6 md:pt-3.5 bg-white border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0 no-print">
