@@ -625,6 +625,7 @@ export default function App() {
       {/* Navigation Bar */}
       <Navbar
         currentPage={appPage}
+        onPageChange={setAppPage}
         currentLayout={layout}
         onLayoutChange={setLayout}
         onOpenByok={() => setIsByokOpen(true)}
@@ -650,7 +651,6 @@ export default function App() {
             onImageSelected={handleImageSelected}
             onLoadSamples={handleLoadSamples}
             onOpenByok={() => setIsByokOpen(true)}
-            onOpenNotebook={() => setAppPage("notebook")}
             hasCustomKey={hasCustomKey}
             isAnalyzing={isAnalyzing}
             questionCount={questions.length}

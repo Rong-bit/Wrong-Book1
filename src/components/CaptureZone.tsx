@@ -16,7 +16,6 @@ interface CaptureZoneProps {
   onImageSelected: (base64: string, subjectHint?: string) => void;
   onLoadSamples: () => void;
   onOpenByok?: () => void;
-  onOpenNotebook?: () => void;
   hasCustomKey?: boolean;
   isAnalyzing: boolean;
   questionCount: number;
@@ -28,7 +27,6 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
   onImageSelected,
   onLoadSamples,
   onOpenByok,
-  onOpenNotebook,
   hasCustomKey = false,
   isAnalyzing,
   questionCount,
@@ -194,13 +192,7 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
                 Ctrl + V
               </kbd>
               <span className="text-xs text-slate-500">(Mac 為 ⌘+V)</span>
-              <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                支援 HEIC / JPG / PNG
-              </span>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              截圖後直接貼上，支援 iPhone/iPad 的 HEIC 拍照照片自動轉碼，並透過 Gemini AI 解析科目、單元與詳解。
-            </p>
             {isConvertingHeic && (
               <div className="mt-2 flex items-center gap-2 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-800 text-xs font-medium animate-pulse">
                 <Loader2 className="w-3.5 h-3.5 animate-spin text-sky-600 shrink-0" />
@@ -246,16 +238,6 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
             >
               <BookOpen className="w-4 h-4" />
               載入示範錯題
-            </button>
-          )}
-          {questionCount > 0 && onOpenNotebook && (
-            <button
-              type="button"
-              onClick={onOpenNotebook}
-              className="px-3.5 py-2.5 rounded-xl text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 active:scale-95 border border-amber-200 transition flex items-center gap-1.5"
-            >
-              <BookOpen className="w-4 h-4" />
-              進入錯題本 ({questionCount})
             </button>
           )}
         </div>
