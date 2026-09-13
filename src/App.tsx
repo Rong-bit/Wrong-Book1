@@ -37,6 +37,7 @@ function uniquePaperParts(values: Array<string | undefined>): string[] {
   for (const raw of values) {
     const value = raw?.trim();
     if (!value || value === "分析中..." || value === "未歸類") continue;
+    if (value.includes("AI 推論") || value.includes("解析中")) continue;
     if (seen.has(value)) continue;
     seen.add(value);
     parts.push(value);

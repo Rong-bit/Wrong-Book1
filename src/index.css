@@ -121,6 +121,25 @@
   .print-only {
     display: block !important;
   }
+  .app-screen-overlay,
+  .app-screen-sheet {
+    position: static !important;
+    inset: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    display: block !important;
+  }
+  #printable-paper-container {
+    width: 100% !important;
+  }
   .paper-sheet {
     page-break-after: always !important;
     break-after: page !important;
