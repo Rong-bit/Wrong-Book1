@@ -231,143 +231,151 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
       }`}
     >
       {/* Top Header Bar */}
-      <div className="flex items-center justify-between gap-3 pb-3 border-b border-slate-100 mb-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Question Sequence Number */}
-          <span
-            className={`w-7 h-7 rounded-lg font-mono font-bold text-xs flex items-center justify-center shrink-0 ${
-              question.isSimilarVariant
-                ? "bg-amber-600 text-white"
-                : "bg-slate-900 text-white"
-            }`}
-          >
-            {question.isSimilarVariant ? "練" : index + 1}
-          </span>
-
-          {/* Similar Question Indicator Tag */}
-          {question.isSimilarVariant && (
-            <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1 shadow-2xs">
-              <Sparkles className="w-3 h-3 text-amber-600" />
-              AI 舉一反三練習題
-            </span>
-          )}
-
-          {/* Subject Badge */}
-          <span
-            className={`px-2.5 py-0.5 rounded-md text-xs font-bold border ${getSubjectColor(
-              question.subject
-            )}`}
-          >
-            {question.subject || "綜合"}
-          </span>
-
-          {/* Book / Volume Badge (冊別) */}
-          {question.gradeLevel && (
+      <div className="flex flex-col gap-2 pb-3 border-b border-slate-100 mb-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap min-w-0 flex-1">
+            {/* Question Sequence Number */}
             <span
-              className="px-2 py-0.5 rounded-md text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/80 flex items-center gap-1 shadow-2xs"
-              title="教材冊別與年級"
+              className={`w-7 h-7 rounded-lg font-mono font-bold text-xs flex items-center justify-center shrink-0 ${
+                question.isSimilarVariant
+                  ? "bg-amber-600 text-white"
+                  : "bg-slate-900 text-white"
+              }`}
             >
-              <GraduationCap className="w-3 h-3 text-indigo-600 shrink-0" />
-              {question.gradeLevel}
+              {question.isSimilarVariant ? "練" : index + 1}
             </span>
-          )}
 
-          {/* Chapter Badge (章節) */}
-          {question.chapter && (
+            {/* Similar Question Indicator Tag */}
+            {question.isSimilarVariant && (
+              <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center gap-1 shadow-2xs whitespace-nowrap">
+                <Sparkles className="w-3 h-3 text-amber-600" />
+                AI 舉一反三練習題
+              </span>
+            )}
+
+            {/* Subject Badge */}
             <span
-              className="px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200/80 flex items-center gap-1 shadow-2xs"
-              title="所屬章節名稱"
+              className={`px-2.5 py-0.5 rounded-md text-xs font-bold border whitespace-nowrap ${getSubjectColor(
+                question.subject
+              )}`}
             >
-              <BookOpen className="w-3 h-3 text-amber-600 shrink-0" />
-              {question.chapter}
+              {question.subject || "綜合"}
             </span>
-          )}
 
-          {/* Unit Badge */}
-          <span
-            className="px-2.5 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-700 flex items-center gap-1 border border-slate-200/60"
-            title="所屬小節或主題"
-          >
-            <Tag className="w-3 h-3 text-slate-400" />
-            {question.unit || "未分類單元"}
-          </span>
-
-          {question.questionType && (
-            <span className="text-[11px] text-slate-500 font-sans">
-              [{question.questionType}]
-            </span>
-          )}
-
-          {/* Variation Point if this is a variant */}
-          {question.variationPoint && (
-            <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-medium">
-              💡 {question.variationPoint}
-            </span>
-          )}
-        </div>
-
-        {/* Action Controls */}
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            disabled={index === 0}
-            onClick={() => onMoveUp(index)}
-            className="p-1.5 text-slate-400 hover:text-slate-700 disabled:opacity-30 rounded-lg hover:bg-slate-100 transition"
-            title="向上移動題目"
-          >
-            <ChevronUp className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            disabled={index === totalCount - 1}
-            onClick={() => onMoveDown(index)}
-            className="p-1.5 text-slate-400 hover:text-slate-700 disabled:opacity-30 rounded-lg hover:bg-slate-100 transition"
-            title="向下移動題目"
-          >
-            <ChevronDown className="w-4 h-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setIsEditing(!isEditing)}
-            className={`p-1.5 rounded-lg transition ${
-              isEditing ? "bg-sky-100 text-sky-700" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-            }`}
-            title="編輯題目文字與詳解"
-          >
-            <Edit3 className="w-4 h-4" />
-          </button>
-          {isConfirmingDelete ? (
-            <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded-lg text-xs animate-in fade-in">
-              <span className="text-rose-700 font-bold text-[11px] whitespace-nowrap">確定刪除此題？</span>
-              <button
-                type="button"
-                onClick={() => {
-                  onDelete(question.id);
-                  setIsConfirmingDelete(false);
-                }}
-                className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[11px] font-bold shadow-2xs transition"
+            {/* Book / Volume Badge (冊別) */}
+            {question.gradeLevel && (
+              <span
+                className="px-2 py-0.5 rounded-md text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200/80 flex items-center gap-1 shadow-2xs whitespace-nowrap max-w-full"
+                title="教材冊別與年級"
               >
-                刪除
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsConfirmingDelete(false)}
-                className="px-1.5 py-0.5 text-slate-500 hover:text-slate-700 text-[11px] font-medium"
+                <GraduationCap className="w-3 h-3 text-indigo-600 shrink-0" />
+                <span className="truncate">{question.gradeLevel}</span>
+              </span>
+            )}
+
+            {/* Chapter Badge (章節) */}
+            {question.chapter && (
+              <span
+                className="px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200/80 flex items-center gap-1 shadow-2xs whitespace-nowrap max-w-full"
+                title="所屬章節名稱"
               >
-                取消
-              </button>
-            </div>
-          ) : (
+                <BookOpen className="w-3 h-3 text-amber-600 shrink-0" />
+                <span className="truncate">{question.chapter}</span>
+              </span>
+            )}
+
+            {/* Unit Badge */}
+            <span
+              className="px-2.5 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-700 flex items-center gap-1 border border-slate-200/60 whitespace-nowrap max-w-full"
+              title="所屬小節或主題"
+            >
+              <Tag className="w-3 h-3 text-slate-400 shrink-0" />
+              <span className="truncate">{question.unit || "未分類單元"}</span>
+            </span>
+
+            {question.questionType && (
+              <span className="text-[11px] text-slate-500 font-sans whitespace-nowrap">
+                [{question.questionType}]
+              </span>
+            )}
+
+            {/* Variation Point if this is a variant */}
+            {question.variationPoint && (
+              <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-medium whitespace-nowrap max-w-full truncate">
+                💡 {question.variationPoint}
+              </span>
+            )}
+          </div>
+
+          {/* Action Controls */}
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button
+              type="button"
+              disabled={index === 0}
+              onClick={() => onMoveUp(index)}
+              className="p-1.5 text-slate-400 hover:text-slate-700 disabled:opacity-30 rounded-lg hover:bg-slate-100 transition"
+              title="向上移動題目"
+            >
+              <ChevronUp className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              disabled={index === totalCount - 1}
+              onClick={() => onMoveDown(index)}
+              className="p-1.5 text-slate-400 hover:text-slate-700 disabled:opacity-30 rounded-lg hover:bg-slate-100 transition"
+              title="向下移動題目"
+            >
+              <ChevronDown className="w-4 h-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsEditing(!isEditing)}
+              className={`p-1.5 rounded-lg transition ${
+                isEditing ? "bg-sky-100 text-sky-700" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
+              }`}
+              title="編輯題目文字與詳解"
+            >
+              <Edit3 className="w-4 h-4" />
+            </button>
             <button
               type="button"
               onClick={() => setIsConfirmingDelete(true)}
-              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
+              className={`p-1.5 rounded-lg transition ${
+                isConfirmingDelete
+                  ? "bg-rose-100 text-rose-600"
+                  : "text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+              }`}
               title="刪除題目"
             >
               <Trash2 className="w-4 h-4" />
             </button>
-          )}
+          </div>
         </div>
+
+        {isConfirmingDelete && (
+          <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 px-3 py-2 rounded-xl">
+            <span className="flex-1 text-rose-800 text-xs font-semibold">
+              確定刪除此題？
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsConfirmingDelete(false)}
+              className="px-2.5 py-1 text-slate-600 hover:text-slate-800 text-[11px] font-medium rounded-lg hover:bg-white/80"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                onDelete(question.id);
+                setIsConfirmingDelete(false);
+              }}
+              className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-[11px] font-bold shadow-2xs transition"
+            >
+              刪除
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Hidden file input for replacing or adding this question's image */}
