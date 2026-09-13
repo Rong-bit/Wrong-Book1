@@ -7,9 +7,6 @@ import {
 } from "../utils/membership";
 import { MEMBER_EMAILS } from "../data/memberEmails";
 
-const GITHUB_EMAILS_EDIT_URL =
-  "https://github.com/Rong-bit/Wrong-Book1/edit/main/src/data/memberEmails.ts";
-
 interface MembershipPanelProps {
   membership: MembershipState;
   onChangeRole: (role: MembershipState["role"]) => void;
@@ -119,14 +116,6 @@ export const MembershipPanel: React.FC<MembershipPanelProps> = ({
           <p className="text-[11px] text-slate-600 leading-relaxed">
             先在 GitHub 登記 Email（目前名單 {registeredCount} 筆），再於下方輸入同一組信箱核對。未核對前仍視為未解鎖。
           </p>
-          <a
-            href={GITHUB_EMAILS_EDIT_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="text-[11px] font-semibold text-sky-800 underline underline-offset-2"
-          >
-            在 GitHub 編輯會員名單
-          </a>
           <label className="block text-xs font-semibold text-slate-600" htmlFor="member-email">
             已登記的會員 Email
           </label>
