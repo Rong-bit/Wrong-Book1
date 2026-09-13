@@ -99,10 +99,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
 
   // Compute responsive display dimensions so the image always comfortably fills the workspace
   const displayDimensions = useMemo(() => {
-    const padX = 4;
-    const padY = 4;
-    const maxW = Math.max(80, (containerSize.width || 880) - padX);
-    const maxH = Math.max(80, (containerSize.height || 420) - padY);
+    // Leave room for the 44px crop handles so left/right pins stay on-screen.
+    const handleGutter = 44;
+    const maxW = Math.max(80, (containerSize.width || 880) - handleGutter);
+    const maxH = Math.max(80, (containerSize.height || 420) - handleGutter);
 
     const natW = naturalDimensions.width || 800;
     const natH = naturalDimensions.height || 600;
@@ -114,11 +114,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     let h: number;
 
     if (imgAspect > containerAspect) {
-      // Wider image: fit width
       w = maxW;
       h = maxW / imgAspect;
     } else {
-      // Taller image: fit height
       h = maxH;
       w = maxH * imgAspect;
     }
@@ -126,15 +124,25 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     w *= zoomScale;
     h *= zoomScale;
 
-    // Keep the box on the image aspect ratio. Independent min-width/min-height
-    // (e.g. forcing 120px tall on a wide strip) adds letterbox, and the crop
-    // overlay then no longer maps 1:1 onto pixels.
     const minSide = 64;
     const shortest = Math.min(w, h);
     if (shortest > 0 && shortest < minSide) {
       const bump = minSide / shortest;
-      w *= bump;
-      h *= bump;
+      const bumpedW = w * bump;
+      const bumpedH = h * bump;
+      if (bumpedW <= maxW * Math.max(1, zoomScale) && bumpedH <= maxH * Math.max(1, zoomScale)) {
+        w = bumpedW;
+        h = bumpedH;
+      }
+    }
+
+    if (w > maxW * Math.max(1, zoomScale) || h > maxH * Math.max(1, zoomScale)) {
+      const fit = Math.min(
+        (maxW * Math.max(1, zoomScale)) / w,
+        (maxH * Math.max(1, zoomScale)) / h
+      );
+      w *= fit;
+      h *= fit;
     }
 
     return {
@@ -1052,7 +1060,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         {/* Interactive Workspace Area */}
         <div
           ref={containerRef}
-          className="relative flex-1 bg-slate-900 flex items-center justify-center px-9 py-8 sm:p-6 overflow-hidden select-none min-h-0"
+          className="relative flex-1 bg-slate-900 flex items-center justify-center px-9 py-8 sm:p-6 overflow-auto select-none min-h-0"
         >
           {/* Working Image and Interactive Overlay */}
           <div
