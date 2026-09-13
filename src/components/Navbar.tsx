@@ -3,16 +3,18 @@ import {
   BookOpen,
   FileDown,
   Key,
-  Layers,
   FileText,
   Grid,
-  CheckCircle2,
-  Sparkles,
   HardDrive,
+  Camera,
 } from "lucide-react";
 import { ViewLayout } from "../types";
 
+export type AppPage = "home" | "notebook";
+
 interface NavbarProps {
+  currentPage: AppPage;
+  onPageChange: (page: AppPage) => void;
   currentLayout: ViewLayout;
   onLayoutChange: (layout: ViewLayout) => void;
   onOpenByok: () => void;
@@ -21,12 +23,11 @@ interface NavbarProps {
   hasCustomKey: boolean;
   maskedCustomKey?: string;
   questionCount: number;
-  selectedFilter: string;
-  onFilterChange: (subject: string) => void;
-  availableSubjects: string[];
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
+  currentPage,
+  onPageChange,
   currentLayout,
   onLayoutChange,
   onOpenByok,
@@ -35,15 +36,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   hasCustomKey,
   maskedCustomKey,
   questionCount,
-  selectedFilter,
-  onFilterChange,
-  availableSubjects,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-2xs no-print w-full overflow-hidden">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-2 w-full min-w-0">
         {/* Logo & Title */}
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <button
+          type="button"
+          onClick={() => onPageChange("home")}
+          className="flex items-center gap-2 sm:gap-3 min-w-0 text-left"
+          title="回到擷取首頁"
+        >
           <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-sky-500/10 shrink-0">
             <BookOpen className="w-5 h-5" />
           </div>
@@ -57,57 +60,91 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </div>
             <p className="text-[11px] text-slate-500 hidden md:block">
-              Ctrl+V / 手機拍照即錄 · AI 自動辨識單元 · 高清 B5/A4 考卷導出
+              {currentPage === "home"
+                ? "拍照或貼上截圖，完成後進入錯題本"
+                : "錯題精讀 · AI 詳解 · 高清 B5/A4 匯出"}
             </p>
           </div>
-        </div>
+        </button>
 
-        {/* Center: Layout View Switcher */}
-        <div className="hidden lg:flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/60">
+        {/* Page Switcher */}
+        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/60 shrink-0">
           <button
-            id="view-notebook-btn"
             type="button"
-            onClick={() => onLayoutChange("notebook")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              currentLayout === "notebook"
+            onClick={() => onPageChange("home")}
+            className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              currentPage === "home"
+                ? "bg-white text-slate-900 shadow-xs"
+                : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            <Camera className="w-3.5 h-3.5 text-sky-600" />
+            <span>擷取</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onPageChange("notebook")}
+            className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              currentPage === "notebook"
                 ? "bg-white text-slate-900 shadow-xs"
                 : "text-slate-600 hover:text-slate-900"
             }`}
           >
             <BookOpen className="w-3.5 h-3.5 text-amber-600" />
-            錯題精讀本
-          </button>
-          <button
-            id="view-paper-btn"
-            type="button"
-            onClick={() => onLayoutChange("paper")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              currentLayout === "paper"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5 text-indigo-600" />
-            自組試卷排版
-          </button>
-          <button
-            id="view-grid-btn"
-            type="button"
-            onClick={() => onLayoutChange("grid")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              currentLayout === "grid"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <Grid className="w-3.5 h-3.5 text-sky-600" />
-            卡片總覽
+            <span>錯題本</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-[10px] text-slate-600">
+              {questionCount}
+            </span>
           </button>
         </div>
 
+        {/* Center: Layout View Switcher (notebook only) */}
+        {currentPage === "notebook" && (
+          <div className="hidden lg:flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/60">
+            <button
+              id="view-notebook-btn"
+              type="button"
+              onClick={() => onLayoutChange("notebook")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                currentLayout === "notebook"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5 text-amber-600" />
+              錯題精讀本
+            </button>
+            <button
+              id="view-paper-btn"
+              type="button"
+              onClick={() => onLayoutChange("paper")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                currentLayout === "paper"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5 text-indigo-600" />
+              自組試卷排版
+            </button>
+            <button
+              id="view-grid-btn"
+              type="button"
+              onClick={() => onLayoutChange("grid")}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                currentLayout === "grid"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              }`}
+            >
+              <Grid className="w-3.5 h-3.5 text-sky-600" />
+              卡片總覽
+            </button>
+          </div>
+        )}
+
         {/* Right Actions */}
         <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-          {/* BYOK Button */}
           <button
             id="open-byok-btn"
             type="button"
@@ -137,35 +174,38 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </button>
 
-          {/* Backup / Restore Button */}
-          <button
-            id="open-backup-btn"
-            type="button"
-            onClick={onOpenBackup}
-            className="p-2 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition flex items-center gap-1.5 shadow-2xs"
-            title="題庫備份與還原 (下載 / 匯入 .json 檔案)"
-          >
-            <HardDrive className="w-3.5 h-3.5 text-sky-600" />
-            <span className="hidden sm:inline">檔案備份</span>
-          </button>
+          {currentPage === "notebook" && (
+            <>
+              <button
+                id="open-backup-btn"
+                type="button"
+                onClick={onOpenBackup}
+                className="p-2 sm:px-3 sm:py-1.5 rounded-xl text-xs font-semibold bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 transition flex items-center gap-1.5 shadow-2xs"
+                title="題庫備份與還原 (下載 / 匯入 .json 檔案)"
+              >
+                <HardDrive className="w-3.5 h-3.5 text-sky-600" />
+                <span className="hidden sm:inline">檔案備份</span>
+              </button>
 
-          {/* Export PDF Button */}
-          <button
-            id="open-pdf-export-btn"
-            type="button"
-            disabled={questionCount === 0}
-            onClick={onOpenExportPdf}
-            className="px-2.5 sm:px-4 py-2 rounded-xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 active:scale-95 transition shadow-xs flex items-center gap-1.5 sm:gap-2 disabled:opacity-40"
-          >
-            <FileDown className="w-4 h-4 text-sky-400" />
-            <span className="sm:hidden">匯出</span>
-            <span className="hidden sm:inline">匯出考卷 (B5/A4)</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-slate-800 text-[10px] text-sky-300">
-              {questionCount}
-            </span>
-          </button>
+              <button
+                id="open-pdf-export-btn"
+                type="button"
+                disabled={questionCount === 0}
+                onClick={onOpenExportPdf}
+                className="px-2.5 sm:px-4 py-2 rounded-xl text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 active:scale-95 transition shadow-xs flex items-center gap-1.5 sm:gap-2 disabled:opacity-40"
+              >
+                <FileDown className="w-4 h-4 text-sky-400" />
+                <span className="sm:hidden">匯出</span>
+                <span className="hidden sm:inline">匯出考卷 (B5/A4)</span>
+                <span className="px-1.5 py-0.2 rounded-full bg-slate-800 text-[10px] text-sky-300">
+                  {questionCount}
+                </span>
+              </button>
+            </>
+          )}
         </div>
       </div>
     </header>
   );
 };
+

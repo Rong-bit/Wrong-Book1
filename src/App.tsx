@@ -19,7 +19,7 @@ import {
   getStoredApiKey,
   getMaskedKey,
 } from "./services/aiService";
-import { Navbar } from "./components/Navbar";
+import { Navbar, AppPage } from "./components/Navbar";
 import { CaptureZone } from "./components/CaptureZone";
 import { QuestionCard } from "./components/QuestionCard";
 import { ImageControlModal } from "./components/ImageControlModal";
@@ -91,6 +91,7 @@ export default function App() {
   });
 
   const [layout, setLayout] = useState<ViewLayout>("notebook");
+  const [appPage, setAppPage] = useState<AppPage>("home");
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<string>("全部");
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [analyzingMessage, setAnalyzingMessage] = useState<string>("");
@@ -181,6 +182,7 @@ export default function App() {
 
       // Put at the beginning
       setQuestions((prev) => [newQuestionPlaceholder, ...prev]);
+      setAppPage("notebook");
 
       try {
         const result = await analyzeQuestionImage(base64Data, subjectHint);
@@ -550,6 +552,7 @@ export default function App() {
 
   const handleLoadSamples = () => {
     setQuestions(initialSampleQuestions);
+    setAppPage("notebook");
   };
 
   const handleClearAll = () => {
@@ -620,6 +623,8 @@ export default function App() {
     <div className="min-h-dvh w-full max-w-full min-w-0 bg-slate-50 flex flex-col selection:bg-sky-100 selection:text-sky-900">
       {/* Navigation Bar */}
       <Navbar
+        currentPage={appPage}
+        onPageChange={setAppPage}
         currentLayout={layout}
         onLayoutChange={setLayout}
         onOpenByok={() => setIsByokOpen(true)}
@@ -627,10 +632,7 @@ export default function App() {
         onOpenBackup={() => setIsBackupModalOpen(true)}
         hasCustomKey={hasCustomKey}
         maskedCustomKey={getMaskedKey(getStoredApiKey())}
-        questionCount={filteredQuestions.length}
-        selectedFilter={selectedSubjectFilter}
-        onFilterChange={setSelectedSubjectFilter}
-        availableSubjects={availableSubjects}
+        questionCount={questions.length}
       />
 
       {/* Floating Paste Notification Toast */}
@@ -643,18 +645,20 @@ export default function App() {
 
       {/* Main Container */}
       <main className="flex-1 w-full min-w-0 max-w-full md:max-w-7xl mx-auto px-3 md:px-6 py-4 sm:py-6">
-        {/* Top Capture Area */}
-        <CaptureZone
-          onImageSelected={handleImageSelected}
-          onLoadSamples={handleLoadSamples}
-          onOpenByok={() => setIsByokOpen(true)}
-          hasCustomKey={hasCustomKey}
-          isAnalyzing={isAnalyzing}
-          questionCount={questions.length}
-          autoCalibrate={autoCalibrateOnCapture}
-          onToggleAutoCalibrate={handleToggleAutoCalibrate}
-        />
-
+        {appPage === "home" ? (
+          <CaptureZone
+            onImageSelected={handleImageSelected}
+            onLoadSamples={handleLoadSamples}
+            onOpenByok={() => setIsByokOpen(true)}
+            onOpenNotebook={() => setAppPage("notebook")}
+            hasCustomKey={hasCustomKey}
+            isAnalyzing={isAnalyzing}
+            questionCount={questions.length}
+            autoCalibrate={autoCalibrateOnCapture}
+            onToggleAutoCalibrate={handleToggleAutoCalibrate}
+          />
+        ) : (
+          <>
         {/* Status Bar / Filter & Stats */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-6 bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs">
           {/* Subject Filter Chips */}
@@ -695,6 +699,15 @@ export default function App() {
 
           {/* Quick Actions */}
           <div className="flex items-center gap-2 self-end sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setAppPage("home")}
+              className="px-2.5 py-1 text-xs font-semibold text-sky-700 hover:text-sky-900 hover:bg-sky-50 rounded-lg transition flex items-center gap-1"
+              title="回到擷取首頁拍照或貼上新題"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              再拍一題
+            </button>
             {questions.length > 0 && (
               <>
                 <button
@@ -766,9 +779,18 @@ export default function App() {
                 : `目前沒有「${selectedSubjectFilter}」科目的錯題`}
             </h3>
             <p className="text-xs text-slate-500 max-w-md mx-auto mb-5 leading-relaxed">
-              按下電腦鍵盤 <kbd className="font-mono font-bold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">Ctrl + V</kbd> 即可直接貼上截圖，或使用手機相機拍照、選取檔案快速匯入。
+              回到擷取首頁拍照、選圖，或在頁面任意處按下{" "}
+              <kbd className="font-mono font-bold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">Ctrl + V</kbd>{" "}
+              貼上截圖。
             </p>
             <div className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setAppPage("home")}
+                className="px-4 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-xl transition"
+              >
+                去拍照擷取
+              </button>
               <button
                 type="button"
                 onClick={handleLoadSamples}
@@ -823,6 +845,8 @@ export default function App() {
               />
             ))}
           </div>
+        )}
+          </>
         )}
       </main>
 

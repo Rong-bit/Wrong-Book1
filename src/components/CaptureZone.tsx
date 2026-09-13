@@ -16,6 +16,7 @@ interface CaptureZoneProps {
   onImageSelected: (base64: string, subjectHint?: string) => void;
   onLoadSamples: () => void;
   onOpenByok?: () => void;
+  onOpenNotebook?: () => void;
   hasCustomKey?: boolean;
   isAnalyzing: boolean;
   questionCount: number;
@@ -27,6 +28,7 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
   onImageSelected,
   onLoadSamples,
   onOpenByok,
+  onOpenNotebook,
   hasCustomKey = false,
   isAnalyzing,
   questionCount,
@@ -133,8 +135,11 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
             </span>
           </div>
           <h2 className="text-xl font-extrabold text-slate-900 mt-1 tracking-tight">
-            錯題擷取與智慧題本
+            錯題擷取
           </h2>
+          <p className="text-xs text-slate-500 mt-1">
+            拍照或貼上後會先校正題目，再進入錯題本查看解析。
+          </p>
         </div>
 
         {/* Optional Subject Hint Tag Selector */}
@@ -241,6 +246,16 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
             >
               <BookOpen className="w-4 h-4" />
               載入示範錯題
+            </button>
+          )}
+          {questionCount > 0 && onOpenNotebook && (
+            <button
+              type="button"
+              onClick={onOpenNotebook}
+              className="px-3.5 py-2.5 rounded-xl text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 active:scale-95 border border-amber-200 transition flex items-center gap-1.5"
+            >
+              <BookOpen className="w-4 h-4" />
+              進入錯題本 ({questionCount})
             </button>
           )}
         </div>
