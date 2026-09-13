@@ -59,7 +59,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   onClose,
   onConfirm,
   onSkip,
-  title = "考卷拍照智慧校正與裁切",
+  title = "考卷校正",
   isExistingQuestion = false,
   initialMode = "perspective",
   onReplaceTargetImage,
@@ -96,10 +96,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
 
   // Compute responsive display dimensions so the image always comfortably fills the workspace
   const displayDimensions = useMemo(() => {
-    const padX = 36;
-    const padY = 36;
-    const maxW = Math.max(260, (containerSize.width || 880) - padX);
-    const maxH = Math.max(140, (containerSize.height || 420) - padY);
+    const padX = 8;
+    const padY = 8;
+    const maxW = Math.max(80, (containerSize.width || 880) - padX);
+    const maxH = Math.max(80, (containerSize.height || 420) - padY);
 
     const natW = naturalDimensions.width || 800;
     const natH = naturalDimensions.height || 600;
@@ -752,12 +752,12 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   };
 
   return (
-    <div className="app-screen-overlay bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="app-screen-sheet bg-white rounded-2xl shadow-2xl max-w-5xl sm:h-[min(860px,100%)] sm:max-h-[860px] sm:self-center border border-slate-200">
+    <div className="app-screen-overlay app-screen-overlay-photo bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="app-screen-sheet bg-white rounded-none sm:rounded-2xl shadow-2xl max-w-5xl h-full sm:h-[min(860px,100%)] sm:max-h-[860px] sm:self-center border-0 sm:border border-slate-200">
         {/* Modal Header */}
-        <div className="px-4 sm:px-5 py-3 border-b border-slate-200 flex items-center justify-between bg-white shrink-0 gap-2">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-sky-600 text-white flex items-center justify-center shadow-xs shrink-0">
+        <div className="px-2.5 sm:px-5 py-2 sm:py-3 border-b border-slate-200 flex items-center justify-between bg-white shrink-0 gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="hidden sm:flex w-8 h-8 rounded-xl bg-sky-600 text-white items-center justify-center shadow-xs shrink-0">
               <SlidersHorizontal className="w-4 h-4" />
             </div>
             <div className="min-w-0">
@@ -769,7 +769,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                   按 Enter 快速進入下一步
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 hidden sm:block truncate">
+              <p className="text-[11px] text-slate-500 hidden md:block truncate">
                 支援四點透視拉正斜拍試卷，並自由框選裁切精準保留題目內容
               </p>
             </div>
@@ -810,7 +810,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 type="button"
                 onClick={() => onSkip(imageSrc)}
                 disabled={isProcessing}
-                className="hidden sm:inline-flex px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
+                className="inline-flex px-2 sm:px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 transition"
                 title="跳過校正，直接送出原圖進行 AI 辨識"
               >
                 略過校正
@@ -822,7 +822,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               type="button"
               onClick={() => onConfirm(currentImage)}
               disabled={isProcessing}
-              className="px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs font-extrabold text-white bg-sky-600 hover:bg-sky-500 active:scale-95 transition shadow-sm flex items-center gap-1.5"
+              className="hidden sm:inline-flex px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs font-extrabold text-white bg-sky-600 hover:bg-sky-500 active:scale-95 transition shadow-sm items-center gap-1.5"
               title="完成校正並進行下一步"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
@@ -842,12 +842,12 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         </div>
 
         {/* Secondary Tool Bar */}
-        <div className="px-5 py-2.5 bg-white border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs shrink-0">
+        <div className="px-2 sm:px-5 py-1.5 sm:py-2.5 bg-white border-b border-slate-100 flex items-center gap-1.5 sm:gap-3 text-xs shrink-0 overflow-x-auto">
           {/* Left: Mode-specific tips or aspect ratio buttons */}
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             {mode === "perspective" ? (
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 text-sky-700 bg-sky-50 px-2 py-1 rounded-md font-medium text-[11px]">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <span className="hidden sm:inline-flex items-center gap-1 text-sky-700 bg-sky-50 px-2 py-1 rounded-md font-medium text-[11px]">
                   <Info className="w-3.5 h-3.5" />
                   拖曳四角圓點對齊考卷四個角落，即可將歪斜拍照自動展平拉正
                 </span>
@@ -861,14 +861,14 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                       { x: 0.05, y: 0.95 },
                     ])
                   }
-                  className="px-2 py-1 text-slate-600 hover:bg-slate-100 rounded border border-slate-200 text-[11px] transition"
+                  className="px-2 py-1 text-slate-600 hover:bg-slate-100 rounded border border-slate-200 text-[11px] transition whitespace-nowrap"
                 >
                   重置四角
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-slate-500 font-medium mr-1 text-[11px]">裁切比例：</span>
+              <div className="flex items-center gap-1 sm:gap-1.5 flex-nowrap">
+                <span className="hidden sm:inline text-slate-500 font-medium mr-1 text-[11px]">裁切比例：</span>
                 {(
                   [
                     { id: "free", label: "自由" },
@@ -896,18 +896,19 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           </div>
 
           {/* Right: Shadow Removal, Zoom, Rotate and Undo Tools */}
-          <div className="flex items-center gap-1.5 ml-auto flex-wrap">
+          <div className="flex items-center gap-1 sm:gap-1.5 ml-auto shrink-0">
             {/* Shadow Removal / Paper Whitening Quick Actions */}
             <div className="flex items-center gap-0.5 bg-amber-50/90 p-0.5 rounded-lg border border-amber-200 shadow-2xs">
               <button
                 type="button"
                 onClick={() => handleRemoveShadows("pure_bw")}
                 disabled={isProcessing}
-                className="px-2.5 py-1 rounded-md text-[11px] font-bold text-amber-950 bg-amber-200/80 hover:bg-amber-300 active:scale-95 transition flex items-center gap-1.5 cursor-pointer"
+                className="px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-bold text-amber-950 bg-amber-200/80 hover:bg-amber-300 active:scale-95 transition flex items-center gap-1 sm:gap-1.5 cursor-pointer whitespace-nowrap"
                 title="去除所有陰影、黃光與暗角，將紙張底色轉為 100% 純白，文字強化為深黑"
               >
                 <Wand2 className="w-3.5 h-3.5 text-amber-700" />
-                <span>去除陰影 (純白底黑字)</span>
+                <span className="sm:hidden">去陰影</span>
+                <span className="hidden sm:inline">去除陰影 (純白底黑字)</span>
               </button>
 
               <div className="relative group">
@@ -1008,7 +1009,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               title="復原上一步"
             >
               <Undo2 className="w-3.5 h-3.5" />
-              <span>復原</span>
+              <span className="hidden sm:inline">復原</span>
             </button>
             <button
               type="button"
@@ -1018,7 +1019,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               title="重置回原圖"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span>重置</span>
+              <span className="hidden sm:inline">重置</span>
             </button>
           </div>
         </div>
@@ -1026,7 +1027,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         {/* Interactive Workspace Area */}
         <div
           ref={containerRef}
-          className="relative flex-1 bg-slate-900 flex items-center justify-center p-3 sm:p-4 overflow-hidden select-none min-h-[160px]"
+          className="relative flex-1 bg-slate-900 flex items-center justify-center p-0 sm:p-2 overflow-hidden select-none min-h-0"
         >
           {/* Working Image and Interactive Overlay */}
           <div
@@ -1034,7 +1035,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               width: `${displayDimensions.width}px`,
               height: `${displayDimensions.height}px`,
             }}
-            className="relative shrink-0 shadow-2xl rounded-lg overflow-visible bg-white border border-slate-700/60"
+            className="relative shrink-0 shadow-2xl rounded-none sm:rounded-lg overflow-visible bg-white sm:border border-slate-700/60"
           >
             {imageLoadError ? (
               <div className="w-full h-full min-h-[260px] flex flex-col items-center justify-center p-6 text-center text-slate-700 bg-slate-50 rounded-lg">
@@ -1116,8 +1117,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         </div>
 
         {/* Modal Footer / Action Bar */}
-        <div className="app-safe-footer px-4 sm:px-6 pt-3 bg-slate-50 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0 z-10">
-          <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
+        <div className="app-safe-footer px-2 sm:px-6 pt-2 sm:pt-3 bg-slate-50 border-t border-slate-200 flex flex-row items-center justify-between gap-1.5 sm:gap-3 shrink-0 z-10">
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 sm:flex-none sm:w-auto">
             {/* Mode Actions & Step progression */}
             {mode === "perspective" ? (
               <>
@@ -1125,21 +1126,22 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                   type="button"
                   onClick={handleApplyPerspective}
                   disabled={isProcessing}
-                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:scale-95 transition shadow-xs flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className="flex-1 sm:flex-none px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:scale-95 transition shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 disabled:opacity-50"
                   title="執行四點透視展平"
                 >
                   <Maximize2 className="w-3.5 h-3.5" />
-                  套用透視拉正
+                  <span className="sm:hidden">套用拉正</span>
+                  <span className="hidden sm:inline">套用透視拉正</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setMode("crop")}
-                  className="px-3.5 py-2 rounded-xl text-xs font-semibold text-sky-800 bg-sky-50 hover:bg-sky-100 active:scale-95 transition border border-sky-200/80 flex items-center gap-1"
+                  className="px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-semibold text-sky-800 bg-sky-50 hover:bg-sky-100 active:scale-95 transition border border-sky-200/80 flex items-center gap-1"
                   title="切換至步驟 2 框選題目"
                 >
                   <Crop className="w-3.5 h-3.5 text-sky-600" />
-                  下一步：框選裁切
-                  <ChevronRight className="w-3.5 h-3.5" />
+                  框選裁切
+                  <ChevronRight className="w-3.5 h-3.5 hidden sm:block" />
                 </button>
               </>
             ) : (
@@ -1148,34 +1150,23 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                   type="button"
                   onClick={handleApplyCrop}
                   disabled={isProcessing}
-                  className="px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition shadow-xs flex items-center justify-center gap-1.5 disabled:opacity-50"
+                  className="flex-1 sm:flex-none px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 disabled:opacity-50"
                   title="裁切保留所選區域"
                 >
                   <Crop className="w-3.5 h-3.5" />
-                  套用框選裁切
+                  <span className="sm:hidden">套用裁切</span>
+                  <span className="hidden sm:inline">套用框選裁切</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setMode("perspective")}
-                  className="px-3 py-2 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-200/70 active:scale-95 transition flex items-center gap-1"
+                  className="px-2 sm:px-3 py-2 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-200/70 active:scale-95 transition flex items-center gap-1"
                   title="回到步驟 1 透視拉正"
                 >
-                  ← 上一步：透視拉正
+                  ← 拉正
                 </button>
               </>
             )}
-
-            {/* Quick Pure White B&W Button in footer */}
-            <button
-              type="button"
-              onClick={() => handleRemoveShadows("pure_bw")}
-              disabled={isProcessing}
-              className="px-3 py-2 rounded-xl text-xs font-bold text-amber-950 bg-amber-100 hover:bg-amber-200 active:scale-95 transition border border-amber-300/90 flex items-center gap-1.5 shadow-2xs cursor-pointer"
-              title="消除手機陰影與檯燈光影，轉換為純白底黑字"
-            >
-              <Wand2 className="w-3.5 h-3.5 text-amber-700" />
-              <span>去除陰影 (白底黑字)</span>
-            </button>
 
             {history.length > 0 && (
               <span className="text-[11px] text-slate-500 font-medium hidden md:inline ml-1">
@@ -1184,20 +1175,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end flex-wrap">
-            {/* Optional Skip directly to AI button if opened from new capture */}
-            {onSkip && !isExistingQuestion && (
-              <button
-                type="button"
-                onClick={() => onSkip(imageSrc)}
-                disabled={isProcessing}
-                className="px-3 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:bg-slate-200/80 transition"
-                title="略過影像拉正，直接進入 AI 題目辨識"
-              >
-                略過校正，直接下一步
-              </button>
-            )}
-
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
             {isExistingQuestion && (
               <button
                 type="button"
@@ -1214,14 +1192,11 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               type="button"
               onClick={() => onConfirm(currentImage)}
               disabled={isProcessing}
-              className="w-full sm:w-auto px-5 py-2.5 rounded-xl text-xs font-extrabold text-white bg-slate-900 hover:bg-slate-800 active:scale-95 transition shadow-md flex items-center justify-center gap-2 cursor-pointer"
+              className="sm:hidden px-3 py-2 rounded-xl text-xs font-extrabold text-white bg-slate-900 hover:bg-slate-800 active:scale-95 transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>{isExistingQuestion ? "下一步：儲存校正截圖" : "下一步：完成並開始 AI 分析"}</span>
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>{isExistingQuestion ? "儲存" : "開始分析"}</span>
               <ArrowRight className="w-3.5 h-3.5 text-sky-400" />
-              <span className="hidden md:inline-flex items-center text-[10px] text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700">
-                Enter ↵
-              </span>
             </button>
           </div>
         </div>
