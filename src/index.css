@@ -171,6 +171,16 @@
     background: #ffffff !important;
   }
 
+  /* Print CSS forces visibility:visible on all descendants, which would
+     un-hide KaTeX MathML and duplicate every formula onto extra pages. */
+  #printable-paper-container .katex-mathml {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    width: 0 !important;
+    overflow: hidden !important;
+  }
+
   .paper-sheet {
     margin: 0 auto !important;
     box-shadow: none !important;
@@ -180,12 +190,20 @@
     break-after: auto !important;
   }
 
-  /* Cornell sheets fill one page. Avoid break-inside:avoid + exact page
-     height, which makes Chrome overflow a blank extra page. */
   .paper-sheet-fit {
     overflow: hidden !important;
-    page-break-inside: auto !important;
-    break-inside: auto !important;
+    min-height: 0 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .paper-sheet-fit * {
+    min-height: 0 !important;
+  }
+
+  .paper-sheet-fit .overflow-y-auto,
+  .paper-sheet-fit .overflow-x-auto {
+    overflow: hidden !important;
   }
 
   /* Break before the next sheet so the last page never forces a blank one. */

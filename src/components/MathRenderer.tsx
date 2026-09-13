@@ -181,7 +181,7 @@ function renderKatexHtml(latex: string, displayMode: boolean): string {
     return katex.renderToString(cleanLatex, {
       displayMode,
       throwOnError: false,
-      output: "htmlAndMathml",
+      output: "html",
       strict: false,
     });
   } catch {
