@@ -3,7 +3,6 @@ import {
   Sparkles,
   BookOpen,
   Filter,
-  Plus,
   RefreshCw,
   Trash2,
   LayoutGrid,
@@ -127,7 +126,7 @@ export default function App() {
     showGrid: true,
     showCheckboxes: true,
     showReviewTrack: true,
-    includeAnswerSheet: true,
+    includeAnswerSheet: false,
     includeImages: false,
     leaveBlankHeight: 100,
     columns: 1,
@@ -718,15 +717,6 @@ export default function App() {
 
           {/* Quick Actions */}
           <div className="flex items-center gap-2 self-end sm:self-auto">
-            <button
-              type="button"
-              onClick={() => setAppPage("home")}
-              className="px-2.5 py-1 text-xs font-semibold text-sky-700 hover:text-sky-900 hover:bg-sky-50 rounded-lg transition flex items-center gap-1"
-              title="回到擷取首頁拍照或貼上新題"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              再拍一題
-            </button>
             {questions.length > 0 && (
               <>
                 <button
