@@ -323,6 +323,13 @@ export const FALLBACK_PERSPECTIVE_CORNERS: [Point, Point, Point, Point] = [
   { x: 0.06, y: 0.94 },
 ];
 
+export const FULL_FRAME_CORNERS: [Point, Point, Point, Point] = [
+  { x: 0, y: 0 },
+  { x: 1, y: 0 },
+  { x: 1, y: 1 },
+  { x: 0, y: 1 },
+];
+
 export function cropBoxFromCorners(corners: [Point, Point, Point, Point]): {
   x: number;
   y: number;
@@ -338,8 +345,8 @@ export function cropBoxFromCorners(corners: [Point, Point, Point, Point]): {
   return {
     x,
     y,
-    w: Math.max(0.08, x2 - x),
-    h: Math.max(0.08, y2 - y),
+    w: Math.min(1 - x, Math.max(0.05, x2 - x)),
+    h: Math.min(1 - y, Math.max(0.05, y2 - y)),
   };
 }
 

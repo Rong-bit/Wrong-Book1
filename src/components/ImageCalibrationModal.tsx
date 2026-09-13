@@ -37,6 +37,7 @@ import {
   ShadowRemovalMode,
   detectNearWhitePaperCorners,
   FALLBACK_PERSPECTIVE_CORNERS,
+  FULL_FRAME_CORNERS,
   cropBoxFromCorners,
 } from "../utils/imageUtils";
 
@@ -297,9 +298,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       pushHistory(corrected);
 
       // After straightening, default next step to free crop so user can immediately frame the exact question
+      // Flattened image edges ARE the paper corners the user just aligned.
       setMode("crop");
-      setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
-      setCorners(FALLBACK_PERSPECTIVE_CORNERS);
+      setCorners(FULL_FRAME_CORNERS);
+      setCropBox(cropBoxFromCorners(FULL_FRAME_CORNERS));
     } catch (err) {
       console.error("Apply perspective failed:", err);
     } finally {
