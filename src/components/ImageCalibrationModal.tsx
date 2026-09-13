@@ -37,6 +37,7 @@ import {
   ShadowRemovalMode,
   detectNearWhitePaperCorners,
   FALLBACK_PERSPECTIVE_CORNERS,
+  cropBoxFromCorners,
 } from "../utils/imageUtils";
 
 interface ImageCalibrationModalProps {
@@ -147,12 +148,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   );
 
   // Normalized crop rectangle: { x, y, width, height }, values in [0, 1]
-  const [cropBox, setCropBox] = useState<{ x: number; y: number; w: number; h: number }>({
-    x: 0.08,
-    y: 0.08,
-    w: 0.84,
-    h: 0.84,
-  });
+  const [cropBox, setCropBox] = useState<{ x: number; y: number; w: number; h: number }>(
+    cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS)
+  );
 
   // Dragging states
   const [activeDragCorner, setActiveDragCorner] = useState<number | null>(null);
@@ -178,7 +176,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setMode(initialMode || "perspective");
       setZoomScale(1);
       setCorners(FALLBACK_PERSPECTIVE_CORNERS);
-      setCropBox({ x: 0.08, y: 0.08, w: 0.84, h: 0.84 });
+      setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
 
       // Immediate pre-decode test
       const img = new Image();
@@ -194,9 +192,12 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           setIsImageReady(true);
           setImageLoadError(false);
           try {
-            setCorners(detectNearWhitePaperCorners(img));
+            const detected = detectNearWhitePaperCorners(img);
+            setCorners(detected);
+            setCropBox(cropBoxFromCorners(detected));
           } catch {
             setCorners(FALLBACK_PERSPECTIVE_CORNERS);
+            setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
           }
         }
       };
@@ -210,12 +211,16 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const applyDetectedPaperCorners = (img: HTMLImageElement | null) => {
     if (!img || !(img.naturalWidth || img.width)) {
       setCorners(FALLBACK_PERSPECTIVE_CORNERS);
+      setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
       return;
     }
     try {
-      setCorners(detectNearWhitePaperCorners(img));
+      const detected = detectNearWhitePaperCorners(img);
+      setCorners(detected);
+      setCropBox(cropBoxFromCorners(detected));
     } catch {
       setCorners(FALLBACK_PERSPECTIVE_CORNERS);
+      setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
     }
   };
 
@@ -248,10 +253,15 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     setCurrentImage(prev);
   };
 
+  const enterCropMode = () => {
+    setCropBox(cropBoxFromCorners(corners));
+    setMode("crop");
+  };
+
   const handleResetToOriginal = () => {
     setHistory([]);
     setCurrentImage(imageSrc);
-    setCropBox({ x: 0.08, y: 0.08, w: 0.84, h: 0.84 });
+    setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
   };
 
   // Rotate image by +/- 90 degrees
@@ -260,7 +270,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     try {
       const rotated = await rotateImage(currentImage, deg);
       pushHistory(rotated);
-      setCropBox({ x: 0.08, y: 0.08, w: 0.84, h: 0.84 });
+      setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
       const probe = new Image();
       probe.onload = () => applyDetectedPaperCorners(probe);
       probe.src = rotated;
@@ -288,13 +298,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
 
       // After straightening, default next step to free crop so user can immediately frame the exact question
       setMode("crop");
-      setCropBox({ x: 0.04, y: 0.04, w: 0.92, h: 0.92 });
-      setCorners([
-        { x: 0.05, y: 0.05 },
-        { x: 0.95, y: 0.05 },
-        { x: 0.95, y: 0.95 },
-        { x: 0.05, y: 0.95 },
-      ]);
+      setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
+      setCorners(FALLBACK_PERSPECTIVE_CORNERS);
     } catch (err) {
       console.error("Apply perspective failed:", err);
     } finally {
@@ -808,7 +813,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setMode("crop")}
+              onClick={enterCropMode}
               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
                 mode === "crop"
                   ? "bg-white text-emerald-700 shadow-xs"
@@ -1153,7 +1158,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setMode("crop")}
+                  onClick={enterCropMode}
                   className="px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-semibold text-sky-800 bg-sky-50 hover:bg-sky-100 active:scale-95 transition border border-sky-200/80 flex items-center gap-1"
                   title="切換至步驟 2 框選題目"
                 >

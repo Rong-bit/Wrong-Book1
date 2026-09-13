@@ -323,6 +323,26 @@ export const FALLBACK_PERSPECTIVE_CORNERS: [Point, Point, Point, Point] = [
   { x: 0.06, y: 0.94 },
 ];
 
+export function cropBoxFromCorners(corners: [Point, Point, Point, Point]): {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+} {
+  const xs = corners.map((p) => p.x);
+  const ys = corners.map((p) => p.y);
+  const x = Math.max(0, Math.min(...xs));
+  const y = Math.max(0, Math.min(...ys));
+  const x2 = Math.min(1, Math.max(...xs));
+  const y2 = Math.min(1, Math.max(...ys));
+  return {
+    x,
+    y,
+    w: Math.max(0.08, x2 - x),
+    h: Math.max(0.08, y2 - y),
+  };
+}
+
 function clampByteIndex(v: number, max: number) {
   return v < 0 ? 0 : v > max ? max : v;
 }
