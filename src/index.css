@@ -109,13 +109,10 @@
   background-position: -1px -1px;
 }
 
-/* Print stylesheets: only Cornell / exam paper sheets, never the app chrome.
-   Extra blank last pages usually come from (1) leftover layout of visibility:hidden
-   UI, and (2) page-break-after on a sheet that already fills the page. */
+/* Print: isolate cloned sheets so mobile Safari cannot paginate hidden UI. */
 @media print {
-  html,
-  body,
-  #root {
+  html.printing-exam,
+  html.printing-exam body {
     margin: 0 !important;
     padding: 0 !important;
     height: auto !important;
@@ -124,148 +121,66 @@
     background: #ffffff !important;
   }
 
-  body * {
-    visibility: hidden !important;
-  }
-
-  #printable-paper-container,
-  #printable-paper-container * {
-    visibility: visible !important;
-  }
-
-  .no-print {
+  html.printing-exam body > *:not(#exam-print-root) {
     display: none !important;
   }
 
-  .print-only {
+  html.printing-exam #exam-print-root {
     display: block !important;
-  }
-
-  .app-screen-overlay,
-  .app-screen-sheet,
-  .print-preview-canvas {
     position: static !important;
-    inset: auto !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    width: auto !important;
-    height: 0 !important;
-    min-height: 0 !important;
-    max-height: none !important;
-    overflow: visible !important;
-    background: #ffffff !important;
-    box-shadow: none !important;
-    border: none !important;
-    border-radius: 0 !important;
-    display: block !important;
-  }
-
-  #printable-paper-container {
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
     width: 100% !important;
     margin: 0 !important;
     padding: 0 !important;
-    display: block !important;
     background: #ffffff !important;
   }
 
-  /* Print CSS forces visibility:visible on all descendants, which would
-     un-hide KaTeX MathML and duplicate every formula onto extra pages. */
-  #printable-paper-container .katex-mathml {
+  html.printing-exam #exam-print-root .katex-mathml {
     display: none !important;
     visibility: hidden !important;
     height: 0 !important;
-    width: 0 !important;
     overflow: hidden !important;
   }
 
-  .paper-sheet {
+  html.printing-exam #exam-print-root .paper-sheet {
     margin: 0 auto !important;
     box-shadow: none !important;
     border: none !important;
     box-sizing: border-box !important;
+    overflow: hidden !important;
+    page-break-after: always !important;
+    break-after: page !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+
+  html.printing-exam #exam-print-root .paper-sheet:last-of-type {
     page-break-after: auto !important;
     break-after: auto !important;
   }
 
-  .paper-sheet-fit {
-    overflow: hidden !important;
-    min-height: 0 !important;
-    contain: size layout !important;
-    page-break-inside: avoid !important;
-    break-inside: avoid !important;
-  }
-
-  .paper-sheet-fit * {
+  html.printing-exam #exam-print-root .paper-sheet-fit * {
     min-height: 0 !important;
   }
 
-  .paper-sheet-fit .overflow-y-auto,
-  .paper-sheet-fit .overflow-x-auto {
+  html.printing-exam #exam-print-root .overflow-y-auto,
+  html.printing-exam #exam-print-root .overflow-x-auto {
     overflow: hidden !important;
   }
 
-  /* Break before the next sheet so the last page never forces a blank one. */
-  .paper-sheet + .paper-sheet {
-    page-break-before: always !important;
-    break-before: page !important;
-  }
-
-  .paper-sheet:last-of-type {
-    page-break-after: avoid !important;
-    break-after: avoid !important;
-  }
-
-  .print-page {
-    page-break-before: always;
-    break-before: page;
-  }
-
-  .print-avoid-break {
-    page-break-inside: avoid;
-    break-inside: avoid;
+  html.printing-exam #exam-print-root .katex-display {
+    display: inline-block !important;
+    margin: 0.1em 0.2em !important;
+    text-align: left !important;
   }
 
   @page {
     margin: 0;
   }
+}
 
-  @page paper-a4 {
-    size: A4 portrait;
-    margin: 0;
-  }
-
-  @page paper-b5 {
-    size: 182mm 257mm;
-    margin: 0;
-  }
-
-  html[data-print-size="A4"] .paper-sheet-fit,
-  .paper-sheet-fit.paper-a4 {
-    page: paper-a4;
-    width: 210mm !important;
-    height: 295mm !important;
-    max-height: 295mm !important;
-  }
-
-  html[data-print-size="B5"] .paper-sheet-fit,
-  .paper-sheet-fit.paper-b5 {
-    page: paper-b5;
-    width: 182mm !important;
-    height: 255mm !important;
-    max-height: 255mm !important;
-  }
-
-  #printable-paper-container .katex {
-    font-size: 1em !important;
-  }
-
-  #printable-paper-container .katex-display {
-    display: inline-block !important;
-    margin: 0.1em 0.2em !important;
-    text-align: left !important;
+@media print {
+  .print-only {
+    display: block !important;
   }
 }
 

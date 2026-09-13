@@ -61,26 +61,63 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   if (!isOpen) return null;
 
   const handlePrint = () => {
+    const source =
+      previewRef.current ||
+      document.getElementById("printable-paper-container");
+    if (!source) return;
+
     const root = document.documentElement;
+    const isB5 = settings.paperSize === "B5";
+    const isMobile =
+      window.matchMedia("(pointer: coarse)").matches ||
+      /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+    document.getElementById("exam-print-root")?.remove();
+    document.getElementById("exam-print-page-size")?.remove();
+
+    const printRoot = document.createElement("div");
+    printRoot.id = "exam-print-root";
+    printRoot.appendChild(source.cloneNode(true));
+    document.body.appendChild(printRoot);
+
+    const sheetWidth = isMobile ? "100%" : isB5 ? "182mm" : "210mm";
+    const sheetHeight = isMobile
+      ? isB5
+        ? "220mm"
+        : "248mm"
+      : isB5
+        ? "255mm"
+        : "295mm";
+
+    const pageStyle = document.createElement("style");
+    pageStyle.id = "exam-print-page-size";
+    pageStyle.textContent = `
+      @page { size: ${isB5 ? "182mm 257mm" : "A4 portrait"}; margin: 0; }
+      #exam-print-root .paper-sheet-fit {
+        width: ${sheetWidth} !important;
+        max-width: 100% !important;
+        height: ${sheetHeight} !important;
+        max-height: ${sheetHeight} !important;
+        min-height: 0 !important;
+      }
+    `;
+    document.head.appendChild(pageStyle);
+
     root.classList.add("printing-exam");
     root.setAttribute("data-print-size", settings.paperSize);
 
-    document.getElementById("exam-print-page-size")?.remove();
-    const pageStyle = document.createElement("style");
-    pageStyle.id = "exam-print-page-size";
-    pageStyle.textContent =
-      settings.paperSize === "B5"
-        ? "@page { size: 182mm 257mm; margin: 0; }"
-        : "@page { size: A4 portrait; margin: 0; }";
-    document.head.appendChild(pageStyle);
-
+    let cleaned = false;
     const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
       root.classList.remove("printing-exam");
       root.removeAttribute("data-print-size");
+      printRoot.remove();
       pageStyle.remove();
       window.removeEventListener("afterprint", cleanup);
     };
     window.addEventListener("afterprint", cleanup);
+    window.setTimeout(cleanup, 120000);
     window.print();
   };
 
