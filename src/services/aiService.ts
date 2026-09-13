@@ -9,6 +9,7 @@ import {
   parseJsonResponse,
   resolveModel,
 } from "./geminiCore";
+import { alignAnalysisLabels, CurriculumLabel } from "../utils/curriculumLabels";
 
 export interface AIAnalysisResult {
   科目: string;
@@ -219,7 +220,8 @@ function parseServerError(errData: any, fallback: string, status: number) {
 
 async function analyzeQuestionImageOnClient(
   imageBase64: string,
-  subjectHint?: string
+  subjectHint?: string,
+  existingLabelsText?: string
 ): Promise<AIAnalysisResult> {
   const customApiKey = getStoredApiKey();
   if (!customApiKey) {
@@ -242,7 +244,7 @@ async function analyzeQuestionImageOnClient(
             },
           },
           {
-            text: buildAnalyzePrompt(subjectHint),
+            text: buildAnalyzePrompt(subjectHint, existingLabelsText),
           },
         ],
       },
@@ -261,12 +263,25 @@ async function analyzeQuestionImageOnClient(
 
 export async function analyzeQuestionImage(
   imageBase64: string,
-  subjectHint?: string
+  subjectHint?: string,
+  existingLabels: CurriculumLabel[] = []
 ): Promise<AIAnalysisResult> {
   const customApiKey = getStoredApiKey();
   const selectedModel = getStoredModel();
   const mimeMatch = imageBase64.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,/);
   const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+  const existingLabelsText = existingLabels.length
+    ? existingLabels
+        .map((label) =>
+          ["- ", [label.gradeLevel, label.chapter, label.unit].filter(Boolean).join(" / ")].join("")
+        )
+        .filter((line) => line !== "- ")
+        .slice(0, 40)
+        .join("\n")
+    : "";
+
+  const alignResult = (data: AIAnalysisResult) =>
+    alignAnalysisLabels(data, existingLabels);
 
   try {
     const response = await fetch("/api/analyze-question", {
@@ -280,11 +295,12 @@ export async function analyzeQuestionImage(
         customApiKey,
         selectedModel,
         subjectHint,
+        existingLabelsText,
       }),
     });
 
     if (isBackendUnavailable(response)) {
-      return analyzeQuestionImageOnClient(imageBase64, subjectHint);
+      return alignResult(await analyzeQuestionImageOnClient(imageBase64, subjectHint, existingLabelsText));
     }
 
     if (!response.ok) {
@@ -297,7 +313,7 @@ export async function analyzeQuestionImage(
       throw new Error("AI 分析回傳格式異常，請再試一次。");
     }
 
-    return result.data as AIAnalysisResult;
+    return alignResult(result.data as AIAnalysisResult);
   } catch (error: any) {
     if (error?.needKey || error?.isKeyProblem || error?.isTransient) {
       throw error;
@@ -305,7 +321,7 @@ export async function analyzeQuestionImage(
     if (error instanceof Error && error.message.includes("AI 分析回傳格式異常")) {
       throw error;
     }
-    return analyzeQuestionImageOnClient(imageBase64, subjectHint);
+    return alignResult(await analyzeQuestionImageOnClient(imageBase64, subjectHint, existingLabelsText));
   }
 }
 

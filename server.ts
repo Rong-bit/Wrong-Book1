@@ -82,7 +82,7 @@ app.post("/api/verify-key", async (req, res) => {
 // AI analysis route for question image
 app.post("/api/analyze-question", async (req, res) => {
   try {
-    const { imageBase64, mimeType = "image/jpeg", customApiKey, subjectHint, selectedModel } = req.body;
+    const { imageBase64, mimeType = "image/jpeg", customApiKey, subjectHint, selectedModel, existingLabelsText } = req.body;
 
     if (!imageBase64) {
       return res.status(400).json({ error: "未提供題目圖片數據" });
@@ -117,7 +117,7 @@ app.post("/api/analyze-question", async (req, res) => {
               },
             },
             {
-              text: buildAnalyzePrompt(subjectHint),
+              text: buildAnalyzePrompt(subjectHint, existingLabelsText),
             },
           ],
         },

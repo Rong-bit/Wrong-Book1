@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Sparkles,
   BookOpen,
@@ -28,6 +28,10 @@ import { PdfExportModal } from "./components/PdfExportModal";
 import { BackupModal } from "./components/BackupModal";
 import { ImageCalibrationModal } from "./components/ImageCalibrationModal";
 import { compressImage, normalizeImageSrc } from "./utils/imageUtils";
+import {
+  alignQuestionCollection,
+  collectExistingLabels,
+} from "./utils/curriculumLabels";
 
 const STORAGE_QUESTIONS_KEY = "digital_notebook_questions_v1";
 
@@ -68,7 +72,7 @@ export default function App() {
       if (saved) {
         const parsed: QuestionItem[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((q) => {
+          const repaired = parsed.map((q) => {
             // Repair sample questions if they have outdated/broken/empty image
             if (q.id === "sample-1" && (!q.imageBase64 || q.imageBase64.includes("utf8") || q.imageBase64.startsWith("data:image/svg"))) {
               const fresh = initialSampleQuestions.find((s) => s.id === "sample-1");
@@ -83,6 +87,7 @@ export default function App() {
             }
             return q;
           });
+          return alignQuestionCollection(repaired);
         }
       }
     } catch (e) {
@@ -90,6 +95,8 @@ export default function App() {
     }
     return initialSampleQuestions;
   });
+  const questionsRef = useRef(questions);
+  questionsRef.current = questions;
 
   const [layout, setLayout] = useState<ViewLayout>("notebook");
   const [appPage, setAppPage] = useState<AppPage>("home");
@@ -186,29 +193,35 @@ export default function App() {
       setAppPage("notebook");
 
       try {
-        const result = await analyzeQuestionImage(base64Data, subjectHint);
+        const result = await analyzeQuestionImage(
+          base64Data,
+          subjectHint,
+          collectExistingLabels(questionsRef.current)
+        );
 
         setQuestions((prev) =>
-          prev.map((item) => {
-            if (item.id === tempId) {
-              return {
-                ...item,
-                subject: result.科目 || "未歸類",
-                gradeLevel: result.冊別 || "",
-                chapter: result.章節 || "",
-                unit: result.單元 || "未歸類單元",
-                questionText: result.題目文字 || "",
-                questionType: result.題型 || "綜合題",
-                answer: result.答案 || "",
-                coreConcepts: result.核心考點 || "",
-                commonPitfalls: result.易錯陷阱 || "",
-                explanation: result.詳解步驟 || "",
-                tips: result.關鍵技巧 || "",
-                status: "ready",
-              };
-            }
-            return item;
-          })
+          alignQuestionCollection(
+            prev.map((item) => {
+              if (item.id === tempId) {
+                return {
+                  ...item,
+                  subject: result.科目 || "未歸類",
+                  gradeLevel: result.冊別 || "",
+                  chapter: result.章節 || "",
+                  unit: result.單元 || "未歸類單元",
+                  questionText: result.題目文字 || "",
+                  questionType: result.題型 || "綜合題",
+                  answer: result.答案 || "",
+                  coreConcepts: result.核心考點 || "",
+                  commonPitfalls: result.易錯陷阱 || "",
+                  explanation: result.詳解步驟 || "",
+                  tips: result.關鍵技巧 || "",
+                  status: "ready",
+                };
+              }
+              return item;
+            })
+          )
         );
       } catch (err: any) {
         console.error("Analysis failed:", err);
@@ -437,29 +450,35 @@ export default function App() {
     );
 
     try {
-      const result = await analyzeQuestionImage(targetQ.imageBase64, targetQ.subject);
+      const result = await analyzeQuestionImage(
+        targetQ.imageBase64,
+        targetQ.subject,
+        collectExistingLabels(questions.filter((q) => q.id !== questionId))
+      );
       setQuestions((prev) =>
-        prev.map((item) => {
-          if (item.id === questionId) {
-            return {
-              ...item,
-              subject: result.科目 || item.subject || "未歸類",
-              gradeLevel: result.冊別 || item.gradeLevel || "",
-              chapter: result.章節 || item.chapter || "",
-              unit: result.單元 || item.unit || "未歸類單元",
-              questionText: result.題目文字 || "",
-              questionType: result.題型 || "綜合題",
-              answer: result.答案 || "",
-              coreConcepts: result.核心考點 || "",
-              commonPitfalls: result.易錯陷阱 || "",
-              explanation: result.詳解步驟 || "",
-              tips: result.關鍵技巧 || "",
-              status: "ready",
-              errorMessage: undefined,
-            };
-          }
-          return item;
-        })
+        alignQuestionCollection(
+          prev.map((item) => {
+            if (item.id === questionId) {
+              return {
+                ...item,
+                subject: result.科目 || item.subject || "未歸類",
+                gradeLevel: result.冊別 || item.gradeLevel || "",
+                chapter: result.章節 || item.chapter || "",
+                unit: result.單元 || item.unit || "未歸類單元",
+                questionText: result.題目文字 || "",
+                questionType: result.題型 || "綜合題",
+                answer: result.答案 || "",
+                coreConcepts: result.核心考點 || "",
+                commonPitfalls: result.易錯陷阱 || "",
+                explanation: result.詳解步驟 || "",
+                tips: result.關鍵技巧 || "",
+                status: "ready",
+                errorMessage: undefined,
+              };
+            }
+            return item;
+          })
+        )
       );
       setPasteToast("✨ 考題重新辨識成功！");
       setTimeout(() => setPasteToast(null), 3000);

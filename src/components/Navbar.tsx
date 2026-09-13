@@ -6,6 +6,7 @@ import {
   FileText,
   Grid,
   HardDrive,
+  Camera,
 } from "lucide-react";
 import { ViewLayout } from "../types";
 
@@ -61,22 +62,29 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Notebook entry */}
-        <button
-          type="button"
-          onClick={() => onPageChange("notebook")}
-          className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold border shrink-0 transition ${
-            currentPage === "notebook"
-              ? "bg-amber-50 text-amber-900 border-amber-200 shadow-2xs"
-              : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-          }`}
-        >
-          <BookOpen className="w-3.5 h-3.5 text-amber-600" />
-          <span>錯題本</span>
-          <span className="px-1.5 py-0.2 rounded-full bg-white/80 text-[10px] text-slate-600">
-            {questionCount}
-          </span>
-        </button>
+        {/* Page entry: home shows notebook, notebook shows capture */}
+        {currentPage === "home" ? (
+          <button
+            type="button"
+            onClick={() => onPageChange("notebook")}
+            className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold border shrink-0 transition bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-amber-600" />
+            <span>錯題本</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-white/80 text-[10px] text-slate-600">
+              {questionCount}
+            </span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => onPageChange("home")}
+            className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold border shrink-0 transition bg-sky-50 text-sky-900 border-sky-200 hover:bg-sky-100"
+          >
+            <Camera className="w-3.5 h-3.5 text-sky-600" />
+            <span>擷取</span>
+          </button>
+        )}
 
         {/* Center: Layout View Switcher (notebook only) */}
         {currentPage === "notebook" && (
