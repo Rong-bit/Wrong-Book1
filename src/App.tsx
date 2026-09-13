@@ -39,6 +39,7 @@ import {
   MembershipState,
   saveMembership,
 } from "./utils/membership";
+import { isRegisteredMemberEmail } from "./data/memberEmails";
 
 const STORAGE_QUESTIONS_KEY = "digital_notebook_questions_v1";
 
@@ -650,6 +651,20 @@ export default function App() {
     setMembership((prev) => ({ ...prev, role }));
   };
 
+  const handleVerifyMemberEmail = (email: string) => {
+    if (!isRegisteredMemberEmail(email)) return false;
+    setMembership((prev) => ({
+      ...prev,
+      role: "member",
+      email: email.trim(),
+    }));
+    return true;
+  };
+
+  const handleSignOutMember = () => {
+    setMembership((prev) => ({ ...prev, role: "guest", email: "" }));
+  };
+
   const handleLoadSamples = () => {
     setQuestions(initialSampleQuestions);
     setAppPage("notebook");
@@ -760,6 +775,8 @@ export default function App() {
             <MembershipPanel
               membership={membership}
               onChangeRole={handleChangeMemberRole}
+              onVerifyEmail={handleVerifyMemberEmail}
+              onSignOutMember={handleSignOutMember}
             />
             <CaptureZone
               onImageSelected={handleImageSelected}

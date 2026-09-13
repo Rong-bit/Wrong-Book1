@@ -1,3 +1,5 @@
+import { isRegisteredMemberEmail } from "../data/memberEmails";
+
 export type MemberRole = "guest" | "member";
 
 export const GUEST_CAPTURE_LIMIT = 5;
@@ -47,11 +49,16 @@ export function saveMembership(state: MembershipState) {
 }
 
 export function canCaptureAs(state: MembershipState): boolean {
-  if (state.role === "member") return true;
+  if (state.role === "member") {
+    return isRegisteredMemberEmail(state.email);
+  }
   return state.guestCapturesUsed < GUEST_CAPTURE_LIMIT;
 }
 
 export function captureBlockReason(state: MembershipState): string | null {
   if (canCaptureAs(state)) return null;
-  return `訪客已達 ${GUEST_CAPTURE_LIMIT} 題上限，請在首頁改為「會員」。會員 Email 請在 GitHub 的 src/data/memberEmails.ts 登記。`;
+  if (state.role === "member") {
+    return "請輸入已在 GitHub 登記的會員 Email 後才能不限題數擷取。";
+  }
+  return `訪客已達 ${GUEST_CAPTURE_LIMIT} 題上限。請改為會員，並輸入 GitHub 名單中的 Email。`;
 }
