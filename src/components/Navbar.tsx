@@ -6,7 +6,6 @@ import {
   FileText,
   Grid,
   HardDrive,
-  Camera,
 } from "lucide-react";
 import { ViewLayout } from "../types";
 
@@ -62,36 +61,22 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Page Switcher */}
-        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/60 shrink-0">
-          <button
-            type="button"
-            onClick={() => onPageChange("home")}
-            className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              currentPage === "home"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <Camera className="w-3.5 h-3.5 text-sky-600" />
-            <span>擷取</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onPageChange("notebook")}
-            className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              currentPage === "notebook"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5 text-amber-600" />
-            <span>錯題本</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-[10px] text-slate-600">
-              {questionCount}
-            </span>
-          </button>
-        </div>
+        {/* Notebook entry */}
+        <button
+          type="button"
+          onClick={() => onPageChange("notebook")}
+          className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold border shrink-0 transition ${
+            currentPage === "notebook"
+              ? "bg-amber-50 text-amber-900 border-amber-200 shadow-2xs"
+              : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+          }`}
+        >
+          <BookOpen className="w-3.5 h-3.5 text-amber-600" />
+          <span>錯題本</span>
+          <span className="px-1.5 py-0.2 rounded-full bg-white/80 text-[10px] text-slate-600">
+            {questionCount}
+          </span>
+        </button>
 
         {/* Center: Layout View Switcher (notebook only) */}
         {currentPage === "notebook" && (
