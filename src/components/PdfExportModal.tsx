@@ -61,6 +61,15 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   if (!isOpen) return null;
 
   const handlePrint = () => {
+    const root = document.documentElement;
+    root.classList.add("printing-exam");
+    root.setAttribute("data-print-size", settings.paperSize);
+    const cleanup = () => {
+      root.classList.remove("printing-exam");
+      root.removeAttribute("data-print-size");
+      window.removeEventListener("afterprint", cleanup);
+    };
+    window.addEventListener("afterprint", cleanup);
     window.print();
   };
 

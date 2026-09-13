@@ -625,7 +625,6 @@ export default function App() {
       {/* Navigation Bar */}
       <Navbar
         currentPage={appPage}
-        onPageChange={setAppPage}
         currentLayout={layout}
         onLayoutChange={setLayout}
         onOpenByok={() => setIsByokOpen(true)}
@@ -638,14 +637,14 @@ export default function App() {
 
       {/* Floating Paste Notification Toast */}
       {pasteToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-2.5 text-xs font-semibold animate-in slide-in-from-bottom duration-200 border border-slate-700">
+        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl flex items-center gap-2.5 text-xs font-semibold animate-in slide-in-from-bottom duration-200 border border-slate-700 no-print">
           <Sparkles className="w-4 h-4 text-amber-400 animate-spin" />
           {pasteToast}
         </div>
       )}
 
       {/* Main Container */}
-      <main className="flex-1 w-full min-w-0 max-w-full md:max-w-7xl mx-auto px-3 md:px-6 py-4 sm:py-6">
+      <main className="flex-1 w-full min-w-0 max-w-full md:max-w-7xl mx-auto px-3 md:px-6 py-4 sm:py-6 no-print">
         {appPage === "home" ? (
           <CaptureZone
             onImageSelected={handleImageSelected}

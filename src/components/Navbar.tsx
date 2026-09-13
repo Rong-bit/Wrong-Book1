@@ -6,7 +6,6 @@ import {
   FileText,
   Grid,
   HardDrive,
-  Camera,
 } from "lucide-react";
 import { ViewLayout } from "../types";
 
@@ -14,7 +13,6 @@ export type AppPage = "home" | "notebook";
 
 interface NavbarProps {
   currentPage: AppPage;
-  onPageChange: (page: AppPage) => void;
   currentLayout: ViewLayout;
   onLayoutChange: (layout: ViewLayout) => void;
   onOpenByok: () => void;
@@ -27,7 +25,6 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({
   currentPage,
-  onPageChange,
   currentLayout,
   onLayoutChange,
   onOpenByok,
@@ -41,12 +38,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-2xs no-print w-full overflow-hidden">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-2 w-full min-w-0">
         {/* Logo & Title */}
-        <button
-          type="button"
-          onClick={() => onPageChange("home")}
-          className="flex items-center gap-2 sm:gap-3 min-w-0 text-left"
-          title="回到擷取首頁"
-        >
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-sky-500/10 shrink-0">
             <BookOpen className="w-5 h-5" />
           </div>
@@ -65,37 +57,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                 : "錯題精讀 · AI 詳解 · 高清 B5/A4 匯出"}
             </p>
           </div>
-        </button>
-
-        {/* Page Switcher */}
-        <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/60 shrink-0">
-          <button
-            type="button"
-            onClick={() => onPageChange("home")}
-            className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              currentPage === "home"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <Camera className="w-3.5 h-3.5 text-sky-600" />
-            <span>擷取</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onPageChange("notebook")}
-            className={`flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              currentPage === "notebook"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5 text-amber-600" />
-            <span>錯題本</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-slate-200 text-[10px] text-slate-600">
-              {questionCount}
-            </span>
-          </button>
         </div>
 
         {/* Center: Layout View Switcher (notebook only) */}

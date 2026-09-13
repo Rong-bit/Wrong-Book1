@@ -109,18 +109,42 @@
   background-position: -1px -1px;
 }
 
-/* Print stylesheets for B5 and A4 layout printing */
+/* Print stylesheets: only Cornell / exam paper sheets, never the app chrome */
 @media print {
-  body {
+  html,
+  body,
+  #root {
+    height: auto !important;
+    overflow: visible !important;
     background: #ffffff !important;
-    color: #000000 !important;
   }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  #printable-paper-container,
+  #printable-paper-container * {
+    visibility: visible !important;
+  }
+
+  #printable-paper-container {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    display: block !important;
+    background: #ffffff !important;
+  }
+
   .no-print {
     display: none !important;
   }
+
   .print-only {
     display: block !important;
   }
+
   .app-screen-overlay,
   .app-screen-sheet {
     position: static !important;
@@ -137,27 +161,46 @@
     border-radius: 0 !important;
     display: block !important;
   }
-  #printable-paper-container {
-    width: 100% !important;
-  }
+
   .paper-sheet {
     page-break-after: always !important;
     break-after: page !important;
-    margin: 0 !important;
+    margin: 0 auto 0 auto !important;
     box-shadow: none !important;
     border: none !important;
   }
+
+  .paper-sheet:last-child {
+    page-break-after: auto !important;
+    break-after: auto !important;
+  }
+
   .print-page {
     page-break-after: always;
     break-after: page;
   }
+
   .print-avoid-break {
     page-break-inside: avoid;
     break-inside: avoid;
   }
+
   @page {
     margin: 0;
-    size: auto;
+  }
+
+  html[data-print-size="A4"] {
+    @page {
+      size: A4 portrait;
+      margin: 0;
+    }
+  }
+
+  html[data-print-size="B5"] {
+    @page {
+      size: 182mm 257mm;
+      margin: 0;
+    }
   }
 }
 
