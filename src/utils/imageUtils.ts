@@ -433,6 +433,24 @@ function isPlausiblePaperQuad(corners: [Point, Point, Point, Point]): boolean {
   return quadArea(corners) >= 0.1;
 }
 
+function dilateMask(src: Uint8Array, w: number, h: number): Uint8Array {
+  const out = new Uint8Array(src);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!src[y * w + x]) continue;
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          out[ny * w + nx] = 1;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Find the four near-white paper corners of an exam photo.
  * Order: [Top-Left, Top-Right, Bottom-Right, Bottom-Left], normalized 0–1.
@@ -471,22 +489,30 @@ export function detectNearWhitePaperCorners(
   }
 
   const blurred = blurLuminance(lum, w, h, 2);
-  const paperLum = Math.min(200, Math.max(otsuThreshold(blurred), 145));
-  const maxChroma = 72;
+  const otsu = otsuThreshold(blurred);
+  // Shadowed corners (especially bottom-left) sit below a hard 145 floor.
+  const paperLum = Math.min(195, Math.max(otsu * 0.82, 118));
+  const maxChroma = 96;
 
-  const mask = new Uint8Array(w * h);
+  const rawMask = new Uint8Array(w * h);
   let paperCount = 0;
-  for (let i = 0; i < mask.length; i++) {
-    if (blurred[i] >= paperLum && chroma[i] <= maxChroma) {
-      mask[i] = 1;
+  for (let i = 0; i < rawMask.length; i++) {
+    const nearWhite = blurred[i] >= paperLum && chroma[i] <= maxChroma;
+    const shadowedPaper = blurred[i] >= paperLum * 0.88 && chroma[i] <= 110;
+    if (nearWhite || shadowedPaper) {
+      rawMask[i] = 1;
       paperCount += 1;
     }
   }
 
-  const cover = paperCount / mask.length;
+  const cover = paperCount / rawMask.length;
   // No distinct paper-vs-background corners: keep the 6% inset.
   if (cover < 0.08 || cover > 0.97) return FALLBACK_PERSPECTIVE_CORNERS;
 
+  const mask = dilateMask(rawMask, w, h);
+
+  const nw = Math.max(1, w - 1);
+  const nh = Math.max(1, h - 1);
   let minSum = Infinity;
   let maxSum = -Infinity;
   let minDiff = Infinity;
@@ -496,20 +522,14 @@ export function detectNearWhitePaperCorners(
   const br = { x: w - 1, y: h - 1 };
   const bl = { x: 0, y: h - 1 };
 
-  for (let y = 1; y < h - 1; y++) {
-    for (let x = 1; x < w - 1; x++) {
-      const i = y * w + x;
-      if (!mask[i]) continue;
-      let neighbors = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          neighbors += mask[(y + dy) * w + (x + dx)];
-        }
-      }
-      if (neighbors < 6) continue;
-
-      const sum = x + y;
-      const diff = x - y;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (!mask[y * w + x]) continue;
+      // Normalize so portrait photos don't let "more bottom" beat "more left".
+      const nx = x / nw;
+      const ny = y / nh;
+      const sum = nx + ny;
+      const diff = nx - ny;
       if (sum < minSum) {
         minSum = sum;
         tl.x = x;
@@ -537,15 +557,39 @@ export function detectNearWhitePaperCorners(
     return FALLBACK_PERSPECTIVE_CORNERS;
   }
 
-  const cx = (tl.x + tr.x + br.x + bl.x) / 4;
-  const cy = (tl.y + tr.y + br.y + bl.y) / 4;
-  const inset = Math.max(2, Math.hypot(w, h) * 0.01);
+  const snapToward = (
+    p: { x: number; y: number },
+    tx: number,
+    ty: number
+  ): { x: number; y: number } => {
+    const dx = tx - p.x;
+    const dy = ty - p.y;
+    const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy)));
+    let last = { x: p.x, y: p.y };
+    for (let i = 1; i <= steps; i++) {
+      const x = Math.round(p.x + (dx * i) / steps);
+      const y = Math.round(p.y + (dy * i) / steps);
+      if (x < 0 || y < 0 || x >= w || y >= h) break;
+      if (!mask[y * w + x]) break;
+      last = { x, y };
+    }
+    return last;
+  };
+
+  const snappedTl = snapToward(tl, 0, 0);
+  const snappedTr = snapToward(tr, w - 1, 0);
+  const snappedBr = snapToward(br, w - 1, h - 1);
+  const snappedBl = snapToward(bl, 0, h - 1);
+
+  const cx = (snappedTl.x + snappedTr.x + snappedBr.x + snappedBl.x) / 4;
+  const cy = (snappedTl.y + snappedTr.y + snappedBr.y + snappedBl.y) / 4;
+  const inset = Math.max(1, Math.hypot(w, h) * 0.006);
 
   const pull = (p: { x: number; y: number }): Point => {
     const dx = cx - p.x;
     const dy = cy - p.y;
     const len = Math.hypot(dx, dy) || 1;
-    const t = Math.min(inset, len * 0.06);
+    const t = Math.min(inset, len * 0.04);
     return {
       x: Math.min(0.995, Math.max(0.005, (p.x + (dx / len) * t) / w)),
       y: Math.min(0.995, Math.max(0.005, (p.y + (dy / len) * t) / h)),
@@ -553,10 +597,10 @@ export function detectNearWhitePaperCorners(
   };
 
   const corners: [Point, Point, Point, Point] = [
-    pull(tl),
-    pull(tr),
-    pull(br),
-    pull(bl),
+    pull(snappedTl),
+    pull(snappedTr),
+    pull(snappedBr),
+    pull(snappedBl),
   ];
 
   return isPlausiblePaperQuad(corners) ? corners : FALLBACK_PERSPECTIVE_CORNERS;
