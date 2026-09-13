@@ -159,14 +159,23 @@ function parseMathSegments(rawText: string): Segment[] {
 /**
  * Safely renders LaTeX via KaTeX
  */
+const LATEX_COMMANDS =
+  "Delta|Gamma|Lambda|Omega|Phi|Pi|Psi|Sigma|Theta|Upsilon|Xi|alpha|beta|gamma|delta|epsilon|varepsilon|zeta|eta|theta|vartheta|iota|kappa|lambda|mu|nu|xi|pi|varpi|rho|varrho|sigma|varsigma|tau|upsilon|phi|varphi|chi|psi|omega|sum|prod|int|infty|cdot|times|leq|geq|neq|pm|mp|sin|cos|tan|log|lim|frac|sqrt|left|right|text|mathrm|mathbf|overline|underline";
+
+function restoreMissingLatexCommands(latex: string): string {
+  return latex.replace(new RegExp(`(?<!\\\\)\\b(${LATEX_COMMANDS})\\b`, "g"), "\\$1");
+}
+
 function renderKatexHtml(latex: string, displayMode: boolean): string {
   // Clean any remaining control characters or unicode minus
-  const cleanLatex = latex
-    .replace(/\x0c([a-zA-Z]+)/g, "\\f$1")
-    .replace(/\x0crac/g, "\\frac")
-    .replace(/\x0c/g, "\\frac")
-    .replace(/\x08([a-zA-Z]+)/g, "\\b$1")
-    .replace(/−/g, "-");
+  const cleanLatex = restoreMissingLatexCommands(
+    latex
+      .replace(/\x0c([a-zA-Z]+)/g, "\\f$1")
+      .replace(/\x0crac/g, "\\frac")
+      .replace(/\x0c/g, "\\frac")
+      .replace(/\x08([a-zA-Z]+)/g, "\\b$1")
+      .replace(/−/g, "-")
+  );
 
   try {
     return katex.renderToString(cleanLatex, {

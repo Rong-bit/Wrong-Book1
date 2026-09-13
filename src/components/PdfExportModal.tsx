@@ -992,7 +992,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                             {q.myNotes && (
                               <div className="text-indigo-800 bg-indigo-50/70 p-1.5 rounded">
                                 <span className="font-bold">【個人覆盤】：</span>
-                                <span>{q.myNotes}</span>
+                                <MathRenderer content={q.myNotes} />
                               </div>
                             )}
                           </div>
