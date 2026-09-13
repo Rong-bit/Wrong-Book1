@@ -39,6 +39,7 @@ import { normalizeImageSrc, compressImage } from "../utils/imageUtils";
 interface QuestionCardProps {
   question: QuestionItem;
   index: number;
+  captureNumber: number;
   totalCount: number;
   layout: ViewLayout;
   onOpenImageControl: (question: QuestionItem) => void;
@@ -55,6 +56,7 @@ interface QuestionCardProps {
 export const QuestionCard: React.FC<QuestionCardProps> = ({
   question,
   index,
+  captureNumber,
   totalCount,
   layout,
   onOpenImageControl,
@@ -243,7 +245,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                   : "bg-slate-900 text-white"
               }`}
             >
-              {question.isSimilarVariant ? "練" : index + 1}
+              {question.isSimilarVariant ? "練" : captureNumber}
             </span>
 
             {/* Similar Question Indicator Tag */}

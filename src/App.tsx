@@ -64,6 +64,41 @@ function buildPaperMetaFromQuestions(questions: QuestionItem[]) {
   };
 }
 
+function compareCaptureTime(a: QuestionItem, b: QuestionItem) {
+  const dt = (a.createdAt || 0) - (b.createdAt || 0);
+  if (dt !== 0) return dt;
+  return String(a.id).localeCompare(String(b.id));
+}
+
+function newestFirst(items: QuestionItem[]): QuestionItem[] {
+  if (items.length < 2) return items;
+  let newerFirst = 0;
+  let olderFirst = 0;
+  for (let i = 1; i < items.length; i++) {
+    const prev = items[i - 1].createdAt || 0;
+    const curr = items[i].createdAt || 0;
+    if (curr < prev) newerFirst += 1;
+    if (curr > prev) olderFirst += 1;
+  }
+  // Notebook shows latest capture on top. Flip lists that were stored oldest-first.
+  return olderFirst > newerFirst ? [...items].reverse() : items;
+}
+
+function swapQuestionOrder(
+  questions: QuestionItem[],
+  firstId: string,
+  secondId: string
+): QuestionItem[] {
+  const i = questions.findIndex((q) => q.id === firstId);
+  const j = questions.findIndex((q) => q.id === secondId);
+  if (i < 0 || j < 0 || i === j) return questions;
+  const next = [...questions];
+  const a = next[i];
+  next[i] = next[j];
+  next[j] = a;
+  return next;
+}
+
 export default function App() {
   const [questions, setQuestions] = useState<QuestionItem[]>(() => {
     try {
@@ -86,7 +121,7 @@ export default function App() {
             }
             return q;
           });
-          return alignQuestionCollection(repaired);
+          return alignQuestionCollection(newestFirst(repaired));
         }
       }
     } catch (e) {
@@ -110,6 +145,7 @@ export default function App() {
   const [hasCustomKey, setHasCustomKey] = useState<boolean>(false);
   const [pasteToast, setPasteToast] = useState<string | null>(null);
   const [isConfirmingClearAll, setIsConfirmingClearAll] = useState<boolean>(false);
+  const [scrollToQuestionId, setScrollToQuestionId] = useState<string | null>(null);
 
   const [paperSettings, setPaperSettings] = useState<PaperSettings>({
     title: "錯題訂正本",
@@ -152,6 +188,17 @@ export default function App() {
     }
   }, [questions]);
 
+  useEffect(() => {
+    if (!scrollToQuestionId || appPage !== "notebook") return;
+    const timer = window.setTimeout(() => {
+      document
+        .getElementById(`question-card-${scrollToQuestionId}`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      setScrollToQuestionId(null);
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [scrollToQuestionId, appPage, questions]);
+
   // Check BYOK key status
   const refreshKeyStatus = useCallback(() => {
     setHasCustomKey(Boolean(getStoredApiKey()));
@@ -187,9 +234,9 @@ export default function App() {
         status: "analyzing",
       };
 
-      // Put at the beginning
       setQuestions((prev) => [newQuestionPlaceholder, ...prev]);
       setAppPage("notebook");
+      setScrollToQuestionId(tempId);
 
       try {
         const result = await analyzeQuestionImage(
@@ -505,25 +552,19 @@ export default function App() {
   };
 
   const handleMoveUp = (index: number) => {
-    if (index === 0) return;
-    setQuestions((prev) => {
-      const next = [...prev];
-      const temp = next[index - 1];
-      next[index - 1] = next[index];
-      next[index] = temp;
-      return next;
-    });
+    if (index <= 0) return;
+    const currentId = filteredQuestions[index]?.id;
+    const aboveId = filteredQuestions[index - 1]?.id;
+    if (!currentId || !aboveId) return;
+    setQuestions((prev) => swapQuestionOrder(prev, currentId, aboveId));
   };
 
   const handleMoveDown = (index: number) => {
-    if (index >= questions.length - 1) return;
-    setQuestions((prev) => {
-      const next = [...prev];
-      const temp = next[index + 1];
-      next[index + 1] = next[index];
-      next[index] = temp;
-      return next;
-    });
+    if (index >= filteredQuestions.length - 1) return;
+    const currentId = filteredQuestions[index]?.id;
+    const belowId = filteredQuestions[index + 1]?.id;
+    if (!currentId || !belowId) return;
+    setQuestions((prev) => swapQuestionOrder(prev, currentId, belowId));
   };
 
   const handleAddSimilarAsQuestion = (similar: SimilarQuestionVariant, parentQ: QuestionItem) => {
@@ -616,6 +657,16 @@ export default function App() {
       return q.subject === selectedSubjectFilter;
     });
   }, [questions, selectedSubjectFilter]);
+
+  const captureNumberById = useMemo(() => {
+    const ordered = [...questions].sort(compareCaptureTime);
+    return new Map(ordered.map((q, i) => [q.id, i + 1]));
+  }, [questions]);
+
+  const printQuestions = useMemo(
+    () => [...filteredQuestions].sort(compareCaptureTime),
+    [filteredQuestions]
+  );
 
   const paperMeta = useMemo(
     () => buildPaperMetaFromQuestions(filteredQuestions),
@@ -819,6 +870,7 @@ export default function App() {
                 key={q.id}
                 question={q}
                 index={idx}
+                captureNumber={captureNumberById.get(q.id) ?? idx + 1}
                 totalCount={filteredQuestions.length}
                 layout={layout}
                 onOpenImageControl={(question) => setSelectedQuestionForImageModal(question)}
@@ -840,6 +892,7 @@ export default function App() {
                 key={q.id}
                 question={q}
                 index={idx}
+                captureNumber={captureNumberById.get(q.id) ?? idx + 1}
                 totalCount={filteredQuestions.length}
                 layout={layout}
                 onOpenImageControl={(question) => setSelectedQuestionForImageModal(question)}
@@ -927,7 +980,7 @@ export default function App() {
       {/* PDF Export & Print Modal */}
       <PdfExportModal
         isOpen={isPdfModalOpen}
-        questions={filteredQuestions}
+        questions={printQuestions}
         settings={paperSettings}
         onClose={() => setIsPdfModalOpen(false)}
         onUpdateSettings={setPaperSettings}
