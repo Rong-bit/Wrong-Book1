@@ -96,8 +96,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
 
   // Compute responsive display dimensions so the image always comfortably fills the workspace
   const displayDimensions = useMemo(() => {
-    const padX = 8;
-    const padY = 8;
+    const padX = 4;
+    const padY = 4;
     const maxW = Math.max(80, (containerSize.width || 880) - padX);
     const maxH = Math.max(80, (containerSize.height || 420) - padY);
 
@@ -634,7 +634,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 top: `${p.y * 100}%`,
                 touchAction: "none",
               }}
-              className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto cursor-grab active:cursor-grabbing group z-20"
+              className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto cursor-grab active:cursor-grabbing group z-20 w-12 h-12 flex items-center justify-center"
             >
               {/* Target Handle */}
               <div
@@ -738,7 +738,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               cursor: h.cursor,
               touchAction: "none",
             }}
-            className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-20 group"
+            className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-20 group w-11 h-11 flex items-center justify-center"
           >
             <div
               className={`w-3.5 h-3.5 rounded-sm bg-white border-2 border-emerald-600 shadow-md group-hover:scale-130 transition-transform ${
@@ -891,6 +891,14 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                     {r.label}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setCropBox({ x: 0, y: 0, w: 1, h: 1 })}
+                  className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap"
+                  title="裁切框貼齊照片四邊"
+                >
+                  貼齊邊緣
+                </button>
               </div>
             )}
           </div>
@@ -1027,7 +1035,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         {/* Interactive Workspace Area */}
         <div
           ref={containerRef}
-          className="relative flex-1 bg-slate-900 flex items-center justify-center p-0 sm:p-2 overflow-hidden select-none min-h-0"
+          className="relative flex-1 bg-slate-900 flex items-center justify-center px-9 py-8 sm:p-6 overflow-hidden select-none min-h-0"
         >
           {/* Working Image and Interactive Overlay */}
           <div
