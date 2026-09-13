@@ -21,6 +21,8 @@ interface CaptureZoneProps {
   questionCount: number;
   autoCalibrate?: boolean;
   onToggleAutoCalibrate?: (val: boolean) => void;
+  captureDisabled?: boolean;
+  captureDisabledReason?: string | null;
 }
 
 export const CaptureZone: React.FC<CaptureZoneProps> = ({
@@ -32,6 +34,8 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
   questionCount,
   autoCalibrate = true,
   onToggleAutoCalibrate,
+  captureDisabled = false,
+  captureDisabledReason = null,
 }) => {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
@@ -40,6 +44,10 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
   const [isConvertingHeic, setIsConvertingHeic] = useState(false);
 
   const handleFile = async (file: File) => {
+    if (captureDisabled) {
+      if (captureDisabledReason) alert(captureDisabledReason);
+      return;
+    }
     if (!isSupportedImageFile(file)) {
       alert("請選擇圖片格式檔案 (支援 JPG、PNG、WebP、HEIC / HEIF 等)");
       return;
@@ -164,16 +172,24 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
         </div>
       </div>
 
+      {captureDisabled && captureDisabledReason && (
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-950">
+          {captureDisabledReason}
+        </div>
+      )}
+
       {/* Main Drag/Drop and Action Banner */}
       <div
         onDragOver={(e) => {
           e.preventDefault();
-          setIsDragOver(true);
+          if (!captureDisabled) setIsDragOver(true);
         }}
         onDragLeave={() => setIsDragOver(false)}
         onDrop={handleDrop}
         className={`mt-4 rounded-xl border-2 border-dashed p-4 sm:p-5 transition-all duration-200 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 w-full min-w-0 ${
-          isDragOver
+          captureDisabled
+            ? "border-amber-300 bg-amber-50/50 opacity-70"
+            : isDragOver
             ? "border-sky-500 bg-sky-50/70 scale-[1.005]"
             : "border-slate-300/90 bg-slate-50/60 hover:bg-slate-50"
         }`}
@@ -208,7 +224,7 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
           <button
             id="mobile-camera-btn"
             type="button"
-            disabled={isAnalyzing}
+            disabled={isAnalyzing || captureDisabled}
             onClick={() => cameraInputRef.current?.click()}
             className="px-4 py-2.5 rounded-xl text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:scale-95 transition shadow-xs flex items-center gap-1.5 disabled:opacity-50"
           >
@@ -220,7 +236,7 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
           <button
             id="upload-file-btn"
             type="button"
-            disabled={isAnalyzing}
+            disabled={isAnalyzing || captureDisabled}
             onClick={() => galleryInputRef.current?.click()}
             className="px-4 py-2.5 rounded-xl text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 active:scale-95 border border-slate-200 transition shadow-xs flex items-center gap-1.5 disabled:opacity-50"
           >
