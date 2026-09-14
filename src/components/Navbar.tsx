@@ -39,9 +39,9 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/90 shadow-2xs no-print w-full overflow-hidden">
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center justify-between gap-2 w-full min-w-0">
+      <div className="max-w-7xl mx-auto px-3 sm:px-6 h-16 flex items-center gap-2 w-full min-w-0">
         {/* Logo & Title */}
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
           <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-600 text-white flex items-center justify-center shadow-md shadow-sky-500/10 shrink-0">
             <BookOpen className="w-5 h-5" />
           </div>
@@ -62,33 +62,9 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        {/* Page entry: home shows notebook, notebook shows capture */}
-        {currentPage === "home" ? (
-          <button
-            type="button"
-            onClick={() => onPageChange("notebook")}
-            className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold border shrink-0 transition bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
-          >
-            <BookOpen className="w-3.5 h-3.5 text-amber-600" />
-            <span>錯題本</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-white/80 text-[10px] text-slate-600">
-              {questionCount}
-            </span>
-          </button>
-        ) : (
-          <button
-            type="button"
-            onClick={() => onPageChange("home")}
-            className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold border shrink-0 transition bg-sky-50 text-sky-900 border-sky-200 hover:bg-sky-100"
-          >
-            <Camera className="w-3.5 h-3.5 text-sky-600" />
-            <span>擷取</span>
-          </button>
-        )}
-
         {/* Center: Layout View Switcher (notebook only) */}
         {currentPage === "notebook" && (
-          <div className="hidden lg:flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/60">
+          <div className="hidden lg:flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200/60 shrink-0">
             <button
               id="view-notebook-btn"
               type="button"
@@ -131,8 +107,31 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         )}
 
-        {/* Right Actions */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+        {/* Right: page switch + actions */}
+        <div className="flex items-center justify-end gap-1.5 sm:gap-2.5 shrink-0 flex-1">
+          {currentPage === "home" ? (
+            <button
+              type="button"
+              onClick={() => onPageChange("notebook")}
+              className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold border shrink-0 transition bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+            >
+              <BookOpen className="w-3.5 h-3.5 text-amber-600" />
+              <span>錯題本</span>
+              <span className="px-1.5 py-0.2 rounded-full bg-white/80 text-[10px] text-slate-600">
+                {questionCount}
+              </span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => onPageChange("home")}
+              className="flex items-center gap-1 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-semibold border shrink-0 transition bg-sky-50 text-sky-900 border-sky-200 hover:bg-sky-100"
+            >
+              <Camera className="w-3.5 h-3.5 text-sky-600" />
+              <span>擷取</span>
+            </button>
+          )}
+
           {currentPage === "home" && (
             <button
               id="open-byok-btn"
