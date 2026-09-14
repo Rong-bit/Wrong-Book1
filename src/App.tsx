@@ -20,7 +20,6 @@ import {
 } from "./services/aiService";
 import { Navbar, AppPage } from "./components/Navbar";
 import { CaptureZone } from "./components/CaptureZone";
-import { MembershipPanel } from "./components/MembershipPanel";
 import { QuestionCard } from "./components/QuestionCard";
 import { ImageControlModal } from "./components/ImageControlModal";
 import { ByokModal } from "./components/ByokModal";
@@ -32,14 +31,6 @@ import {
   alignQuestionCollection,
   collectExistingLabels,
 } from "./utils/curriculumLabels";
-import {
-  canCaptureAs,
-  captureBlockReason,
-  loadMembership,
-  MembershipState,
-  saveMembership,
-} from "./utils/membership";
-import { isRegisteredMemberEmail } from "./data/memberEmails";
 
 const STORAGE_QUESTIONS_KEY = "digital_notebook_questions_v1";
 
@@ -141,10 +132,6 @@ export default function App() {
   const questionsRef = useRef(questions);
   questionsRef.current = questions;
 
-  const [membership, setMembership] = useState<MembershipState>(() => loadMembership());
-  const membershipRef = useRef(membership);
-  membershipRef.current = membership;
-
   const [layout, setLayout] = useState<ViewLayout>("notebook");
   const [appPage, setAppPage] = useState<AppPage>("home");
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<string>("全部");
@@ -202,10 +189,6 @@ export default function App() {
   }, [questions]);
 
   useEffect(() => {
-    saveMembership(membership);
-  }, [membership]);
-
-  useEffect(() => {
     if (!scrollToQuestionId || appPage !== "notebook") return;
     const timer = window.setTimeout(() => {
       document
@@ -228,21 +211,6 @@ export default function App() {
   // Process new image (from Ctrl+V paste or camera / upload)
   const processNewImage = useCallback(
     async (base64Data: string, subjectHint?: string) => {
-      const currentMembership = membershipRef.current;
-      if (!canCaptureAs(currentMembership)) {
-        setPasteToast(captureBlockReason(currentMembership) || "目前無法擷取新題。");
-        setTimeout(() => setPasteToast(null), 3500);
-        setAppPage("home");
-        return;
-      }
-
-      if (currentMembership.role === "guest") {
-        setMembership((prev) => ({
-          ...prev,
-          guestCapturesUsed: prev.guestCapturesUsed + 1,
-        }));
-      }
-
       const tempId = "q_" + Date.now();
       setIsAnalyzing(true);
       setAnalyzingMessage("AI 正在辨識考題圖片並分析科目與單元...");
@@ -363,11 +331,6 @@ export default function App() {
 
   const handleImageSelected = useCallback(
     (base64Data: string, subjectHint?: string) => {
-      if (!canCaptureAs(membershipRef.current)) {
-        setPasteToast(captureBlockReason(membershipRef.current) || "目前無法擷取新題。");
-        setTimeout(() => setPasteToast(null), 3500);
-        return;
-      }
       if (autoCalibrateOnCapture) {
         setCalibrationModal({
           isOpen: true,
@@ -647,24 +610,6 @@ export default function App() {
     setTimeout(() => setPasteToast(null), 3500);
   };
 
-  const handleChangeMemberRole = (role: MembershipState["role"]) => {
-    setMembership((prev) => ({ ...prev, role }));
-  };
-
-  const handleVerifyMemberEmail = (email: string) => {
-    if (!isRegisteredMemberEmail(email)) return false;
-    setMembership((prev) => ({
-      ...prev,
-      role: "member",
-      email: email.trim(),
-    }));
-    return true;
-  };
-
-  const handleSignOutMember = () => {
-    setMembership((prev) => ({ ...prev, role: "guest", email: "" }));
-  };
-
   const handleLoadSamples = () => {
     setQuestions(initialSampleQuestions);
     setAppPage("notebook");
@@ -771,26 +716,16 @@ export default function App() {
       {/* Main Container */}
       <main className="flex-1 w-full min-w-0 max-w-full md:max-w-7xl mx-auto px-3 md:px-6 py-4 sm:py-6 no-print">
         {appPage === "home" ? (
-          <>
-            <MembershipPanel
-              membership={membership}
-              onChangeRole={handleChangeMemberRole}
-              onVerifyEmail={handleVerifyMemberEmail}
-              onSignOutMember={handleSignOutMember}
-            />
-            <CaptureZone
-              onImageSelected={handleImageSelected}
-              onLoadSamples={handleLoadSamples}
-              onOpenByok={() => setIsByokOpen(true)}
-              hasCustomKey={hasCustomKey}
-              isAnalyzing={isAnalyzing}
-              questionCount={questions.length}
-              autoCalibrate={autoCalibrateOnCapture}
-              onToggleAutoCalibrate={handleToggleAutoCalibrate}
-              captureDisabled={!canCaptureAs(membership)}
-              captureDisabledReason={captureBlockReason(membership)}
-            />
-          </>
+          <CaptureZone
+            onImageSelected={handleImageSelected}
+            onLoadSamples={handleLoadSamples}
+            onOpenByok={() => setIsByokOpen(true)}
+            hasCustomKey={hasCustomKey}
+            isAnalyzing={isAnalyzing}
+            questionCount={questions.length}
+            autoCalibrate={autoCalibrateOnCapture}
+            onToggleAutoCalibrate={handleToggleAutoCalibrate}
+          />
         ) : (
           <>
         {/* Status Bar / Filter & Stats */}
