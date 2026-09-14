@@ -22,7 +22,11 @@ interface BackupModalProps {
   onClose: () => void;
   questions: QuestionItem[];
   paperSettings: PaperSettings;
-  onRestoreQuestions: (restoredQuestions: QuestionItem[], mode: "merge" | "overwrite") => void;
+  onRestoreQuestions: (
+    restoredQuestions: QuestionItem[],
+    mode: "merge" | "overwrite",
+    restoredPaperSettings?: PaperSettings
+  ) => void;
 }
 
 export const BackupModal: React.FC<BackupModalProps> = ({
@@ -181,11 +185,14 @@ export const BackupModal: React.FC<BackupModalProps> = ({
   const handleConfirmRestore = () => {
     if (!parsedBackup || !parsedBackup.questions) return;
 
-    onRestoreQuestions(parsedBackup.questions, restoreMode);
+    onRestoreQuestions(parsedBackup.questions, restoreMode, parsedBackup.paperSettings);
+    const restoredLayout = restoreMode === "overwrite" && parsedBackup.paperSettings;
     setRestoreSuccessMsg(
       restoreMode === "merge"
         ? `成功合併匯入 ${parsedBackup.questions.length} 道題目！`
-        : `成功以備份檔案完全覆蓋還原（共 ${parsedBackup.questions.length} 題）！`
+        : restoredLayout
+          ? `成功以備份檔案完全覆蓋還原（共 ${parsedBackup.questions.length} 題，含版面設定）！`
+          : `成功以備份檔案完全覆蓋還原（共 ${parsedBackup.questions.length} 題）！`
     );
 
     setTimeout(() => {

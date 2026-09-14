@@ -131,6 +131,8 @@ export default function App() {
   });
   const questionsRef = useRef(questions);
   questionsRef.current = questions;
+  const analyzingCountRef = useRef(0);
+  const paperAutoLockRef = useRef({ subtitle: false, gradeClass: false });
 
   const [layout, setLayout] = useState<ViewLayout>("notebook");
   const [appPage, setAppPage] = useState<AppPage>("home");
@@ -145,6 +147,7 @@ export default function App() {
   const [hasCustomKey, setHasCustomKey] = useState<boolean>(false);
   const [pasteToast, setPasteToast] = useState<string | null>(null);
   const [isConfirmingClearAll, setIsConfirmingClearAll] = useState<boolean>(false);
+  const [isConfirmingLoadSamples, setIsConfirmingLoadSamples] = useState<boolean>(false);
   const [scrollToQuestionId, setScrollToQuestionId] = useState<string | null>(null);
 
   const [paperSettings, setPaperSettings] = useState<PaperSettings>({
@@ -173,18 +176,9 @@ export default function App() {
     try {
       localStorage.setItem(STORAGE_QUESTIONS_KEY, JSON.stringify(questions));
     } catch (e) {
-      console.warn("Storage quota exceeded, attempting lightweight backup:", e);
-      try {
-        const lightweight = questions.map((q) => {
-          if (q.imageBase64 && q.imageBase64.length > 500000) {
-            return { ...q, imageBase64: "" };
-          }
-          return q;
-        });
-        localStorage.setItem(STORAGE_QUESTIONS_KEY, JSON.stringify(lightweight));
-      } catch (fallbackErr) {
-        console.error("Secondary localStorage write failed:", fallbackErr);
-      }
+      console.warn("Storage quota exceeded:", e);
+      setPasteToast("瀏覽器儲存空間不足，這一頁的題本仍在，重整後可能遺失。請先備份。");
+      window.setTimeout(() => setPasteToast(null), 5000);
     }
   }, [questions]);
 
@@ -212,6 +206,7 @@ export default function App() {
   const processNewImage = useCallback(
     async (base64Data: string, subjectHint?: string) => {
       const tempId = "q_" + Date.now();
+      analyzingCountRef.current += 1;
       setIsAnalyzing(true);
       setAnalyzingMessage("AI 正在辨識考題圖片並分析科目與單元...");
 
@@ -293,8 +288,11 @@ export default function App() {
           setIsByokOpen(true);
         }
       } finally {
-        setIsAnalyzing(false);
-        setAnalyzingMessage("");
+        analyzingCountRef.current = Math.max(0, analyzingCountRef.current - 1);
+        if (analyzingCountRef.current === 0) {
+          setIsAnalyzing(false);
+          setAnalyzingMessage("");
+        }
       }
     },
     []
@@ -400,6 +398,12 @@ export default function App() {
   // Global paste event listener for Ctrl+V
   useEffect(() => {
     const handlePaste = async (e: ClipboardEvent) => {
+      const active = document.activeElement as HTMLElement | null;
+      const tag = active?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || active?.isContentEditable) {
+        return;
+      }
+
       const items = e.clipboardData?.items;
       if (!items) return;
 
@@ -611,6 +615,12 @@ export default function App() {
   };
 
   const handleLoadSamples = () => {
+    if (questions.length > 0 && !isConfirmingLoadSamples) {
+      setIsConfirmingLoadSamples(true);
+      setIsConfirmingClearAll(false);
+      return;
+    }
+    setIsConfirmingLoadSamples(false);
     setQuestions(initialSampleQuestions);
     setAppPage("notebook");
   };
@@ -621,25 +631,36 @@ export default function App() {
 
   const handleRestoreQuestions = (
     restoredQuestions: QuestionItem[],
-    mode: "merge" | "overwrite"
+    mode: "merge" | "overwrite",
+    restoredPaperSettings?: PaperSettings
   ) => {
     if (mode === "overwrite") {
       setQuestions(restoredQuestions);
+      if (restoredPaperSettings) {
+        paperAutoLockRef.current = { subtitle: true, gradeClass: true };
+        setPaperSettings(restoredPaperSettings);
+      }
       setPasteToast(`✨ 已成功完全還原 ${restoredQuestions.length} 道考題！`);
     } else {
-      // Merge mode: keep existing questions, append new ones avoiding duplicate IDs
       setQuestions((prev) => {
         const existingIds = new Set(prev.map((q) => q.id));
+        const idMap = new Map<string, string>();
         const newItems = restoredQuestions.map((q) => {
           if (existingIds.has(q.id)) {
-            return {
-              ...q,
-              id: `q_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-            };
+            const newId = `q_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+            idMap.set(q.id, newId);
+            return { ...q, id: newId };
           }
           return q;
         });
-        return [...prev, ...newItems];
+        return [
+          ...prev,
+          ...newItems.map((q) =>
+            q.parentQuestionId && idMap.has(q.parentQuestionId)
+              ? { ...q, parentQuestionId: idMap.get(q.parentQuestionId) }
+              : q
+          ),
+        ];
       });
       setPasteToast(`✨ 已成功合併匯入 ${restoredQuestions.length} 道考題！`);
     }
@@ -675,17 +696,17 @@ export default function App() {
 
   useEffect(() => {
     setPaperSettings((prev) => {
-      if (
-        prev.subtitle === paperMeta.subtitle &&
-        prev.gradeClass === paperMeta.gradeClass
-      ) {
-        return prev;
+      const next = { ...prev };
+      let changed = false;
+      if (!paperAutoLockRef.current.subtitle && prev.subtitle !== paperMeta.subtitle) {
+        next.subtitle = paperMeta.subtitle;
+        changed = true;
       }
-      return {
-        ...prev,
-        subtitle: paperMeta.subtitle,
-        gradeClass: paperMeta.gradeClass,
-      };
+      if (!paperAutoLockRef.current.gradeClass && prev.gradeClass !== paperMeta.gradeClass) {
+        next.gradeClass = paperMeta.gradeClass;
+        changed = true;
+      }
+      return changed ? next : prev;
     });
   }, [paperMeta]);
 
@@ -770,14 +791,34 @@ export default function App() {
           <div className="flex items-center gap-2 self-end sm:self-auto">
             {questions.length > 0 && (
               <>
-                <button
-                  type="button"
-                  onClick={handleLoadSamples}
-                  className="px-2.5 py-1 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition"
-                  title="重新填入示範考題"
-                >
-                  重載示範題
-                </button>
+                {isConfirmingLoadSamples ? (
+                  <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-lg text-xs">
+                    <span className="text-amber-800 font-bold text-[11px]">確定覆蓋成示範題？</span>
+                    <button
+                      type="button"
+                      onClick={handleLoadSamples}
+                      className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold shadow-2xs transition"
+                    >
+                      覆蓋
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsConfirmingLoadSamples(false)}
+                      className="px-1 text-slate-500 hover:text-slate-700 text-[10px]"
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleLoadSamples}
+                    className="px-2.5 py-1 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition"
+                    title="重新填入示範考題"
+                  >
+                    重載示範題
+                  </button>
+                )}
                 {isConfirmingClearAll ? (
                   <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded-lg text-xs">
                     <span className="text-rose-700 font-bold text-[11px]">確定清空？</span>
@@ -966,7 +1007,13 @@ export default function App() {
               });
             }
           }}
-          onClose={() => setCalibrationModal({ isOpen: false, imageSrc: "" })}
+          onClose={() => {
+            if (!calibrationModal.targetQuestionId && calibrationModal.imageSrc) {
+              handleCalibrationSkip();
+              return;
+            }
+            setCalibrationModal({ isOpen: false, imageSrc: "" });
+          }}
         />
       )}
 
@@ -983,7 +1030,13 @@ export default function App() {
         questions={printQuestions}
         settings={paperSettings}
         onClose={() => setIsPdfModalOpen(false)}
-        onUpdateSettings={setPaperSettings}
+        onUpdateSettings={(next) => {
+          setPaperSettings((prev) => {
+            if (next.subtitle !== prev.subtitle) paperAutoLockRef.current.subtitle = true;
+            if (next.gradeClass !== prev.gradeClass) paperAutoLockRef.current.gradeClass = true;
+            return next;
+          });
+        }}
       />
 
       {/* Backup & Restore Modal */}

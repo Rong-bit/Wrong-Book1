@@ -317,6 +317,46 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     }
   };
 
+  const applyPendingTransforms = async (): Promise<string> => {
+    if (mode === "perspective") {
+      const natW = imgRef.current?.naturalWidth || naturalDimensions.width;
+      const natH = imgRef.current?.naturalHeight || naturalDimensions.height;
+      const realCorners: [Point, Point, Point, Point] = [
+        { x: corners[0].x * natW, y: corners[0].y * natH },
+        { x: corners[1].x * natW, y: corners[1].y * natH },
+        { x: corners[2].x * natW, y: corners[2].y * natH },
+        { x: corners[3].x * natW, y: corners[3].y * natH },
+      ];
+      return applyPerspectiveCorrection(currentImage, realCorners);
+    }
+    return applyCrop(
+      currentImage,
+      {
+        x: cropBox.x,
+        y: cropBox.y,
+        width: cropBox.w,
+        height: cropBox.h,
+      },
+      0.92,
+      imgRef.current
+    );
+  };
+
+  const handleFinish = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    setProcessingText("正在套用校正...");
+    try {
+      const output = await applyPendingTransforms();
+      onConfirm(output);
+    } catch (err) {
+      console.error("Finish calibration failed:", err);
+      onConfirm(currentImage);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Execute Crop
   const handleApplyCrop = async () => {
     if (isProcessing) return;
@@ -575,13 +615,13 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         const targetTag = (e.target as HTMLElement)?.tagName?.toLowerCase();
         if (targetTag !== "input" && targetTag !== "textarea") {
           e.preventDefault();
-          onConfirm(currentImage);
+          void handleFinish();
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose, onConfirm, currentImage, isProcessing]);
+  }, [isOpen, onClose, handleFinish, isProcessing]);
 
   if (!isOpen) return null;
 
@@ -852,7 +892,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             <button
               id="top-header-next-step-btn"
               type="button"
-              onClick={() => onConfirm(currentImage)}
+              onClick={() => void handleFinish()}
               disabled={isProcessing}
               className="hidden sm:inline-flex px-3.5 sm:px-4 py-1.5 sm:py-2 rounded-xl text-xs font-extrabold text-white bg-sky-600 hover:bg-sky-500 active:scale-95 transition shadow-sm items-center gap-1.5"
               title="完成校正並進行下一步"
@@ -1223,7 +1263,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             <button
               id="bottom-footer-next-step-btn"
               type="button"
-              onClick={() => onConfirm(currentImage)}
+              onClick={() => void handleFinish()}
               disabled={isProcessing}
               className="sm:hidden px-3 py-2 rounded-xl text-xs font-extrabold text-white bg-slate-900 hover:bg-slate-800 active:scale-95 transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
             >

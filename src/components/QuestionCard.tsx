@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   ChevronUp,
   ChevronDown,
@@ -78,6 +78,36 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   const [editedExplanation, setEditedExplanation] = useState(question.explanation);
   const [editedNotes, setEditedNotes] = useState(question.myNotes || "");
   const [showAnswerInPaper, setShowAnswerInPaper] = useState(false);
+
+  const fillEditFromQuestion = () => {
+    setEditedSubject(question.subject || "");
+    setEditedGradeLevel(question.gradeLevel || "");
+    setEditedChapter(question.chapter || "");
+    setEditedUnit(question.unit || "");
+    setEditedText(question.questionText);
+    setEditedExplanation(question.explanation);
+    setEditedNotes(question.myNotes || "");
+  };
+
+  useEffect(() => {
+    if (!isEditing) fillEditFromQuestion();
+  }, [
+    isEditing,
+    question.id,
+    question.subject,
+    question.gradeLevel,
+    question.chapter,
+    question.unit,
+    question.questionText,
+    question.explanation,
+    question.myNotes,
+  ]);
+
+  const beginEdit = () => {
+    if (question.status === "analyzing") return;
+    fillEditFromQuestion();
+    setIsEditing(true);
+  };
 
   // AI Similar Question Generator State
   const [isGeneratingSimilar, setIsGeneratingSimilar] = useState(false);
@@ -332,10 +362,11 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => setIsEditing(!isEditing)}
+              disabled={question.status === "analyzing"}
+              onClick={() => (isEditing ? setIsEditing(false) : beginEdit())}
               className={`p-1.5 rounded-lg transition ${
                 isEditing ? "bg-sky-100 text-sky-700" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
-              }`}
+              } disabled:opacity-40 disabled:pointer-events-none`}
               title="編輯題目文字與詳解"
             >
               <Edit3 className="w-4 h-4" />
@@ -555,7 +586,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             )}
             <button
               type="button"
-              onClick={() => setIsEditing(true)}
+              onClick={beginEdit}
               className="px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer"
             >
               <Edit3 className="w-3.5 h-3.5" />
@@ -899,7 +930,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                       {!question.myNotes && (
                         <button
                           type="button"
-                          onClick={() => setIsEditing(true)}
+                          onClick={beginEdit}
                           className="text-sky-600 hover:underline text-[11px]"
                         >
                           + 新增覆盤心得
