@@ -1474,35 +1474,24 @@ export async function applyMultiRegionCrop(
           };
         });
 
-        // Reading order: top→bottom, then left→right
-        patches.sort((a, b) => (Math.abs(a.cy - b.cy) > 0.04 ? a.cy - b.cy : a.cx - b.cx));
+        // Stack vertically as two (or more) blocks — not one long strip.
+        // Same row (stem | map): left panel first; else top→bottom.
+        patches.sort((a, b) => (Math.abs(a.cy - b.cy) > 0.06 ? a.cy - b.cy : a.cx - b.cx));
 
-        const gutter = Math.max(8, Math.round(Math.min(w, h) * 0.012));
-        const pad = Math.max(6, Math.round(Math.min(w, h) * 0.008));
-        const paper = "#f7f4ec";
-        const border = "#d6d3c9";
+        const labelH = Math.max(18, Math.round(Math.min(w, h) * 0.014));
+        const gutter = Math.max(16, Math.round(Math.min(w, h) * 0.02));
+        const pad = Math.max(12, Math.round(Math.min(w, h) * 0.012));
+        const paper = "#e8e6de";
+        const border = "#64748b";
+        const labels =
+          patches.length === 2 ? ["文字區", "圖區"] : patches.map((_, i) => `範圍 ${i + 1}`);
 
-        // Side-by-side on the page → pack as two horizontal panels; else stack
-        let packHorizontal = false;
-        if (patches.length === 2) {
-          const [a, b] = patches;
-          const overlapY =
-            Math.max(0, Math.min(a.sy + a.sh, b.sy + b.sh) - Math.max(a.sy, b.sy)) /
-            Math.max(1, Math.min(a.sh, b.sh));
-          packHorizontal = overlapY >= 0.35 && Math.abs(a.cx - b.cx) > Math.abs(a.cy - b.cy);
-        }
-
-        let canvasW: number;
-        let canvasH: number;
-        if (packHorizontal) {
-          const maxH = Math.max(...patches.map((p) => p.sh));
-          canvasW = pad * 2 + patches.reduce((s, p) => s + p.sw, 0) + gutter * (patches.length - 1);
-          canvasH = pad * 2 + maxH;
-        } else {
-          const maxW = Math.max(...patches.map((p) => p.sw));
-          canvasW = pad * 2 + maxW;
-          canvasH = pad * 2 + patches.reduce((s, p) => s + p.sh, 0) + gutter * (patches.length - 1);
-        }
+        const maxW = Math.max(...patches.map((p) => p.sw));
+        const canvasW = pad * 2 + maxW;
+        const canvasH =
+          pad * 2 +
+          patches.reduce((s, p) => s + labelH + p.sh, 0) +
+          gutter * (patches.length - 1);
 
         const canvas = document.createElement("canvas");
         canvas.width = Math.max(1, canvasW);
@@ -1516,25 +1505,35 @@ export async function applyMultiRegionCrop(
         ctx.fillStyle = paper;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        let cursorX = pad;
         let cursorY = pad;
-        for (const p of patches) {
-          const dx = packHorizontal ? cursorX : pad + Math.round((canvas.width - pad * 2 - p.sw) / 2);
-          const dy = packHorizontal
-            ? pad + Math.round((canvas.height - pad * 2 - p.sh) / 2)
-            : cursorY;
+        for (let i = 0; i < patches.length; i++) {
+          const p = patches[i];
+          const panelW = maxW;
+          const dx = pad;
+          const dy = cursorY + labelH;
 
-          // Panel background + border so text / map read as two blocks
+          // Label chip
+          ctx.fillStyle = i === 0 ? "#0f766e" : "#0369a1";
+          const chipW = Math.min(panelW, Math.max(56, labels[i].length * 14 + 16));
+          ctx.beginPath();
+          ctx.roundRect(dx, cursorY, chipW, labelH - 2, 4);
+          ctx.fill();
           ctx.fillStyle = "#ffffff";
-          ctx.fillRect(dx - 2, dy - 2, p.sw + 4, p.sh + 4);
+          ctx.font = `bold ${Math.max(11, Math.round(labelH * 0.62))}px sans-serif`;
+          ctx.textBaseline = "middle";
+          ctx.fillText(labels[i], dx + 8, cursorY + (labelH - 2) / 2);
+
+          // Panel
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(dx, dy, panelW, p.sh);
           ctx.strokeStyle = border;
-          ctx.lineWidth = 1;
-          ctx.strokeRect(dx - 2.5, dy - 2.5, p.sw + 5, p.sh + 5);
+          ctx.lineWidth = 2;
+          ctx.strokeRect(dx + 0.5, dy + 0.5, panelW - 1, p.sh - 1);
 
-          ctx.drawImage(img, p.sx, p.sy, p.sw, p.sh, dx, dy, p.sw, p.sh);
+          const imgX = dx + Math.round((panelW - p.sw) / 2);
+          ctx.drawImage(img, p.sx, p.sy, p.sw, p.sh, imgX, dy, p.sw, p.sh);
 
-          if (packHorizontal) cursorX += p.sw + gutter;
-          else cursorY += p.sh + gutter;
+          cursorY += labelH + p.sh + gutter;
         }
 
         resolve(canvas.toDataURL("image/jpeg", quality));
