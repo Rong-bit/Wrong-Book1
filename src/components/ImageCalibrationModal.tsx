@@ -491,25 +491,38 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       const imageBase64 = await applyPendingTransforms();
       return { imageBase64 };
     }
-    // Same question may be multiple paint islands (stem + map) → multi-rect composite
-    // plus a figure-only crop for PDF「僅排版文字」
-    if (selectRegionsRef.current.length > 0) {
-      const regions = selectRegionsRef.current;
-      const imageBase64 = await applyMultiRegionCrop(currentImage, regions, 0.92);
-      const figureOnly = await cropFigureRegionsOnly(currentImage, regions, 0.92);
-      // "" = explicit none so PDF textOnly won't fall back to the stem screenshot
-      return { imageBase64, figureImageBase64: figureOnly || "" };
+    // Frame tool must win over leftover paint islands: user may paint 文字 then
+    // switch to「框圖形」and confirm the visible rectangle as the diagram.
+    let regions: LabeledCropRect[];
+    if (cropTool === "frame") {
+      const frameRegion: LabeledCropRect = {
+        x: cropBox.x,
+        y: cropBox.y,
+        width: cropBox.w,
+        height: cropBox.h,
+        kind: paintKindRef.current,
+      };
+      // Keep opposite-kind paint islands; replace same-kind with the active frame
+      const kept = selectRegionsRef.current.filter(
+        (r) => r.kind !== paintKindRef.current
+      );
+      regions = [...kept, frameRegion];
+    } else if (selectRegionsRef.current.length > 0) {
+      regions = selectRegionsRef.current;
+    } else {
+      regions = [
+        {
+          x: cropBox.x,
+          y: cropBox.y,
+          width: cropBox.w,
+          height: cropBox.h,
+          kind: paintKindRef.current,
+        },
+      ];
     }
-    // 框文字／框圖形：單矩形也帶 kind，圖形框才產出 figure 附圖
-    const frameRegion: LabeledCropRect = {
-      x: cropBox.x,
-      y: cropBox.y,
-      width: cropBox.w,
-      height: cropBox.h,
-      kind: paintKindRef.current,
-    };
-    const imageBase64 = await applyMultiRegionCrop(currentImage, [frameRegion], 0.92);
-    const figureOnly = await cropFigureRegionsOnly(currentImage, [frameRegion], 0.92);
+    const imageBase64 = await applyMultiRegionCrop(currentImage, regions, 0.92);
+    const figureOnly = await cropFigureRegionsOnly(currentImage, regions, 0.92);
+    // "" = explicit none so PDF textOnly won't fall back to the stem screenshot
     return { imageBase64, figureImageBase64: figureOnly || "" };
   };
 
