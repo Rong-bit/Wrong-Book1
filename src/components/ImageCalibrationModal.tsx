@@ -78,6 +78,14 @@ type PaintKind = RegionKind;
 /** Default zoom after capture / open calibration (1 = fit viewport). */
 const DEFAULT_CALIBRATION_ZOOM = 1.3;
 
+type SelectSnapshot = {
+  strokes: Point[][];
+  kinds: RegionKind[];
+  regions: LabeledCropRect[];
+  cropBox: { x: number; y: number; w: number; h: number };
+  paintKind: PaintKind;
+};
+
 /** Thin stroke preview while painting (normalized width factor). */
 const PAINT_PREVIEW_WIDTH = 0.018;
 /** Mobile: aim above the finger so the red crosshair (not the finger tip) is the drop point. */
@@ -126,6 +134,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const paintKindRef = useRef<PaintKind>("text");
   const cropToolRef = useRef<CropTool>("paint");
   const cropDirtyAfterAddRef = useRef(false);
+  /** Snapshots before each paint stroke / frame lock — step undo without full 清除 */
+  const selectHistoryRef = useRef<SelectSnapshot[]>([]);
+  const [selectHistoryLen, setSelectHistoryLen] = useState(0);
+  const pushSelectHistoryRef = useRef<() => void>(() => undefined);
   paintKindRef.current = paintKind;
   cropToolRef.current = cropTool;
   selectStrokeKindsRef.current = selectStrokeKinds;
@@ -267,6 +279,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setActiveSelectStroke(null);
       selectStrokeRef.current = null;
       setIsSelectPainting(false);
+      selectHistoryRef.current = [];
+      setSelectHistoryLen(0);
       cropDirtyAfterAddRef.current = false;
 
       // Immediate pre-decode test
@@ -344,7 +358,45 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     setCurrentImage(prev);
   };
 
+  const snapshotSelection = (): SelectSnapshot => ({
+    strokes: selectPaintStrokesRef.current.map((stroke) =>
+      stroke.map((p) => ({ x: p.x, y: p.y }))
+    ),
+    kinds: [...selectStrokeKindsRef.current],
+    regions: selectRegionsRef.current.map((r) => ({ ...r })),
+    cropBox: { ...cropBoxRef.current },
+    paintKind: paintKindRef.current,
+  });
+
+  const pushSelectHistory = () => {
+    selectHistoryRef.current = [
+      ...selectHistoryRef.current,
+      snapshotSelection(),
+    ];
+    setSelectHistoryLen(selectHistoryRef.current.length);
+  };
+  pushSelectHistoryRef.current = pushSelectHistory;
+
+  const restoreSelectSnapshot = (snap: SelectSnapshot) => {
+    selectPaintStrokesRef.current = snap.strokes;
+    setSelectPaintStrokes(snap.strokes);
+    selectStrokeKindsRef.current = snap.kinds;
+    setSelectStrokeKinds(snap.kinds);
+    selectRegionsRef.current = snap.regions;
+    setSelectRegions(snap.regions);
+    cropBoxRef.current = snap.cropBox;
+    setCropBox(snap.cropBox);
+    setPaintKind(snap.paintKind);
+    paintKindRef.current = snap.paintKind;
+    setActiveSelectStroke(null);
+    selectStrokeRef.current = null;
+    setIsSelectPainting(false);
+    cropDirtyAfterAddRef.current = snap.regions.length > 0 || snap.strokes.length > 0;
+  };
+
   const clearSelectPaint = () => {
+    selectHistoryRef.current = [];
+    setSelectHistoryLen(0);
     setSelectPaintStrokes([]);
     selectPaintStrokesRef.current = [];
     setSelectStrokeKinds([]);
@@ -355,6 +407,29 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     selectStrokeRef.current = null;
     setIsSelectPainting(false);
   };
+
+  /** Undo last 選文字／選圖形 stroke or 框選 lock — not a full clear */
+  const undoLastSelection = () => {
+    if (selectHistoryRef.current.length > 0) {
+      const prev = selectHistoryRef.current[selectHistoryRef.current.length - 1];
+      selectHistoryRef.current = selectHistoryRef.current.slice(0, -1);
+      setSelectHistoryLen(selectHistoryRef.current.length);
+      restoreSelectSnapshot(prev);
+      return;
+    }
+    // Fallback: drop last stroke when history missing
+    if (selectPaintStrokesRef.current.length === 0) return;
+    const nextStrokes = selectPaintStrokesRef.current.slice(0, -1);
+    const nextKinds = selectStrokeKindsRef.current.slice(0, -1);
+    selectPaintStrokesRef.current = nextStrokes;
+    selectStrokeKindsRef.current = nextKinds;
+    setSelectPaintStrokes(nextStrokes);
+    setSelectStrokeKinds(nextKinds);
+    syncPaintRegionsFromStrokes(nextStrokes, nextKinds);
+  };
+
+  const canUndoSelection =
+    selectHistoryLen > 0 || selectPaintStrokes.length > 0;
 
   const applyPaintKind = (kind: PaintKind) => {
     setPaintKind(kind);
@@ -456,6 +531,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
    */
   const activateFrameTool = () => {
     if (cropTool === "frame") {
+      // Snapshot before locking current box as one island
+      pushSelectHistory();
       upsertFrameRegion(paintKind, cropBoxRef.current);
       const nextKind: PaintKind = paintKind === "text" ? "diagram" : "text";
       applyPaintKind(nextKind);
@@ -1008,6 +1085,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     if (cropTool === "paint") return;
     e.preventDefault();
     e.stopPropagation();
+    // Snapshot before drag so「復原」可回到調整前的框
+    if (cropTool === "frame") pushSelectHistory();
     setActiveCropHandle(handle);
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
     const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
@@ -1036,6 +1115,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setActiveSelectStroke(null);
       setIsSelectPainting(false);
       if (points.length < 2) return;
+      // Snapshot pre-stroke so「復原」可撤銷這一筆選文字／選圖形
+      pushSelectHistoryRef.current();
       const kind = paintKindRef.current;
       const nextStrokes = [...selectPaintStrokesRef.current, points];
       const nextKinds = [...selectStrokeKindsRef.current, kind];
@@ -1193,6 +1274,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         const box = cropBoxRef.current;
         const kind = paintKindRef.current;
         if (box.w >= 0.02 && box.h >= 0.02) {
+          // History was pushed on pointer down (pre-drag)
           const frameRegion: LabeledCropRect = {
             x: box.x,
             y: box.y,
@@ -1530,7 +1612,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           </div>
         </div>
 
-        {/* 8 Resize Handles */}
+        {/* 8 resize hit-targets: invisible so they don't cover text/figures; drag edges/corners still works */}
         {handles.map((h) => (
           <div
             key={h.id}
@@ -1542,20 +1624,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               cursor: h.cursor,
               touchAction: "none",
             }}
-            className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-20 group w-11 h-11 flex items-center justify-center"
-          >
-            <div
-              className={`w-3.5 h-3.5 rounded-sm bg-white border-2 shadow-md group-hover:scale-130 transition-transform ${
-                isDiagramFrame ? "border-sky-600" : "border-emerald-600"
-              } ${
-                activeCropHandle === h.id
-                  ? isDiagramFrame
-                    ? "scale-140 bg-sky-500 border-white ring-2 ring-sky-300"
-                    : "scale-140 bg-emerald-500 border-white ring-2 ring-emerald-300"
-                  : ""
-              }`}
-            />
-          </div>
+            className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-20 w-11 h-11"
+            aria-label={`調整裁切框 ${h.id}`}
+            title="拖曳邊角調整範圍"
+          />
         ))}
       </div>
     );
@@ -1728,14 +1800,25 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                       : "框文字"}
                   </button>
                 </div>
-                {selectRegions.length > 0 ? (
+                {canUndoSelection ? (
+                  <button
+                    type="button"
+                    onClick={undoLastSelection}
+                    className="px-2 py-0.5 rounded text-[11px] font-medium bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100 whitespace-nowrap flex items-center gap-0.5"
+                    title="復原上一筆選文字／選圖形或框選（不必全部清除）"
+                  >
+                    <Undo2 className="w-3 h-3" />
+                    復原
+                  </button>
+                ) : null}
+                {selectRegions.length > 0 || selectPaintStrokes.length > 0 ? (
                   <button
                     type="button"
                     onClick={clearSelectPaint}
                     className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap"
                     title={
                       cropTool === "paint"
-                        ? "清除畫選，重新描繪"
+                        ? "清除全部畫選，重新描繪"
                         : "清除已鎖定的文字／圖形框"
                     }
                   >
@@ -1911,10 +1994,22 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             <div className="w-px h-4 bg-slate-200 mx-1" />
             <button
               type="button"
-              onClick={handleUndo}
-              disabled={history.length === 0 || isProcessing}
+              onClick={() => {
+                if (canUndoSelection) {
+                  undoLastSelection();
+                  return;
+                }
+                handleUndo();
+              }}
+              disabled={
+                isProcessing || (!canUndoSelection && history.length === 0)
+              }
               className="px-2 py-1 rounded-lg text-slate-600 hover:bg-slate-100 border border-slate-200 transition disabled:opacity-40 flex items-center gap-1"
-              title="復原上一步"
+              title={
+                canUndoSelection
+                  ? "復原上一筆選文字／選圖形或框選"
+                  : "復原上一步影像處理"
+              }
             >
               <Undo2 className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">復原</span>
