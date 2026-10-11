@@ -57,7 +57,12 @@ export interface PaperSettings {
   orientation: "portrait" | "landscape";
   mode: "cornell" | "notebook" | "exam"; // "cornell" (康乃爾雙欄手寫訂正本) vs "notebook" (含解析筆記) vs "exam" (挖空作答卷)
   questionDisplayMode: QuestionDisplayMode; // "both" (文字與截圖) | "imageOnly" (僅截圖照片沒文字) | "textOnly" (僅文字無截圖)
-  questionsPerPage: 1 | 2; // 康乃爾模式每頁題數 (1 或 2 題)
+  /**
+   * 康乃爾每頁密度：
+   * 1 / 2 = 固定每頁題數（大演算／黃金比例）；
+   * "compact" = 背科精簡：題與題緊接、無手寫留白，自動較密排版。
+   */
+  questionsPerPage: 1 | 2 | "compact";
   showGrid: boolean; // 是否顯示 5mm 數學微網格手寫背景
   showCheckboxes: boolean; // 是否包含 8 大錯誤原因分析核取框
   showReviewTrack: boolean; // 是否包含艾賓浩斯 5 次複習打卡檢核

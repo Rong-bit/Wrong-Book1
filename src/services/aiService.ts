@@ -475,13 +475,13 @@ async function removeHandwritingOnClient(imageBase64: string): Promise<string> {
     const { response } = await generateImageContentWithRetry(ai, IMAGE_EDIT_MODELS[0], {
       contents: {
         parts: [
+          { text: buildRemoveHandwritingPrompt() },
           {
             inlineData: {
               mimeType,
               data: cleanBase64,
             },
           },
-          { text: buildRemoveHandwritingPrompt() },
         ],
       },
       config: {

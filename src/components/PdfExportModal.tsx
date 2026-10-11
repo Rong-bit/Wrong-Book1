@@ -122,7 +122,15 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   };
 
   // Chunk questions for Cornell mode
-  const cornellPageSize = settings.questionsPerPage || 2;
+  const isCornellCompact = settings.questionsPerPage === "compact";
+  // 背科精簡：無手寫留白、題與題緊接；B5 約 5 題／A4 約 6 題；其餘為固定 1 或 2 題
+  const cornellPageSize = isCornellCompact
+    ? settings.paperSize === "B5"
+      ? 5
+      : 6
+    : settings.questionsPerPage === 1
+    ? 1
+    : 2;
   const cornellPages: { pageIndex: number; questions: { q: QuestionItem; index: number }[] }[] = [];
   for (let i = 0; i < questions.length; i += cornellPageSize) {
     const chunk = questions.slice(i, i + cornellPageSize).map((q, offset) => ({
@@ -323,19 +331,21 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   <label className="block text-slate-700 font-semibold mb-1">
                     每頁題數配置
                   </label>
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
                     <button
                       type="button"
                       onClick={() =>
                         onUpdateSettings({ ...settings, questionsPerPage: 2 })
                       }
                       className={`py-1.5 px-2 rounded-lg border text-center transition ${
-                        (settings.questionsPerPage || 2) === 2
+                        settings.questionsPerPage === 2 ||
+                        settings.questionsPerPage == null
                           ? "bg-amber-600 text-white border-amber-600 font-bold"
                           : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                       }`}
                     >
-                      每頁 2 題 (黃金比例)
+                      <div className="text-[11px] font-bold">每頁 2 題</div>
+                      <div className="text-[9px] opacity-80 mt-0.5">黃金比例 · 數理演算</div>
                     </button>
                     <button
                       type="button"
@@ -348,9 +358,32 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                           : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                       }`}
                     >
-                      每頁 1 題 (超大演算)
+                      <div className="text-[11px] font-bold">每頁 1 題</div>
+                      <div className="text-[9px] opacity-80 mt-0.5">超大演算空間</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onUpdateSettings({ ...settings, questionsPerPage: "compact" })
+                      }
+                      className={`py-1.5 px-2 rounded-lg border text-center transition ${
+                        settings.questionsPerPage === "compact"
+                          ? "bg-amber-600 text-white border-amber-600 font-bold"
+                          : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                      }`}
+                      title="地理、公民、歷史等背科：題與題緊接、不留手寫空白，避免紙張浪費"
+                    >
+                      <div className="text-[11px] font-bold">背科精簡</div>
+                      <div className="text-[9px] opacity-80 mt-0.5">無留白 · 密排</div>
                     </button>
                   </div>
+                  {settings.questionsPerPage === "compact" && (
+                    <p className="mt-1.5 text-[10px] text-amber-800/90 leading-snug">
+                      適合地理、公民、歷史等死背科目：
+                      {settings.paperSize === "B5" ? "B5 約 5 題／頁" : "A4 約 6 題／頁"}
+                      ，題與題緊接、不留手寫訂正空白。
+                    </p>
+                  )}
                 </div>
 
                 <div className="space-y-1.5 pt-1">
@@ -661,31 +694,51 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                       </div>
 
                       {/* Questions in this sheet */}
-                      <div className="flex-1 min-h-0 flex flex-col gap-2.5">
+                      <div
+                        className={`flex-1 min-h-0 flex flex-col ${
+                          isCornellCompact ? "gap-1.5 justify-start overflow-hidden" : "gap-2.5"
+                        }`}
+                      >
                         {pageQs.map(({ q, index }, qIdx) => (
                           <div
                             key={q.id}
-                            className="flex-1 min-h-0 border border-slate-300 rounded-lg overflow-hidden flex flex-row relative bg-white"
+                            className={`border border-slate-300 rounded-lg overflow-hidden flex flex-row relative bg-white ${
+                              isCornellCompact
+                                ? "shrink-0 items-start"
+                                : "flex-1 min-h-0"
+                            }`}
                           >
                             {/* LEFT SIDEBAR: Metadata & Mistake Reason Analysis */}
-                            <div className="w-48 sm:w-52 shrink-0 bg-slate-50 border-r border-slate-300 p-2.5 flex flex-col justify-between text-[11px] font-sans">
-                              <div className="space-y-2">
+                            <div
+                              className={`shrink-0 bg-slate-50 border-r border-slate-300 flex flex-col text-[11px] font-sans ${
+                                isCornellCompact
+                                  ? "w-36 sm:w-40 p-1.5"
+                                  : "w-48 sm:w-52 p-2.5 justify-between"
+                              }`}
+                            >
+                              <div className={isCornellCompact ? "space-y-1" : "space-y-2"}>
                                 {/* Subject / Source */}
                                 <div>
-                                  <div className="font-semibold text-slate-800 flex items-center gap-1">
+                                  <div className="font-semibold text-slate-800 flex items-center gap-1 flex-wrap">
                                     <span className="text-[10px] px-1.5 py-0.2 rounded bg-sky-100 text-sky-800 font-bold">
                                       {q.subject || "科目"}
                                     </span>
-                                    <span className="text-[10px] text-slate-500 truncate">
-                                      來源: ___________
-                                    </span>
+                                    {!isCornellCompact && (
+                                      <span className="text-[10px] text-slate-500 truncate">
+                                        來源: ___________
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
 
                                 {/* Grade / Volume / Chapter */}
                                 <div>
                                   <div className="text-[10px] text-slate-500 font-bold">主題 / 冊別</div>
-                                  <div className="text-slate-800 font-medium text-[11px] leading-tight">
+                                  <div
+                                    className={`text-slate-800 font-medium leading-tight ${
+                                      isCornellCompact ? "text-[10px]" : "text-[11px]"
+                                    }`}
+                                  >
                                     {q.gradeLevel || "冊別待定"}
                                     {q.chapter ? ` · ${q.chapter}` : ""}
                                   </div>
@@ -694,7 +747,11 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                 {/* Core Knowledge Point */}
                                 <div>
                                   <div className="text-[10px] text-slate-500 font-bold">核心考點</div>
-                                  <div className="text-slate-900 font-bold text-[11px] leading-tight text-amber-900 bg-amber-50/70 p-1 rounded border border-amber-200/60">
+                                  <div
+                                    className={`text-slate-900 font-bold leading-tight text-amber-900 bg-amber-50/70 p-1 rounded border border-amber-200/60 ${
+                                      isCornellCompact ? "text-[10px]" : "text-[11px]"
+                                    }`}
+                                  >
                                     {q.unit || "觀念綜合"}
                                   </div>
                                 </div>
@@ -703,13 +760,25 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                 {settings.showCheckboxes !== false && (
                                   <div>
                                     <div className="text-[10px] text-slate-600 font-bold mb-1 flex items-center justify-between">
-                                      <span>原因分析 (可複選)</span>
-                                      <span className="text-[9px] text-slate-400">WHY</span>
+                                      <span>原因分析{isCornellCompact ? "" : " (可複選)"}</span>
+                                      {!isCornellCompact && (
+                                        <span className="text-[9px] text-slate-400">WHY</span>
+                                      )}
                                     </div>
-                                    <div className="grid grid-cols-2 gap-y-1 gap-x-1 text-[10px] text-slate-700">
+                                    <div
+                                      className={`grid grid-cols-2 text-slate-700 ${
+                                        isCornellCompact
+                                          ? "gap-y-0.5 gap-x-0.5 text-[9px]"
+                                          : "gap-y-1 gap-x-1 text-[10px]"
+                                      }`}
+                                    >
                                       {MISTAKE_REASONS.map((reason) => (
                                         <div key={reason} className="flex items-center gap-1">
-                                          <div className="w-3 h-3 rounded-[2px] border border-slate-400 bg-white" />
+                                          <div
+                                            className={`rounded-[2px] border border-slate-400 bg-white shrink-0 ${
+                                              isCornellCompact ? "w-2.5 h-2.5" : "w-3 h-3"
+                                            }`}
+                                          />
                                           <span className="truncate">{reason}</span>
                                         </div>
                                       ))}
@@ -718,19 +787,27 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                 )}
                               </div>
 
-                              {/* Mastery Level Rating */}
-                              <div className="pt-1.5 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-600">
-                                <span className="font-bold">掌握度：</span>
-                                <span className="tracking-widest text-slate-400 font-mono text-xs">
-                                  ☆☆☆☆☆
-                                </span>
-                              </div>
+                              {/* Mastery Level Rating — skip in compact to save space */}
+                              {!isCornellCompact && (
+                                <div className="pt-1.5 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-600">
+                                  <span className="font-bold">掌握度：</span>
+                                  <span className="tracking-widest text-slate-400 font-mono text-xs">
+                                    ☆☆☆☆☆
+                                  </span>
+                                </div>
+                              )}
                             </div>
 
                             {/* RIGHT MAIN AREA: Question text + Math grid notebook workspace */}
                             <div className="flex-1 flex flex-col min-w-0 bg-white">
                               {/* Top Question Body */}
-                              <div className="p-2.5 border-b border-slate-200 max-h-[48%] overflow-y-auto">
+                              <div
+                                className={`border-b border-slate-200 ${
+                                  isCornellCompact
+                                    ? "p-1.5 max-h-none"
+                                    : "p-2.5 max-h-[48%] overflow-y-auto"
+                                }`}
+                              >
                                 <div className="flex items-center gap-2 mb-1">
                                   <span className="text-xs font-black px-2 py-0.5 rounded bg-slate-900 text-white font-mono">
                                     第 {index + 1} 題
@@ -762,7 +839,11 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                       <img
                                         src={normalizeImageSrc(q.imageBase64)}
                                         alt="題目原圖截圖"
-                                        className="max-h-48 sm:max-h-56 w-auto object-contain border border-slate-200 rounded shadow-2xs"
+                                        className={`w-auto object-contain border border-slate-200 rounded shadow-2xs ${
+                                          isCornellCompact
+                                            ? "max-h-20"
+                                            : "max-h-48 sm:max-h-56"
+                                        }`}
                                         style={{
                                           transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
                                             (q.imageSettings.zoom || 100) / 100
@@ -795,7 +876,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                           <img
                                             src={normalizeImageSrc(q.imageBase64)}
                                             alt="題目原圖"
-                                            className="max-h-28 object-contain border border-slate-200 rounded"
+                                            className={`object-contain border border-slate-200 rounded ${
+                                              isCornellCompact ? "max-h-16" : "max-h-28"
+                                            }`}
                                             style={{
                                               transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
                                                 (q.imageSettings.zoom || 100) / 100
@@ -804,42 +887,64 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                           />
                                         </div>
                                       )}
-                                    <div className="text-xs text-slate-900 leading-relaxed whitespace-pre-line">
+                                    <div
+                                      className={`text-slate-900 leading-relaxed whitespace-pre-line ${
+                                        isCornellCompact ? "text-[11px]" : "text-xs"
+                                      }`}
+                                    >
                                       <MathRenderer content={q.questionText} />
                                     </div>
                                   </>
                                 )}
                               </div>
 
-                              {/* Bottom Handwritten Math Grid & Spaced Repetition Checklist */}
-                              <div
-                                className={`flex-1 p-2 flex flex-col justify-between relative ${
-                                  settings.showGrid !== false ? "math-grid-bg" : "bg-white"
-                                }`}
-                              >
-                                <div className="text-[10px] text-slate-400 font-sans tracking-wider pointer-events-none select-none">
-                                  【演算推導 · 思維訂正筆記區】
-                                </div>
-
-                                {/* Spaced Repetition Review Bar */}
-                                {settings.showReviewTrack !== false && (
-                                  <div className="self-end bg-white/95 px-2.5 py-1 rounded-md border border-slate-300/80 shadow-2xs flex items-center gap-2 text-[10px] text-slate-700">
-                                    <span className="font-bold text-slate-800">
-                                      艾賓浩斯複習打卡 (V/X)：
-                                    </span>
-                                    <div className="flex items-center gap-1.5">
-                                      {REVIEW_INTERVALS.map((label, idx) => (
-                                        <div key={label} className="flex flex-col items-center">
-                                          <div className="w-4 h-4 rounded-[2px] border-2 border-slate-400 bg-white" />
-                                          <span className="text-[8px] text-slate-400 mt-0.5">
-                                            {label}
-                                          </span>
-                                        </div>
-                                      ))}
+                              {/* Bottom: compact = no handwriting blank (optional thin review strip); else spacious grid */}
+                              {isCornellCompact ? (
+                                settings.showReviewTrack !== false && (
+                                  <div className="px-1.5 py-0.5 border-t border-slate-100 flex justify-end shrink-0 bg-white">
+                                    <div className="bg-white rounded border border-slate-300/80 flex items-center gap-1 px-1.5 py-0.5 text-[8px] text-slate-700">
+                                      <span className="font-bold text-slate-800">複習：</span>
+                                      <div className="flex items-center gap-1">
+                                        {REVIEW_INTERVALS.map((label) => (
+                                          <div
+                                            key={label}
+                                            className="w-3 h-3 rounded-[2px] border border-slate-400 bg-white"
+                                            title={label}
+                                          />
+                                        ))}
+                                      </div>
                                     </div>
                                   </div>
-                                )}
-                              </div>
+                                )
+                              ) : (
+                                <div
+                                  className={`flex-1 p-2 flex flex-col justify-between relative ${
+                                    settings.showGrid !== false ? "math-grid-bg" : "bg-white"
+                                  }`}
+                                >
+                                  <div className="text-[10px] text-slate-400 font-sans tracking-wider pointer-events-none select-none">
+                                    【演算推導 · 思維訂正筆記區】
+                                  </div>
+
+                                  {settings.showReviewTrack !== false && (
+                                    <div className="self-end bg-white/95 px-2.5 py-1 rounded-md border border-slate-300/80 shadow-2xs flex items-center gap-2 text-[10px] text-slate-700">
+                                      <span className="font-bold text-slate-800">
+                                        艾賓浩斯複習打卡 (V/X)：
+                                      </span>
+                                      <div className="flex items-center gap-1">
+                                        {REVIEW_INTERVALS.map((label) => (
+                                          <div key={label} className="flex flex-col items-center">
+                                            <div className="w-4 h-4 rounded-[2px] border-2 border-slate-400 bg-white" />
+                                            <span className="text-[8px] text-slate-400 mt-0.5">
+                                              {label}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))}
