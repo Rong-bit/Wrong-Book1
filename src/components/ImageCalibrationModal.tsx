@@ -75,6 +75,9 @@ type AspectRatioMode = "free" | "4:3" | "16:9" | "1:1" | "paper";
 /** Explicit paint target: start with text, tap again for diagram. */
 type PaintKind = RegionKind;
 
+/** Default zoom after capture / open calibration (1 = fit viewport). */
+const DEFAULT_CALIBRATION_ZOOM = 1.3;
+
 /** Thin stroke preview while painting (normalized width factor). */
 const PAINT_PREVIEW_WIDTH = 0.018;
 /** Mobile: aim above the finger so the red crosshair (not the finger tip) is the drop point. */
@@ -104,7 +107,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const [naturalDimensions, setNaturalDimensions] = useState<{ width: number; height: number }>({ width: 800, height: 600 });
   const [aspectRatioMode, setAspectRatioMode] = useState<AspectRatioMode>("free");
   const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({ width: 880, height: 480 });
-  const [zoomScale, setZoomScale] = useState<number>(1); // 1 = Fit Viewport
+  const [zoomScale, setZoomScale] = useState<number>(DEFAULT_CALIBRATION_ZOOM);
   const [imageLoadError, setImageLoadError] = useState<boolean>(false);
   const [isImageReady, setIsImageReady] = useState<boolean>(false);
   const [pendingCrops, setPendingCrops] = useState<CalibratedCrop[]>([]);
@@ -248,7 +251,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setIsImageReady(false);
       setHistory([]);
       setMode(initialMode || "perspective");
-      setZoomScale(1);
+      setZoomScale(DEFAULT_CALIBRATION_ZOOM);
       setCorners(FALLBACK_PERSPECTIVE_CORNERS);
       setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
       setPendingCrops([]);
