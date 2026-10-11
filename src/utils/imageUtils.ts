@@ -890,6 +890,217 @@ export async function applyCrop(
   });
 }
 
+/**
+ * Tap-to-select: find a text line / tight paragraph (or content blob) under a
+ * normalized point, returned as a crop rect with light padding.
+ */
+export function detectTextBlockAtPoint(
+  img: HTMLImageElement,
+  nx: number,
+  ny: number,
+  maxSide = 720
+): CropRect | null {
+  const natW = img.naturalWidth || img.width;
+  const natH = img.naturalHeight || img.height;
+  if (natW < 8 || natH < 8) return null;
+
+  const scale = Math.min(1, maxSide / Math.max(natW, natH));
+  const w = Math.max(32, Math.round(natW * scale));
+  const h = Math.max(32, Math.round(natH * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(img, 0, 0, w, h);
+  const { data } = ctx.getImageData(0, 0, w, h);
+
+  const lum = new Float32Array(w * h);
+  let lumSum = 0;
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    const v = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    lum[p] = v;
+    lumSum += v;
+  }
+  const avgLum = lumSum / (w * h);
+  const inkCut = Math.min(168, Math.max(90, avgLum * 0.72));
+
+  const ink = new Uint8Array(w * h);
+  for (let p = 0; p < ink.length; p++) {
+    ink[p] = lum[p] < inkCut ? 1 : 0;
+  }
+
+  const sx = Math.max(0, Math.min(w - 1, Math.round(nx * (w - 1))));
+  const sy = Math.max(0, Math.min(h - 1, Math.round(ny * (h - 1))));
+
+  // Nearest ink pixel near the tap (finger is imprecise)
+  const searchR = Math.max(8, Math.round(Math.min(w, h) * 0.045));
+  let seedX = -1;
+  let seedY = -1;
+  let bestD = Infinity;
+  for (let dy = -searchR; dy <= searchR; dy++) {
+    for (let dx = -searchR; dx <= searchR; dx++) {
+      const x = sx + dx;
+      const y = sy + dy;
+      if (x < 0 || y < 0 || x >= w || y >= h) continue;
+      if (!ink[y * w + x]) continue;
+      const d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        seedX = x;
+        seedY = y;
+      }
+    }
+  }
+  if (seedX < 0) {
+    // No ink: small box around tap so diagrams/light marks can still be framed
+    const box = Math.max(0.06, Math.min(w, h) * 0.08 / Math.min(w, h));
+    return {
+      x: Math.max(0, nx - box * 0.7),
+      y: Math.max(0, ny - box * 0.45),
+      width: Math.min(1 - Math.max(0, nx - box * 0.7), box * 1.4),
+      height: Math.min(1 - Math.max(0, ny - box * 0.45), box * 0.9),
+    };
+  }
+
+  const rowHasInkInBand = (y: number, x0: number, x1: number): boolean => {
+    if (y < 0 || y >= h) return false;
+    const lo = Math.max(0, x0);
+    const hi = Math.min(w - 1, x1);
+    let hits = 0;
+    for (let x = lo; x <= hi; x++) {
+      if (ink[y * w + x]) {
+        hits++;
+        if (hits >= 2) return true;
+      }
+    }
+    return hits > 0;
+  };
+
+  // Expand horizontally on the seed row with small gap tolerance (spaces between chars)
+  const gapTol = Math.max(3, Math.round(w * 0.018));
+  let xMin = seedX;
+  let xMax = seedX;
+  let gap = 0;
+  for (let x = seedX - 1; x >= 0; x--) {
+    if (ink[seedY * w + x]) {
+      xMin = x;
+      gap = 0;
+    } else if (++gap > gapTol) break;
+  }
+  gap = 0;
+  for (let x = seedX + 1; x < w; x++) {
+    if (ink[seedY * w + x]) {
+      xMax = x;
+      gap = 0;
+    } else if (++gap > gapTol) break;
+  }
+
+  // Estimate line height around seed
+  let yTop = seedY;
+  let yBot = seedY;
+  while (yTop > 0 && rowHasInkInBand(yTop - 1, xMin, xMax)) yTop--;
+  while (yBot < h - 1 && rowHasInkInBand(yBot + 1, xMin, xMax)) yBot++;
+  let lineH = Math.max(4, yBot - yTop + 1);
+
+  // Grow into neighboring lines (paragraph), stop on blank gap or size cap
+  const maxBlockH = Math.round(h * 0.28);
+  const blankLimit = Math.max(2, Math.round(lineH * 0.85));
+  let blank = 0;
+  for (let y = yTop - 1; y >= 0 && yBot - y + 1 < maxBlockH; y--) {
+    if (rowHasInkInBand(y, xMin - gapTol, xMax + gapTol)) {
+      // widen x to this line
+      for (let x = xMin; x >= 0; x--) {
+        if (ink[y * w + x]) xMin = x;
+        else if (xMin - x > gapTol) break;
+      }
+      for (let x = xMax; x < w; x++) {
+        if (ink[y * w + x]) xMax = x;
+        else if (x - xMax > gapTol) break;
+      }
+      yTop = y;
+      blank = 0;
+      lineH = Math.max(lineH, yBot - yTop + 1);
+    } else if (++blank > blankLimit) break;
+  }
+  blank = 0;
+  for (let y = yBot + 1; y < h && y - yTop + 1 < maxBlockH; y++) {
+    if (rowHasInkInBand(y, xMin - gapTol, xMax + gapTol)) {
+      for (let x = xMin; x >= 0; x--) {
+        if (ink[y * w + x]) xMin = x;
+        else if (xMin - x > gapTol) break;
+      }
+      for (let x = xMax; x < w; x++) {
+        if (ink[y * w + x]) xMax = x;
+        else if (x - xMax > gapTol) break;
+      }
+      yBot = y;
+      blank = 0;
+    } else if (++blank > blankLimit) break;
+  }
+
+  // If the block is nearly square / bulky, treat as diagram blob: flood around seed
+  const bw = xMax - xMin + 1;
+  const bh = yBot - yTop + 1;
+  if (bh > lineH * 2.8 && bw < bh * 1.35) {
+    const visited = new Uint8Array(w * h);
+    const qx: number[] = [seedX];
+    const qy: number[] = [seedY];
+    visited[seedY * w + seedX] = 1;
+    let qi = 0;
+    let fx0 = seedX;
+    let fy0 = seedY;
+    let fx1 = seedX;
+    let fy1 = seedY;
+    const maxR2 = Math.pow(Math.min(w, h) * 0.22, 2);
+    while (qi < qx.length) {
+      const cx = qx[qi];
+      const cy = qy[qi];
+      qi++;
+      fx0 = Math.min(fx0, cx);
+      fy0 = Math.min(fy0, cy);
+      fx1 = Math.max(fx1, cx);
+      fy1 = Math.max(fy1, cy);
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const nx2 = cx + dx;
+          const ny2 = cy + dy;
+          if (nx2 < 0 || ny2 < 0 || nx2 >= w || ny2 >= h) continue;
+          const idx = ny2 * w + nx2;
+          if (visited[idx] || !ink[idx]) continue;
+          const ddx = nx2 - seedX;
+          const ddy = ny2 - seedY;
+          if (ddx * ddx + ddy * ddy > maxR2) continue;
+          visited[idx] = 1;
+          qx.push(nx2);
+          qy.push(ny2);
+        }
+      }
+    }
+    if (qx.length > 12) {
+      xMin = fx0;
+      xMax = fx1;
+      yTop = fy0;
+      yBot = fy1;
+    }
+  }
+
+  const padX = Math.max(2, Math.round(w * 0.012));
+  const padY = Math.max(2, Math.round(h * 0.01));
+  const rx0 = Math.max(0, xMin - padX);
+  const ry0 = Math.max(0, yTop - padY);
+  const rx1 = Math.min(w - 1, xMax + padX);
+  const ry1 = Math.min(h - 1, yBot + padY);
+
+  return {
+    x: rx0 / w,
+    y: ry0 / h,
+    width: Math.max(0.04, (rx1 - rx0 + 1) / w),
+    height: Math.max(0.03, (ry1 - ry0 + 1) / h),
+  };
+}
+
 /** Bounding box of one paint stroke (normalized), with brush padding. */
 export function strokeToCropRect(
   stroke: Point[],
