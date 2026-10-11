@@ -31,8 +31,6 @@ import {
   Paintbrush,
 } from "lucide-react";
 
-/** Mobile: aim above the finger so the red loupe crosshair is the true drop point. */
-const TOUCH_AIM_OFFSET_Y = 72;
 import {
   Point,
   applyPerspectiveCorrection,
@@ -73,7 +71,12 @@ type AspectRatioMode = "free" | "4:3" | "16:9" | "1:1" | "paper";
 
 /** Thin stroke preview while painting (normalized width factor). */
 const PAINT_PREVIEW_WIDTH = 0.018;
-
+/** Mobile: aim above the finger so the red crosshair (not the finger tip) is the drop point. */
+const TOUCH_AIM_OFFSET_Y = 72;
+/** Loupe diameter in CSS px — keep in sync with canvas width/height. */
+const LOUPE_SIZE_PX = 120;
+/** Lift loupe center above the aim so the magnifier never covers the drop point. */
+const LOUPE_ABOVE_AIM_PX = LOUPE_SIZE_PX / 2 + 36;
 
 export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   isOpen,
@@ -199,13 +202,25 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const [activeCropHandle, setActiveCropHandle] = useState<string | null>(null);
   const [cropDragStart, setCropDragStart] = useState<{ x: number; y: number; box: typeof cropBox } | null>(null);
 
-  // Loupe magnifier position
-  const [loupeInfo, setLoupeInfo] = useState<{ visible: boolean; x: number; y: number; srcX: number; srcY: number } | null>(null);
+  // Loupe + screen-space aim (aim = true pin drop point; loupe floats above it)
+  const [loupeInfo, setLoupeInfo] = useState<{
+    visible: boolean;
+    loupeX: number;
+    loupeY: number;
+    aimX: number;
+    aimY: number;
+    srcX: number;
+    srcY: number;
+  } | null>(null);
 
   // References
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
+  /** Which finger owns the active corner drag (multi-touch safe). */
+  const activeTouchIdRef = useRef<number | null>(null);
+  /** Last valid aim during corner drag — used if release event has no usable coords. */
+  const lastCornerAimRef = useRef<{ aimX: number; aimY: number; x: number; y: number } | null>(null);
 
   // Initialize or reset when imageSrc or modal opens
   useEffect(() => {
@@ -591,14 +606,14 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     }
   };
 
-  // Render loupe magnifier
+  // Render loupe magnifier (samples image at aim / drop point)
   useEffect(() => {
     if (!loupeInfo || !loupeInfo.visible || !loupeCanvasRef.current || !imgRef.current) return;
     const canvas = loupeCanvasRef.current;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const size = canvas.width; // 120px
+    const size = canvas.width; // LOUPE_SIZE_PX
     const zoom = 2.5;
     const radius = size / 2;
 
@@ -619,8 +634,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     const srcX = loupeInfo.srcX * natW;
     const srcY = loupeInfo.srcY * natH;
 
-    const sWidth = (size / zoom) * (natW / dispW);
-    const sHeight = (size / zoom) * (natH / dispH);
+    // Uniform scale so the loupe isn't stretched when display ≠ natural aspect
+    const scale = Math.max(natW / dispW, natH / dispH);
+    const sWidth = (size / zoom) * scale;
+    const sHeight = (size / zoom) * scale;
 
     ctx.drawImage(
       img,
@@ -671,49 +688,133 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     return { x, y };
   }, []);
 
-  /** Mouse: tip = aim. Touch: aim above finger (same point the loupe crosshair shows). */
+  const findTouchById = useCallback((list: TouchList | undefined, id: number | null) => {
+    if (!list || list.length === 0) return null;
+    if (id == null) return list[0];
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].identifier === id) return list[i];
+    }
+    return null;
+  }, []);
+
+  /**
+   * Resolve pointer client coords.
+   * - During move: follow the tracked finger in touches[]
+   * - On touchend/touchcancel: the ended finger is ONLY in changedTouches
+   *   (prefer that over remaining touches[0], which may be another finger)
+   */
+  const getPointerClient = useCallback(
+    (
+      e: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent,
+      preferredTouchId: number | null = activeTouchIdRef.current
+    ) => {
+      if ("touches" in e) {
+        const type = "type" in e ? String(e.type) : "";
+        const isEndOrCancel = type === "touchend" || type === "touchcancel";
+        // When a touch id is bound, never fall back to a different finger
+        const changedExact =
+          "changedTouches" in e ? findTouchById(e.changedTouches, preferredTouchId) : null;
+        const activeExact = findTouchById(e.touches, preferredTouchId);
+        const changedFallback =
+          preferredTouchId == null && "changedTouches" in e && e.changedTouches?.length > 0
+            ? e.changedTouches[0]
+            : null;
+        const activeFallback =
+          preferredTouchId == null && e.touches?.length > 0 ? e.touches[0] : null;
+
+        const changed = changedExact || changedFallback;
+        const active = activeExact || activeFallback;
+        const t = isEndOrCancel ? changed || active : active || changed;
+        if (t) {
+          return {
+            clientX: t.clientX,
+            clientY: t.clientY,
+            isTouch: true as const,
+            ok: true as const,
+            touchId: t.identifier,
+          };
+        }
+        return { clientX: 0, clientY: 0, isTouch: true as const, ok: false as const, touchId: null };
+      }
+      if ("clientX" in e && typeof e.clientX === "number") {
+        return {
+          clientX: e.clientX,
+          clientY: e.clientY,
+          isTouch: false as const,
+          ok: true as const,
+          touchId: null,
+        };
+      }
+      return { clientX: 0, clientY: 0, isTouch: false as const, ok: false as const, touchId: null };
+    },
+    [findTouchById]
+  );
+
+  /** Mouse: tip = aim. Touch: aim above finger (same point the on-image red crosshair shows). */
   const getAimFromEvent = useCallback(
     (e: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent) => {
-      const isTouch = "touches" in e && e.touches.length > 0;
-      const clientX = isTouch
-        ? e.touches[0].clientX
-        : "clientX" in e
-        ? e.clientX
-        : 0;
-      const clientY = isTouch
-        ? e.touches[0].clientY
-        : "clientY" in e
-        ? e.clientY
-        : 0;
+      const { clientX, clientY, isTouch, ok } = getPointerClient(e);
       const aimX = clientX;
       const aimY = isTouch ? clientY - TOUCH_AIM_OFFSET_Y : clientY;
-      return { clientX, clientY, aimX, aimY, isTouch };
+      return { clientX, clientY, aimX, aimY, isTouch, ok };
     },
-    []
+    [getPointerClient]
   );
+
+  const buildLoupeInfo = useCallback((aimX: number, aimY: number, pos: Point) => {
+    const half = LOUPE_SIZE_PX / 2;
+    const margin = 8;
+    const vw = typeof window !== "undefined" ? window.innerWidth : 400;
+    const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+
+    // Prefer above the aim; flip below when near the top edge
+    let loupeY = aimY - LOUPE_ABOVE_AIM_PX;
+    if (loupeY < half + margin) {
+      loupeY = aimY + LOUPE_ABOVE_AIM_PX;
+    }
+    loupeY = Math.max(half + margin, Math.min(vh - half - margin, loupeY));
+    const loupeX = Math.max(half + margin, Math.min(vw - half - margin, aimX));
+
+    return {
+      visible: true,
+      loupeX,
+      loupeY,
+      aimX,
+      aimY,
+      srcX: pos.x,
+      srcY: pos.y,
+    };
+  }, []);
 
   // Corner pointer events for 4-point perspective
   const handleCornerDown = (index: number, e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setActiveDragCorner(index);
-    const { aimX, aimY } = getAimFromEvent(e);
+    // touchstart: the new contact is in changedTouches (touches[0] may be an older finger)
+    if ("changedTouches" in e && e.changedTouches.length > 0) {
+      activeTouchIdRef.current = e.changedTouches[0].identifier;
+    } else if ("touches" in e && e.touches.length > 0) {
+      activeTouchIdRef.current = e.touches[0].identifier;
+    } else {
+      activeTouchIdRef.current = null;
+    }
+    const { aimX, aimY, ok } = getAimFromEvent(e);
+    if (!ok) {
+      activeTouchIdRef.current = null;
+      return;
+    }
     const pos = getNormalizedPos(aimX, aimY);
+    lastCornerAimRef.current = { aimX, aimY, x: pos.x, y: pos.y };
+    setActiveDragCorner(index);
 
-    // Touch: snap pin to aim point immediately so it matches the loupe crosshair
+    // Snap pin to aim immediately so pin / crosshair / loupe stay in sync
     setCorners((prev) => {
       const next = [...prev] as [Point, Point, Point, Point];
       next[index] = { x: pos.x, y: pos.y };
       return next;
     });
 
-    setLoupeInfo({
-      visible: true,
-      x: aimX,
-      y: aimY,
-      srcX: pos.x,
-      srcY: pos.y,
-    });
+    setLoupeInfo(buildLoupeInfo(aimX, aimY, pos));
   };
 
   // Crop handles pointer events
@@ -775,28 +876,36 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     if (activeDragCorner === null && activeCropHandle === null) return;
 
     const handlePointerMove = (e: MouseEvent | TouchEvent) => {
-      if ("touches" in e) e.preventDefault();
-      const { aimX, aimY } = getAimFromEvent(e);
-      const pos = getNormalizedPos(aimX, aimY);
+      if ("touches" in e) {
+        // Ignore moves from other fingers while a corner drag is owned by one touch id
+        if (
+          activeDragCorner !== null &&
+          activeTouchIdRef.current != null &&
+          !findTouchById(e.touches, activeTouchIdRef.current)
+        ) {
+          return;
+        }
+        e.preventDefault();
+      }
 
       if (activeDragCorner !== null) {
+        const { aimX, aimY, ok } = getAimFromEvent(e);
+        if (!ok) return;
+        const pos = getNormalizedPos(aimX, aimY);
+        lastCornerAimRef.current = { aimX, aimY, x: pos.x, y: pos.y };
         setCorners((prev) => {
           const next = [...prev] as [Point, Point, Point, Point];
           next[activeDragCorner] = { x: pos.x, y: pos.y };
           return next;
         });
-
-        // Loupe is centered on the aim point (= red crosshair = pin drop point)
-        setLoupeInfo({
-          visible: true,
-          x: aimX,
-          y: aimY,
-          srcX: pos.x,
-          srcY: pos.y,
-        });
+        setLoupeInfo(buildLoupeInfo(aimX, aimY, pos));
       } else if (activeCropHandle !== null && cropDragStart) {
-        const dx = pos.x - cropDragStart.x;
-        const dy = pos.y - cropDragStart.y;
+        // Crop handles use finger tip (no aim offset) — match handleCropHandleDown
+        const { clientX, clientY, ok } = getPointerClient(e, null);
+        if (!ok) return;
+        const cropPos = getNormalizedPos(clientX, clientY);
+        const dx = cropPos.x - cropDragStart.x;
+        const dy = cropPos.y - cropDragStart.y;
         const orig = cropDragStart.box;
 
         if (activeCropHandle === "move") {
@@ -847,7 +956,45 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       }
     };
 
-    const handlePointerUp = () => {
+    /** Commit final corner from the release event (changedTouches on touchend). */
+    const handlePointerUp = (e: MouseEvent | TouchEvent) => {
+      // Touch-owned drag: ignore compatibility mouseup (no aim offset; can overwrite drop)
+      if (activeTouchIdRef.current != null && e.type === "mouseup") {
+        return;
+      }
+
+      if (activeDragCorner !== null) {
+        // Only end when the owning finger lifts/cancels (ignore other fingers)
+        if (
+          "changedTouches" in e &&
+          activeTouchIdRef.current != null &&
+          (e.type === "touchend" || e.type === "touchcancel")
+        ) {
+          const ended = findTouchById(e.changedTouches, activeTouchIdRef.current);
+          if (!ended) return;
+        }
+
+        const { aimX, aimY, ok } = getAimFromEvent(e);
+        const fallback = lastCornerAimRef.current;
+        const drop = ok
+          ? (() => {
+              const p = getNormalizedPos(aimX, aimY);
+              return { x: p.x, y: p.y };
+            })()
+          : fallback
+          ? { x: fallback.x, y: fallback.y }
+          : null;
+
+        if (drop) {
+          setCorners((prev) => {
+            const next = [...prev] as [Point, Point, Point, Point];
+            next[activeDragCorner] = drop;
+            return next;
+          });
+        }
+      }
+      activeTouchIdRef.current = null;
+      lastCornerAimRef.current = null;
       setActiveDragCorner(null);
       setActiveCropHandle(null);
       setCropDragStart(null);
@@ -858,12 +1005,14 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     window.addEventListener("mouseup", handlePointerUp);
     window.addEventListener("touchmove", handlePointerMove, { passive: false });
     window.addEventListener("touchend", handlePointerUp);
+    window.addEventListener("touchcancel", handlePointerUp);
 
     return () => {
       window.removeEventListener("mousemove", handlePointerMove);
       window.removeEventListener("mouseup", handlePointerUp);
       window.removeEventListener("touchmove", handlePointerMove);
       window.removeEventListener("touchend", handlePointerUp);
+      window.removeEventListener("touchcancel", handlePointerUp);
     };
   }, [
     activeDragCorner,
@@ -871,6 +1020,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     cropDragStart,
     getNormalizedPos,
     getAimFromEvent,
+    getPointerClient,
+    findTouchById,
+    buildLoupeInfo,
     aspectRatioMode,
     naturalDimensions,
   ]);
@@ -900,23 +1052,43 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     loupeInfo.visible &&
     typeof document !== "undefined" &&
     createPortal(
-      <div
-        style={{
-          left: `${loupeInfo.x}px`,
-          top: `${loupeInfo.y}px`,
-        }}
-        className="fixed -translate-x-1/2 -translate-y-1/2 pointer-events-none z-[200] rounded-full shadow-2xl overflow-hidden ring-3 ring-sky-500 bg-slate-950"
-      >
-        <canvas
-          ref={loupeCanvasRef}
-          width={120}
-          height={120}
-          className="rounded-full block"
-        />
-        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] font-mono font-bold text-white bg-black/60 px-1.5 py-0.2 rounded-full">
-          對準角 · 2.5×
+      <>
+        {/* True drop point — thin red crosshair on the image (not covered by loupe) */}
+        <div
+          style={{
+            left: `${loupeInfo.aimX}px`,
+            top: `${loupeInfo.aimY}px`,
+          }}
+          className="fixed -translate-x-1/2 -translate-y-1/2 pointer-events-none z-[199]"
+          aria-hidden
+        >
+          <div className="relative w-10 h-10">
+            <div className="absolute left-1/2 top-0 bottom-0 w-[2px] -translate-x-1/2 bg-red-500 shadow-[0_0_0_1px_rgba(255,255,255,0.85)]" />
+            <div className="absolute top-1/2 left-0 right-0 h-[2px] -translate-y-1/2 bg-red-500 shadow-[0_0_0_1px_rgba(255,255,255,0.85)]" />
+            <div className="absolute left-1/2 top-1/2 w-2 h-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-red-500 ring-2 ring-white" />
+          </div>
         </div>
-      </div>,
+        {/* Magnifier floats above the aim so it never hides the paper corner */}
+        <div
+          style={{
+            left: `${loupeInfo.loupeX}px`,
+            top: `${loupeInfo.loupeY}px`,
+            width: LOUPE_SIZE_PX,
+            height: LOUPE_SIZE_PX,
+          }}
+          className="fixed -translate-x-1/2 -translate-y-1/2 pointer-events-none z-[200] rounded-full shadow-2xl overflow-hidden ring-3 ring-sky-500 bg-slate-950"
+        >
+          <canvas
+            ref={loupeCanvasRef}
+            width={LOUPE_SIZE_PX}
+            height={LOUPE_SIZE_PX}
+            className="rounded-full block"
+          />
+          <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] font-mono font-bold text-white bg-black/60 px-1.5 py-0.2 rounded-full">
+            對準角 · 2.5×
+          </div>
+        </div>
+      </>,
       document.body
     );
 
@@ -1003,11 +1175,11 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               }}
               className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto cursor-grab active:cursor-grabbing group z-20 w-12 h-12 flex items-center justify-center"
             >
-              {/* Target Handle */}
+              {/* Idle: round pin. Dragging: hide fat pin — screen crosshair is the precise aim. */}
               <div
-                className={`w-7 h-7 rounded-full border-2 border-white flex items-center justify-center shadow-lg transition-transform ${
+                className={`w-7 h-7 rounded-full border-2 border-white flex items-center justify-center shadow-lg transition-opacity ${
                   isDragging
-                    ? "scale-125 bg-red-500 ring-4 ring-red-400/40"
+                    ? "opacity-0"
                     : "bg-sky-600 hover:scale-115 hover:bg-sky-500"
                 }`}
               >
@@ -1019,7 +1191,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 className={`absolute ${
                   idx < 2 ? "-top-7" : "top-8"
                 } left-1/2 -translate-x-1/2 whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-bold text-white shadow-xs backdrop-blur-xs select-none pointer-events-none transition-opacity ${
-                  isDragging ? "bg-red-600 opacity-100" : "bg-slate-900/85 opacity-85 group-hover:opacity-100"
+                  isDragging ? "opacity-0" : "bg-slate-900/85 opacity-85 group-hover:opacity-100"
                 }`}
               >
                 {cornerLabels[idx]}
@@ -1224,8 +1396,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                   <Info className="w-3.5 h-3.5" />
                   拖曳四角圓點對齊考卷近白色紙角（開啟時會自動偵測），即可將歪斜拍照展平
                 </span>
-                <span className="sm:hidden inline-flex items-center gap-1 text-sky-700 bg-sky-50 px-2 py-1 rounded-md font-medium text-[10px] max-w-[11rem] leading-snug">
-                  拖角點：以紅色十字線對準紙角（在指尖上方）
+                <span className="sm:hidden inline-flex items-center gap-1 text-sky-700 bg-sky-50 px-2 py-1 rounded-md font-medium text-[10px] max-w-[12rem] leading-snug">
+                  拖角點：以圖上紅色十字對準紙角（放大鏡在上方，鬆手即落點）
                 </span>
                 <button
                   type="button"
