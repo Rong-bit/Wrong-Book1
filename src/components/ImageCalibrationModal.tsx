@@ -96,7 +96,13 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const [brushSize, setBrushSize] = useState<BrushSizeKey>("m");
   const [eraseStrokePoints, setEraseStrokePoints] = useState<Point[] | null>(null);
   const [isErasing, setIsErasing] = useState(false);
+  const [isErasingBusy, setIsErasingBusy] = useState(false);
   const eraseStrokeRef = useRef<Point[] | null>(null);
+  const cropDirtyAfterAddRef = useRef(false);
+  const currentImageRef = useRef(currentImage);
+  const brushSizeRef = useRef(brushSize);
+  currentImageRef.current = currentImage;
+  brushSizeRef.current = brushSize;
 
   // Track container dimensions to dynamically scale image to fit viewport
   useEffect(() => {
@@ -209,7 +215,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setBrushSize("m");
       setEraseStrokePoints(null);
       setIsErasing(false);
+      setIsErasingBusy(false);
       eraseStrokeRef.current = null;
+      cropDirtyAfterAddRef.current = false;
 
       // Immediate pre-decode test
       const img = new Image();
@@ -384,8 +392,12 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     );
   };
 
+  const markCropDirty = () => {
+    cropDirtyAfterAddRef.current = true;
+  };
+
   const handleAddPendingCrop = async () => {
-    if (isProcessing || isExistingQuestion || mode !== "crop") return;
+    if (isProcessing || isErasingBusy || isExistingQuestion || mode !== "crop") return;
     setIsProcessing(true);
     setProcessingText("正在加入錯題範圍...");
     try {
@@ -395,6 +407,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         // Keep base image; reset frame for the next wrong region
         setCropBox({ x: 0.08, y: 0.08, w: 0.84, h: 0.35 });
         setCropTool("frame");
+        cropDirtyAfterAddRef.current = false;
       }
     } catch (err) {
       console.error("Add pending crop failed:", err);
@@ -404,18 +417,25 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   };
 
   const handleFinish = async () => {
-    if (isProcessing) return;
+    if (isProcessing || isErasingBusy) return;
     setIsProcessing(true);
     setProcessingText(
-      pendingCrops.length > 0 ? `正在準備 ${pendingCrops.length} 道錯題...` : "正在套用校正..."
+      pendingCrops.length > 0 ? `正在準備錯題...` : "正在套用校正..."
     );
     try {
-      if (pendingCrops.length > 0) {
-        onConfirm(pendingCrops);
-      } else {
+      let results: string[] = [];
+      if (pendingCrops.length === 0) {
         const output = await cropCurrentBox();
-        onConfirm([output || currentImage]);
+        results = [output || currentImage];
+      } else {
+        results = [...pendingCrops];
+        // If user reframed after the last「加入」but forgot to add again, include it
+        if (cropDirtyAfterAddRef.current && mode === "crop") {
+          const current = await cropCurrentBox();
+          if (current) results.push(current);
+        }
       }
+      onConfirm(results.filter(Boolean));
     } catch (err) {
       console.error("Finish calibration failed:", err);
       onConfirm([currentImage]);
@@ -451,23 +471,24 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
 
   const commitEraseStroke = async (points: Point[]) => {
     if (!points.length) return;
-    setIsProcessing(true);
-    setProcessingText("正在塗白手寫...");
+    setIsErasingBusy(true);
     try {
-      const painted = await paintWhiteBrushOnImage(currentImage, {
+      const painted = await paintWhiteBrushOnImage(currentImageRef.current, {
         points,
-        radiusNorm: BRUSH_RADIUS_NORM[brushSize],
+        radiusNorm: BRUSH_RADIUS_NORM[brushSizeRef.current],
       });
-      pushHistory(painted);
+      setHistory((prev) => [...prev, currentImageRef.current]);
+      currentImageRef.current = painted;
+      setCurrentImage(painted);
     } catch (err) {
       console.error("Erase handwriting failed:", err);
     } finally {
-      setIsProcessing(false);
+      setIsErasingBusy(false);
     }
   };
 
   const handleErasePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
-    if (cropTool !== "erase" || mode !== "crop" || isProcessing) return;
+    if (cropTool !== "erase" || mode !== "crop" || isProcessing || isErasingBusy) return;
     e.preventDefault();
     e.stopPropagation();
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
@@ -678,6 +699,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         if (activeCropHandle === "move") {
           const newX = Math.max(0, Math.min(1 - orig.w, orig.x + dx));
           const newY = Math.max(0, Math.min(1 - orig.h, orig.y + dy));
+          cropDirtyAfterAddRef.current = true;
           setCropBox({ ...orig, x: newX, y: newY });
         } else {
           let newX = orig.x;
@@ -716,6 +738,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             newH = Math.max(0.05, Math.min(1 - newY, (newW * imageRatio) / targetRatio));
           }
 
+          cropDirtyAfterAddRef.current = true;
           setCropBox({ x: newX, y: newY, w: newW, h: newH });
         }
       }
@@ -1139,7 +1162,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                       <button
                         key={r.id}
                         type="button"
-                        onClick={() => setAspectRatioMode(r.id)}
+                        onClick={() => {
+                          markCropDirty();
+                          setAspectRatioMode(r.id);
+                        }}
                         className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
                           aspectRatioMode === r.id
                             ? "bg-emerald-600 text-white font-bold shadow-2xs"
@@ -1151,7 +1177,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                     ))}
                     <button
                       type="button"
-                      onClick={() => setCropBox({ x: 0, y: 0, w: 1, h: 1 })}
+                      onClick={() => {
+                        markCropDirty();
+                        setCropBox({ x: 0, y: 0, w: 1, h: 1 });
+                      }}
                       className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap"
                       title="裁切框貼齊照片四邊"
                     >
@@ -1385,7 +1414,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                       </svg>
                     )}
                     <div className="absolute top-2 left-1/2 -translate-x-1/2 px-2 py-1 rounded-full bg-rose-600/90 text-white text-[10px] font-bold pointer-events-none">
-                      手指塗白手寫答案
+                      {isErasingBusy ? "塗白套用中…" : "手指塗白手寫答案"}
                     </div>
                   </div>
                 )}
@@ -1414,11 +1443,16 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             </div>
           )}
 
-          {/* Processing Spinner Overlay */}
+          {/* Processing Spinner Overlay (erase brush uses quiet busy flag instead) */}
           {isProcessing && (
             <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-xs flex flex-col items-center justify-center text-white z-40">
               <RefreshCw className="w-8 h-8 animate-spin text-sky-400 mb-2" />
               <div className="text-sm font-bold">{processingText}</div>
+            </div>
+          )}
+          {isErasingBusy && !isProcessing && (
+            <div className="absolute top-3 right-3 z-40 px-2.5 py-1 rounded-full bg-rose-600/90 text-white text-[10px] font-bold shadow-md">
+              塗白中…
             </div>
           )}
         </div>

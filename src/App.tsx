@@ -381,8 +381,9 @@ export default function App() {
 
     const subjectHint = calibrationModal.subjectHint;
     setCalibrationModal({ isOpen: false, imageSrc: "" });
-    // Serial analysis to avoid API bursts when multiple crops are confirmed
-    for (const img of images) {
+    // Serial analysis to avoid API bursts. Reverse so the first framed region
+    // ends on top (processNewImage prepends each new card).
+    for (const img of [...images].reverse()) {
       await processNewImage(img, subjectHint);
     }
   };
@@ -1021,10 +1022,7 @@ export default function App() {
             }
           }}
           onClose={() => {
-            if (!calibrationModal.targetQuestionId && calibrationModal.imageSrc) {
-              handleCalibrationSkip();
-              return;
-            }
+            // X / Escape only closes; use「略過校正」to analyze the original uncropped image
             setCalibrationModal({ isOpen: false, imageSrc: "" });
           }}
         />
