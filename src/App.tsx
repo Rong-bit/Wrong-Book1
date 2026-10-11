@@ -733,9 +733,13 @@ export default function App() {
     return new Map(ordered.map((q, i) => [q.id, i + 1]));
   }, [questions]);
 
+  /** PDF 匯出用全部錯題（不受科目篩選影響）；略過仍在分析中的占位題 */
   const printQuestions = useMemo(
-    () => [...filteredQuestions].sort(compareCaptureTime),
-    [filteredQuestions]
+    () =>
+      [...questions]
+        .filter((q) => q.status !== "analyzing")
+        .sort(compareCaptureTime),
+    [questions]
   );
 
   const paperMeta = useMemo(
@@ -1077,6 +1081,7 @@ export default function App() {
       <PdfExportModal
         isOpen={isPdfModalOpen}
         questions={printQuestions}
+        notebookTotal={questions.length}
         settings={paperSettings}
         onClose={() => setIsPdfModalOpen(false)}
         onUpdateSettings={(next) => {
