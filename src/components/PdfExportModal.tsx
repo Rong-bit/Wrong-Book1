@@ -808,9 +808,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   <div className="flex items-center gap-2">
                     <AlignLeft className="w-4 h-4 text-indigo-600 shrink-0" />
                     <div>
-                      <span className="block text-xs">僅排版文字 (附圖仍保留)</span>
+                      <span className="block text-xs">僅排版文字 (附圖)</span>
                       <span className="block text-[10px] text-slate-500 font-normal">
-                        排版文字為主；有「選圖形」時附地圖於右下方（不含文字截圖）
+                        排版文字＋「選圖形」圖區右下；絕不附文字截圖
                       </span>
                     </div>
                   </div>
@@ -1567,7 +1567,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 ? "文字與照片"
                 : displayMode === "textPlain"
                 ? "純文字（無截圖）"
-                : "文字為主（圖區右下）"}
+                : "排版文字＋圖區（無文字圖）"}
             </span>
           </div>
 
