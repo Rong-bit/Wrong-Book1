@@ -166,14 +166,30 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     let shrinkQueued = false;
 
     const pageOverflows = () => {
-      const bodies = root.querySelectorAll<HTMLElement>("[data-cornell-body]");
-      for (let i = 0; i < bodies.length; i++) {
-        const el = bodies[i];
+      const bodies = Array.from(
+        root.querySelectorAll("[data-cornell-body]")
+      ) as HTMLElement[];
+      for (const el of bodies) {
         if (el.scrollHeight > el.clientHeight + 2) return true;
-        // Also catch inner question panes that used to clip with max-h + overflow
-        const panes = el.querySelectorAll<HTMLElement>("[data-cornell-question]");
-        for (let j = 0; j < panes.length; j++) {
-          const pane = panes[j];
+        const cards = Array.from(
+          el.querySelectorAll("[data-cornell-card]")
+        ) as HTMLElement[];
+        // flex-1 + min-h-0 used to shrink cards and clip inside overflow:hidden,
+        // leaving scrollHeight === clientHeight. Measure natural card heights instead.
+        if (cards.length > 0) {
+          const first = cards[0];
+          const last = cards[cards.length - 1];
+          const span =
+            last.offsetTop + last.scrollHeight - first.offsetTop;
+          if (span > el.clientHeight + 2) return true;
+        }
+        for (const card of cards) {
+          if (card.scrollHeight > card.clientHeight + 2) return true;
+        }
+        const panes = Array.from(
+          el.querySelectorAll("[data-cornell-question]")
+        ) as HTMLElement[];
+        for (const pane of panes) {
           if (pane.scrollHeight > pane.clientHeight + 2) return true;
         }
       }
@@ -257,6 +273,19 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       let overflow = false;
       for (const el of bodies) {
         if (el.scrollHeight > el.clientHeight + 2) overflow = true;
+        const cards = Array.from(
+          el.querySelectorAll("[data-cornell-card]")
+        ) as HTMLElement[];
+        if (cards.length > 0) {
+          const first = cards[0];
+          const last = cards[cards.length - 1];
+          const span =
+            last.offsetTop + last.scrollHeight - first.offsetTop;
+          if (span > el.clientHeight + 2) overflow = true;
+        }
+        for (const card of cards) {
+          if (card.scrollHeight > card.clientHeight + 2) overflow = true;
+        }
         const panes = Array.from(
           el.querySelectorAll("[data-cornell-question]")
         ) as HTMLElement[];
@@ -994,10 +1023,12 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                         {pageQs.map(({ q, index }, qIdx) => (
                           <div
                             key={q.id}
+                            data-cornell-card
                             className={`border border-slate-300 rounded-lg overflow-hidden flex flex-row relative bg-white ${
                               isCornellCompact
                                 ? "shrink-0 items-start"
-                                : "flex-1 min-h-0"
+                                : // min-h-min: grow for handwriting space, never shrink below stem/figure
+                                  "flex-1 min-h-min"
                             }`}
                           >
                             {/* LEFT SIDEBAR: Metadata & Mistake Reason Analysis */}
@@ -1091,7 +1122,12 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                             </div>
 
                             {/* RIGHT MAIN AREA: Question text + Math grid notebook workspace */}
-                            <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white">
+                            <div
+                              className={`flex-1 flex flex-col min-w-0 bg-white ${
+                                // compact may pack tightly; 1/2-per-page must not min-h-0-collapse stems
+                                isCornellCompact ? "min-h-0" : "min-h-min"
+                              }`}
+                            >
                               {/* Top Question Body — natural height (no max-h clip); page fit shrinks density instead */}
                               <div
                                 data-cornell-question
