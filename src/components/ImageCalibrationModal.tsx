@@ -711,13 +711,19 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       if ("touches" in e) {
         const type = "type" in e ? String(e.type) : "";
         const isEndOrCancel = type === "touchend" || type === "touchcancel";
-        const changed =
-          "changedTouches" in e
-            ? findTouchById(e.changedTouches, preferredTouchId) ||
-              (e.changedTouches && e.changedTouches.length > 0 ? e.changedTouches[0] : null)
+        // When a touch id is bound, never fall back to a different finger
+        const changedExact =
+          "changedTouches" in e ? findTouchById(e.changedTouches, preferredTouchId) : null;
+        const activeExact = findTouchById(e.touches, preferredTouchId);
+        const changedFallback =
+          preferredTouchId == null && "changedTouches" in e && e.changedTouches?.length > 0
+            ? e.changedTouches[0]
             : null;
-        const active = findTouchById(e.touches, preferredTouchId);
+        const activeFallback =
+          preferredTouchId == null && e.touches?.length > 0 ? e.touches[0] : null;
 
+        const changed = changedExact || changedFallback;
+        const active = activeExact || activeFallback;
         const t = isEndOrCancel ? changed || active : active || changed;
         if (t) {
           return {
@@ -784,7 +790,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const handleCornerDown = (index: number, e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if ("touches" in e && e.touches.length > 0) {
+    // touchstart: the new contact is in changedTouches (touches[0] may be an older finger)
+    if ("changedTouches" in e && e.changedTouches.length > 0) {
+      activeTouchIdRef.current = e.changedTouches[0].identifier;
+    } else if ("touches" in e && e.touches.length > 0) {
       activeTouchIdRef.current = e.touches[0].identifier;
     } else {
       activeTouchIdRef.current = null;
@@ -950,18 +959,23 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     /** Commit final corner from the release event (changedTouches on touchend). */
     const handlePointerUp = (e: MouseEvent | TouchEvent) => {
       if (activeDragCorner !== null) {
-        // Only end the drag when the owning finger lifts (or mouseup / cancel)
-        if ("changedTouches" in e && activeTouchIdRef.current != null) {
+        // Only end when the owning finger lifts/cancels (ignore other fingers)
+        if (
+          "changedTouches" in e &&
+          activeTouchIdRef.current != null &&
+          (e.type === "touchend" || e.type === "touchcancel")
+        ) {
           const ended = findTouchById(e.changedTouches, activeTouchIdRef.current);
-          if (!ended && e.type === "touchend") {
-            return;
-          }
+          if (!ended) return;
         }
 
         const { aimX, aimY, ok } = getAimFromEvent(e);
         const fallback = lastCornerAimRef.current;
         const drop = ok
-          ? { x: getNormalizedPos(aimX, aimY).x, y: getNormalizedPos(aimX, aimY).y }
+          ? (() => {
+              const p = getNormalizedPos(aimX, aimY);
+              return { x: p.x, y: p.y };
+            })()
           : fallback
           ? { x: fallback.x, y: fallback.y }
           : null;
