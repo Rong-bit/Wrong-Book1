@@ -253,7 +253,7 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
             className="w-4 h-4 rounded text-sky-600 focus:ring-sky-500 border-slate-300 transition cursor-pointer"
           />
           <span className="font-semibold text-slate-700 group-hover:text-slate-900 transition flex items-center gap-1.5">
-            <span>📷 拍照或選圖後，自動開啟「四點透視拉正與自由裁切」</span>
+            <span>📷 拍照後透視一次，可連續框多題並塗白手寫</span>
             <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-800">
               推薦啟用
             </span>
@@ -263,7 +263,7 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
         <div className="flex items-center gap-3 text-[11px] text-slate-500">
           <span className="flex items-center gap-1 text-slate-600">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-            <span>四點拉正歪斜考卷 · 自由框選精準題目</span>
+            <span>透視拉正 · 多錯題框選 · 去手寫塗白</span>
           </span>
         </div>
       </div>

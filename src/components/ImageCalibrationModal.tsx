@@ -25,6 +25,9 @@ import {
   Wand2,
   ChevronDown,
   SunMedium,
+  Plus,
+  Eraser,
+  Trash2,
 } from "lucide-react";
 import {
   Point,
@@ -39,13 +42,14 @@ import {
   FALLBACK_PERSPECTIVE_CORNERS,
   FULL_FRAME_CORNERS,
   cropBoxFromCorners,
+  paintWhiteBrushOnImage,
 } from "../utils/imageUtils";
 
 interface ImageCalibrationModalProps {
   isOpen: boolean;
   imageSrc: string;
   onClose: () => void;
-  onConfirm: (processedBase64: string) => void;
+  onConfirm: (processedImages: string[]) => void;
   onSkip?: (originalBase64: string) => void;
   title?: string;
   isExistingQuestion?: boolean;
@@ -54,7 +58,15 @@ interface ImageCalibrationModalProps {
 }
 
 type CalibrationMode = "perspective" | "crop";
+type CropTool = "frame" | "erase";
 type AspectRatioMode = "free" | "4:3" | "16:9" | "1:1" | "paper";
+type BrushSizeKey = "s" | "m" | "l";
+
+const BRUSH_RADIUS_NORM: Record<BrushSizeKey, number> = {
+  s: 0.012,
+  m: 0.022,
+  l: 0.038,
+};
 
 export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   isOpen,
@@ -79,6 +91,12 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const [zoomScale, setZoomScale] = useState<number>(1); // 1 = Fit Viewport
   const [imageLoadError, setImageLoadError] = useState<boolean>(false);
   const [isImageReady, setIsImageReady] = useState<boolean>(false);
+  const [pendingCrops, setPendingCrops] = useState<string[]>([]);
+  const [cropTool, setCropTool] = useState<CropTool>("frame");
+  const [brushSize, setBrushSize] = useState<BrushSizeKey>("m");
+  const [eraseStrokePoints, setEraseStrokePoints] = useState<Point[] | null>(null);
+  const [isErasing, setIsErasing] = useState(false);
+  const eraseStrokeRef = useRef<Point[] | null>(null);
 
   // Track container dimensions to dynamically scale image to fit viewport
   useEffect(() => {
@@ -186,6 +204,12 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setZoomScale(1);
       setCorners(FALLBACK_PERSPECTIVE_CORNERS);
       setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
+      setPendingCrops([]);
+      setCropTool("frame");
+      setBrushSize("m");
+      setEraseStrokePoints(null);
+      setIsErasing(false);
+      eraseStrokeRef.current = null;
 
       // Immediate pre-decode test
       const img = new Image();
@@ -265,6 +289,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const enterCropMode = () => {
     setCropBox(cropBoxFromCorners(corners));
     setMode("crop");
+    setCropTool("frame");
   };
 
   const handleResetToOriginal = () => {
@@ -342,22 +367,64 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     );
   };
 
-  const handleFinish = async () => {
-    if (isProcessing) return;
+  const cropCurrentBox = async (): Promise<string> => {
+    if (mode === "perspective") {
+      return applyPendingTransforms();
+    }
+    return applyCrop(
+      currentImage,
+      {
+        x: cropBox.x,
+        y: cropBox.y,
+        width: cropBox.w,
+        height: cropBox.h,
+      },
+      0.92,
+      imgRef.current
+    );
+  };
+
+  const handleAddPendingCrop = async () => {
+    if (isProcessing || isExistingQuestion || mode !== "crop") return;
     setIsProcessing(true);
-    setProcessingText("正在套用校正...");
+    setProcessingText("正在加入錯題範圍...");
     try {
-      const output = await applyPendingTransforms();
-      onConfirm(output);
+      const cropped = await cropCurrentBox();
+      if (cropped) {
+        setPendingCrops((prev) => [...prev, cropped]);
+        // Keep base image; reset frame for the next wrong region
+        setCropBox({ x: 0.08, y: 0.08, w: 0.84, h: 0.35 });
+        setCropTool("frame");
+      }
     } catch (err) {
-      console.error("Finish calibration failed:", err);
-      onConfirm(currentImage);
+      console.error("Add pending crop failed:", err);
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // Execute Crop
+  const handleFinish = async () => {
+    if (isProcessing) return;
+    setIsProcessing(true);
+    setProcessingText(
+      pendingCrops.length > 0 ? `正在準備 ${pendingCrops.length} 道錯題...` : "正在套用校正..."
+    );
+    try {
+      if (pendingCrops.length > 0) {
+        onConfirm(pendingCrops);
+      } else {
+        const output = await cropCurrentBox();
+        onConfirm([output || currentImage]);
+      }
+    } catch (err) {
+      console.error("Finish calibration failed:", err);
+      onConfirm([currentImage]);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // Legacy destructive crop: bake current box into the working image (existing-question path)
   const handleApplyCrop = async () => {
     if (isProcessing) return;
     setIsProcessing(true);
@@ -380,6 +447,35 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  const commitEraseStroke = async (points: Point[]) => {
+    if (!points.length) return;
+    setIsProcessing(true);
+    setProcessingText("正在塗白手寫...");
+    try {
+      const painted = await paintWhiteBrushOnImage(currentImage, {
+        points,
+        radiusNorm: BRUSH_RADIUS_NORM[brushSize],
+      });
+      pushHistory(painted);
+    } catch (err) {
+      console.error("Erase handwriting failed:", err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleErasePointerDown = (e: React.MouseEvent | React.TouchEvent) => {
+    if (cropTool !== "erase" || mode !== "crop" || isProcessing) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+    const pos = getNormalizedPos(clientX, clientY);
+    eraseStrokeRef.current = [pos];
+    setEraseStrokePoints([pos]);
+    setIsErasing(true);
   };
 
   // Remove shadows and binarize: pure white background and crisp black text
@@ -502,6 +598,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
 
   // Crop handles pointer events
   const handleCropHandleDown = (handle: string, e: React.MouseEvent | React.TouchEvent) => {
+    if (cropTool === "erase") return;
     e.preventDefault();
     e.stopPropagation();
     setActiveCropHandle(handle);
@@ -510,6 +607,45 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     const pos = getNormalizedPos(clientX, clientY);
     setCropDragStart({ x: pos.x, y: pos.y, box: { ...cropBox } });
   };
+
+  // Erase brush stroke tracking
+  useEffect(() => {
+    if (!isErasing) return;
+
+    const handlePointerMove = (e: MouseEvent | TouchEvent) => {
+      if (!eraseStrokeRef.current) return;
+      if ("touches" in e) e.preventDefault();
+      const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+      const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+      const pos = getNormalizedPos(clientX, clientY);
+      const next = [...eraseStrokeRef.current, pos];
+      eraseStrokeRef.current = next;
+      setEraseStrokePoints(next);
+    };
+
+    const handlePointerUp = () => {
+      const points = eraseStrokeRef.current || [];
+      eraseStrokeRef.current = null;
+      setEraseStrokePoints(null);
+      setIsErasing(false);
+      if (points.length) {
+        void commitEraseStroke(points);
+      }
+    };
+
+    window.addEventListener("mousemove", handlePointerMove);
+    window.addEventListener("mouseup", handlePointerUp);
+    window.addEventListener("touchmove", handlePointerMove, { passive: false });
+    window.addEventListener("touchend", handlePointerUp);
+    window.addEventListener("touchcancel", handlePointerUp);
+    return () => {
+      window.removeEventListener("mousemove", handlePointerMove);
+      window.removeEventListener("mouseup", handlePointerUp);
+      window.removeEventListener("touchmove", handlePointerMove);
+      window.removeEventListener("touchend", handlePointerUp);
+      window.removeEventListener("touchcancel", handlePointerUp);
+    };
+  }, [isErasing, getNormalizedPos]);
 
   // Window-level move and up listeners during drag
   useEffect(() => {
@@ -842,7 +978,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 hidden md:block truncate">
-                支援四點透視拉正斜拍試卷，並自由框選裁切精準保留題目內容
+                透視一次後可連續框選多個錯題，並可塗白手寫答案
               </p>
             </div>
           </div>
@@ -898,7 +1034,13 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               title="完成校正並進行下一步"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-              <span>{isExistingQuestion ? "下一步：儲存截圖" : "下一步：AI 分析"}</span>
+              <span>
+                {isExistingQuestion
+                  ? "下一步：儲存截圖"
+                  : pendingCrops.length > 0
+                  ? `開始分析 (${pendingCrops.length})`
+                  : "下一步：AI 分析"}
+              </span>
               <ArrowRight className="w-3.5 h-3.5 shrink-0" />
             </button>
 
@@ -933,37 +1075,90 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               </div>
             ) : (
               <div className="flex items-center gap-1 sm:gap-1.5 flex-nowrap">
-                <span className="hidden sm:inline text-slate-500 font-medium mr-1 text-[11px]">裁切比例：</span>
-                {(
-                  [
-                    { id: "free", label: "自由" },
-                    { id: "4:3", label: "4:3" },
-                    { id: "16:9", label: "16:9" },
-                    { id: "1:1", label: "1:1" },
-                    { id: "paper", label: "A4/B5 考卷" },
-                  ] as const
-                ).map((r) => (
+                <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200 mr-0.5">
                   <button
-                    key={r.id}
                     type="button"
-                    onClick={() => setAspectRatioMode(r.id)}
-                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
-                      aspectRatioMode === r.id
-                        ? "bg-emerald-600 text-white font-bold shadow-2xs"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                    onClick={() => setCropTool("frame")}
+                    className={`px-2 py-1 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
+                      cropTool === "frame"
+                        ? "bg-emerald-600 text-white shadow-2xs"
+                        : "text-slate-600 hover:bg-white"
                     }`}
+                    title="框選錯題範圍"
                   >
-                    {r.label}
+                    <Crop className="w-3 h-3" />
+                    框選
                   </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setCropBox({ x: 0, y: 0, w: 1, h: 1 })}
-                  className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap"
-                  title="裁切框貼齊照片四邊"
-                >
-                  貼齊邊緣
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setCropTool("erase")}
+                    className={`px-2 py-1 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
+                      cropTool === "erase"
+                        ? "bg-rose-600 text-white shadow-2xs"
+                        : "text-slate-600 hover:bg-white"
+                    }`}
+                    title="塗白手寫答案"
+                  >
+                    <Eraser className="w-3 h-3" />
+                    去手寫
+                  </button>
+                </div>
+                {cropTool === "erase" ? (
+                  <div className="flex items-center gap-0.5">
+                    {([
+                      { id: "s" as const, label: "細" },
+                      { id: "m" as const, label: "中" },
+                      { id: "l" as const, label: "粗" },
+                    ]).map((b) => (
+                      <button
+                        key={b.id}
+                        type="button"
+                        onClick={() => setBrushSize(b.id)}
+                        className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+                          brushSize === b.id
+                            ? "bg-rose-600 text-white font-bold"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <>
+                    <span className="hidden sm:inline text-slate-500 font-medium mr-1 text-[11px]">比例：</span>
+                    {(
+                      [
+                        { id: "free", label: "自由" },
+                        { id: "4:3", label: "4:3" },
+                        { id: "16:9", label: "16:9" },
+                        { id: "1:1", label: "1:1" },
+                        { id: "paper", label: "考卷" },
+                      ] as const
+                    ).map((r) => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => setAspectRatioMode(r.id)}
+                        className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
+                          aspectRatioMode === r.id
+                            ? "bg-emerald-600 text-white font-bold shadow-2xs"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setCropBox({ x: 0, y: 0, w: 1, h: 1 })}
+                      className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap"
+                      title="裁切框貼齊照片四邊"
+                    >
+                      貼齊
+                    </button>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -1154,7 +1349,46 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 />
 
                 {/* Render Perspective Overlay or Crop Overlay */}
-                {mode === "perspective" ? renderPerspectiveSvgOverlay() : renderCropOverlay()}
+                {mode === "perspective"
+                  ? renderPerspectiveSvgOverlay()
+                  : cropTool === "frame"
+                  ? renderCropOverlay()
+                  : null}
+
+                {/* Erase handwriting canvas layer */}
+                {mode === "crop" && cropTool === "erase" && (
+                  <div
+                    className="absolute inset-0 z-30 cursor-crosshair touch-none"
+                    onMouseDown={handleErasePointerDown}
+                    onTouchStart={handleErasePointerDown}
+                    style={{ touchAction: "none" }}
+                  >
+                    {eraseStrokePoints && eraseStrokePoints.length > 0 && (
+                      <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                        <polyline
+                          fill="none"
+                          stroke="rgba(255,255,255,0.92)"
+                          strokeWidth={
+                            Math.min(displayDimensions.width, displayDimensions.height) *
+                            BRUSH_RADIUS_NORM[brushSize] *
+                            2
+                          }
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          points={eraseStrokePoints
+                            .map(
+                              (p) =>
+                                `${p.x * displayDimensions.width},${p.y * displayDimensions.height}`
+                            )
+                            .join(" ")}
+                        />
+                      </svg>
+                    )}
+                    <div className="absolute top-2 left-1/2 -translate-x-1/2 px-2 py-1 rounded-full bg-rose-600/90 text-white text-[10px] font-bold pointer-events-none">
+                      手指塗白手寫答案
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -1189,6 +1423,40 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           )}
         </div>
 
+        {/* Pending multi-crop queue */}
+        {!isExistingQuestion && mode === "crop" && (
+          <div className="px-2 sm:px-5 py-1 text-[10px] sm:text-[11px] text-slate-500 bg-slate-50 border-t border-slate-100 shrink-0">
+            框好一題後按「加入此錯題」，可再框下一題；全部加完再按開始分析。需要時切換「去手寫」塗白答案。
+          </div>
+        )}
+        {!isExistingQuestion && pendingCrops.length > 0 && (
+          <div className="px-2 sm:px-5 py-1.5 bg-emerald-50/90 border-t border-emerald-100 flex items-center gap-2 shrink-0 overflow-x-auto">
+            <span className="text-[11px] font-bold text-emerald-800 whitespace-nowrap">
+              已選 {pendingCrops.length} 題
+            </span>
+            <div className="flex items-center gap-1.5">
+              {pendingCrops.map((src, idx) => (
+                <div
+                  key={`pending-${idx}`}
+                  className="relative w-12 h-12 rounded-lg overflow-hidden border border-emerald-300 bg-white shrink-0"
+                >
+                  <img src={src} alt={`錯題 ${idx + 1}`} className="w-full h-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPendingCrops((prev) => prev.filter((_, i) => i !== idx))
+                    }
+                    className="absolute top-0.5 right-0.5 p-0.5 rounded bg-slate-900/70 text-white"
+                    title="移除此範圍"
+                  >
+                    <Trash2 className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Modal Footer / Action Bar */}
         <div className="app-safe-footer px-2 sm:px-6 pt-2 sm:pt-3 bg-slate-50 border-t border-slate-200 flex flex-row items-center justify-between gap-1.5 sm:gap-3 shrink-0 z-10">
           <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 sm:flex-none sm:w-auto">
@@ -1219,17 +1487,31 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               </>
             ) : (
               <>
-                <button
-                  type="button"
-                  onClick={handleApplyCrop}
-                  disabled={isProcessing}
-                  className="flex-1 sm:flex-none px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 disabled:opacity-50"
-                  title="裁切保留所選區域"
-                >
-                  <Crop className="w-3.5 h-3.5" />
-                  <span className="sm:hidden">套用裁切</span>
-                  <span className="hidden sm:inline">套用框選裁切</span>
-                </button>
+                {!isExistingQuestion ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleAddPendingCrop()}
+                    disabled={isProcessing || cropTool === "erase"}
+                    className="flex-1 sm:flex-none px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 disabled:opacity-50 min-h-10"
+                    title="將目前框選加入錯題清單，可再框下一題"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span className="sm:hidden">加入錯題</span>
+                    <span className="hidden sm:inline">加入此錯題</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleApplyCrop}
+                    disabled={isProcessing || cropTool === "erase"}
+                    className="flex-1 sm:flex-none px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 disabled:opacity-50"
+                    title="裁切保留所選區域"
+                  >
+                    <Crop className="w-3.5 h-3.5" />
+                    <span className="sm:hidden">套用裁切</span>
+                    <span className="hidden sm:inline">套用框選裁切</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setMode("perspective")}
@@ -1265,10 +1547,16 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               type="button"
               onClick={() => void handleFinish()}
               disabled={isProcessing}
-              className="sm:hidden px-3 py-2 rounded-xl text-xs font-extrabold text-white bg-slate-900 hover:bg-slate-800 active:scale-95 transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+              className="sm:hidden px-3 py-2 rounded-xl text-xs font-extrabold text-white bg-slate-900 hover:bg-slate-800 active:scale-95 transition shadow-md flex items-center justify-center gap-1.5 cursor-pointer min-h-10"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              <span>{isExistingQuestion ? "儲存" : "開始分析"}</span>
+              <span>
+                {isExistingQuestion
+                  ? "儲存"
+                  : pendingCrops.length > 0
+                  ? `分析(${pendingCrops.length})`
+                  : "開始分析"}
+              </span>
               <ArrowRight className="w-3.5 h-3.5 text-sky-400" />
             </button>
           </div>
