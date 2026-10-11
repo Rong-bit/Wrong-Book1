@@ -4,6 +4,8 @@ import katex from "katex";
 interface MathRendererProps {
   content: string;
   className?: string;
+  /** Only for 詳細推導：拆「1、…。2、…」；題幹請勿開啟，以免拆壞里程「25、」等數字 */
+  breakNumberedSteps?: boolean;
 }
 
 interface Segment {
@@ -14,27 +16,33 @@ interface Segment {
 /**
  * Force each numbered 詳解 step onto its own line.
  * Handles glued AI output like「……。2、判定」or「……。2. 判定」(no newline/space).
- * Avoids decimals (2.5) and does not touch steps already at line start.
+ *
+ * Must NOT shatter Chinese mileage / enumerations like「臺北為25、臺中為178」:
+ * -顿号「、」only treats single-digit 2–9 as steps (or 10+ after sentence end)
+ * - ASCII/fullwidth 「.／．」skips decimals (2.5) and mid-number splits
  */
 export function breakNumberedExplanationSteps(raw: string): string {
   if (!raw) return "";
   let text = raw.replace(/\r\n/g, "\n");
 
-  // "……。2、" / "…… 2." / "……2、" → newline before step 2+
-  // Delimiter: . 、 ． ； after optional spaces; not followed by another digit (skip 2.5)
+  // Single-digit Chinese steps: 2、…9、 (pred not a digit → keeps 25、 intact)
+  text = text.replace(/([^\n\d])([ \t\u00a0]*)(?=[2-9]、)/g, "$1\n");
+
+  // Multi-digit顿号 steps only after sentence end: 。10、
+  text = text.replace(/([。！？；…])([ \t\u00a0]*)(?=[1-9]\d、)/g, "$1\n");
+
+  // 2. / 10. / 2． — not decimals, not mid-number
   text = text.replace(
-    /([^\n])([ \t\u00a0]*)(?=([2-9]|[1-9]\d)[.、．](?!\d))/g,
+    /([^\n\d])([ \t\u00a0]*)(?=([2-9]|[1-9]\d)[.．](?!\d))/g,
     "$1\n"
   );
 
-  // Parenthesis steps: "……。(2)" / "……（2）"
+  // (2) / （2）
   text = text.replace(
-    /([^\n])([ \t\u00a0]*)(?=[(（]([2-9]|[1-9]\d)[)）])/g,
+    /([^\n\d])([ \t\u00a0]*)(?=[(（]([2-9]|[1-9]\d)[)）])/g,
     "$1\n"
   );
 
-  // Soft-wrap: if step marker sits mid-line after CJK/period with only one space, keep single \n
-  // Collapse runaway blank lines introduced by prior "\n\n" splitters
   text = text.replace(/\n{3,}/g, "\n\n");
   return text;
 }
@@ -80,9 +88,9 @@ export function normalizeMathText(raw: string): string {
     "\\frac{$1\\text{$2}}{$3}"
   );
 
-  // Split numbered steps onto their own lines BEFORE pairing $...$
-  // AI often returns "1、……。2、……" with no space/newline — must not keep "2、" glued to step 1.
-  text = breakNumberedExplanationSteps(text);
+  // Mild split only when there is whitespace around "2. " — helps $ pairing,
+  // and will NOT shatter mileage lists like「臺北為25、臺中為178」.
+  text = text.replace(/(?<!\n)\s+(?=([2-9]|[1-9]\d)[.、．]\s)/g, "\n\n");
 
   // One formula per line: drop extra trailing $$, then close an unmatched opening $
   text = text
@@ -135,10 +143,13 @@ export function normalizeMathText(raw: string): string {
 /**
  * Parses raw text into text and LaTeX math blocks ($...$ or $$...$$)
  */
-function parseMathSegments(rawText: string): Segment[] {
+function parseMathSegments(rawText: string, breakNumberedSteps = false): Segment[] {
   if (!rawText) return [];
 
-  const text = normalizeMathText(rawText);
+  const prepared = breakNumberedSteps
+    ? breakNumberedExplanationSteps(rawText)
+    : rawText;
+  const text = normalizeMathText(prepared);
   const segments: Segment[] = [];
   // Regex to match $$block math$$ or $inline math$
   // $$[\s\S]+?$$ matches display mode formulas
@@ -218,8 +229,15 @@ function renderKatexHtml(latex: string, displayMode: boolean): string {
   }
 }
 
-export const MathRenderer: React.FC<MathRendererProps> = ({ content, className = "" }) => {
-  const segments = useMemo(() => parseMathSegments(content), [content]);
+export const MathRenderer: React.FC<MathRendererProps> = ({
+  content,
+  className = "",
+  breakNumberedSteps = false,
+}) => {
+  const segments = useMemo(
+    () => parseMathSegments(content, breakNumberedSteps),
+    [content, breakNumberedSteps]
+  );
 
   if (!content) return null;
 

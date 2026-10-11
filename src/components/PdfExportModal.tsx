@@ -1519,7 +1519,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                   【詳細推導步驟】：
                                 </span>
                                 <div className="whitespace-pre-line text-slate-600">
-                                  <MathRenderer content={q.explanation} />
+                                  <MathRenderer content={q.explanation} breakNumberedSteps />
                                 </div>
                               </div>
                             )}
@@ -1601,7 +1601,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                           <span className="font-bold text-slate-800 block mb-0.5">
                             詳細推導：
                           </span>
-                          <MathRenderer content={q.explanation} />
+                          <MathRenderer content={q.explanation} breakNumberedSteps />
                         </div>
                       </div>
                     ))}

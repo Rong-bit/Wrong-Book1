@@ -944,7 +944,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                   即時推導預覽 (KaTeX)
                 </div>
                 <div className="text-slate-800 font-sans leading-relaxed overflow-x-auto break-words">
-                  <MathRenderer content={editedExplanation} />
+                  <MathRenderer content={editedExplanation} breakNumberedSteps />
                 </div>
               </div>
             )}
@@ -1098,7 +1098,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                         詳細解題步驟
                       </span>
                       <div className="text-slate-700 font-sans min-w-0 break-words space-y-2">
-                        <MathRenderer content={question.explanation} />
+                        <MathRenderer content={question.explanation} breakNumberedSteps />
                       </div>
                     </div>
                   )}
@@ -1381,7 +1381,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                                       【詳細解題步驟】：
                                     </span>
                                     <div className="leading-relaxed text-slate-600 font-sans min-w-0 break-words overflow-x-auto">
-                                      <MathRenderer content={v.explanation} />
+                                      <MathRenderer content={v.explanation} breakNumberedSteps />
                                     </div>
                                   </div>
                                 )}
