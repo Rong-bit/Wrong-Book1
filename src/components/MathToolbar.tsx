@@ -140,37 +140,37 @@ export const MathToolbar: React.FC<MathToolbarProps> = ({
   };
 
   return (
-    <div className={`border border-sky-200 rounded-xl bg-sky-50/50 overflow-hidden text-xs ${className}`}>
+    <div className={`border border-sky-200 rounded-xl bg-sky-50/50 overflow-hidden text-xs min-w-0 ${className}`}>
       {/* Header bar */}
-      <div className="px-3 py-1.5 flex items-center justify-between gap-2 border-b border-sky-100 bg-sky-100/50">
-        <div className="flex items-center gap-1.5 font-semibold text-sky-900">
-          <Calculator className="w-3.5 h-3.5 text-sky-600" />
-          <span>數學方程式編輯工具列 (KaTeX)</span>
+      <div className="px-2.5 sm:px-3 py-1.5 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between border-b border-sky-100 bg-sky-100/50">
+        <div className="flex items-center gap-1.5 font-semibold text-sky-900 min-w-0">
+          <Calculator className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+          <span className="truncate">數學方程式編輯工具列 (KaTeX)</span>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 flex-wrap">
           <button
             type="button"
             onClick={() => insertSnippet("x", true)}
-            className="px-2 py-0.5 rounded bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 font-mono text-[11px] shadow-2xs transition"
+            className="px-2 py-1.5 sm:py-0.5 min-h-9 sm:min-h-0 rounded bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 font-mono text-[11px] shadow-2xs transition"
             title="插入行內公式 $...$"
           >
-            $行內公式$
+            $行內$
           </button>
           <button
             type="button"
             onClick={() => insertSnippet("\\frac{a}{b}", false)}
-            className="px-2 py-0.5 rounded bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 font-mono text-[11px] shadow-2xs transition"
+            className="px-2 py-1.5 sm:py-0.5 min-h-9 sm:min-h-0 rounded bg-white hover:bg-sky-50 text-sky-700 border border-sky-200 font-mono text-[11px] shadow-2xs transition"
             title="插入獨立置中公式 $$...$$"
           >
-            $$獨立區塊$$
+            $$區塊$$
           </button>
           <button
             type="button"
             onClick={() => setIsOpen(!isOpen)}
-            className="p-1 rounded text-sky-700 hover:bg-sky-200/60 transition flex items-center gap-0.5 font-medium ml-1"
+            className="px-2 py-1.5 sm:p-1 min-h-9 sm:min-h-0 rounded text-sky-700 hover:bg-sky-200/60 transition flex items-center gap-0.5 font-medium"
           >
-            {isOpen ? "收合符號盤" : "展開符號盤"}
+            {isOpen ? "收合" : "展開"}
             {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
         </div>
@@ -180,11 +180,11 @@ export const MathToolbar: React.FC<MathToolbarProps> = ({
       {isOpen && (
         <div className="p-3 bg-white space-y-2.5">
           {/* Category Tabs */}
-          <div className="flex items-center gap-1 border-b border-slate-100 pb-1.5">
+          <div className="flex items-center gap-1 border-b border-slate-100 pb-1.5 overflow-x-auto flex-nowrap -mx-1 px-1">
             <button
               type="button"
               onClick={() => setActiveTab("common")}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition ${
+              className={`px-2.5 py-1.5 sm:py-1 rounded-lg text-[11px] font-semibold transition whitespace-nowrap shrink-0 min-h-9 sm:min-h-0 ${
                 activeTab === "common"
                   ? "bg-sky-600 text-white shadow-2xs"
                   : "text-slate-600 hover:bg-slate-100"
@@ -195,7 +195,7 @@ export const MathToolbar: React.FC<MathToolbarProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab("relations")}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition ${
+              className={`px-2.5 py-1.5 sm:py-1 rounded-lg text-[11px] font-semibold transition whitespace-nowrap shrink-0 min-h-9 sm:min-h-0 ${
                 activeTab === "relations"
                   ? "bg-sky-600 text-white shadow-2xs"
                   : "text-slate-600 hover:bg-slate-100"
@@ -206,7 +206,7 @@ export const MathToolbar: React.FC<MathToolbarProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab("advanced")}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition ${
+              className={`px-2.5 py-1.5 sm:py-1 rounded-lg text-[11px] font-semibold transition whitespace-nowrap shrink-0 min-h-9 sm:min-h-0 ${
                 activeTab === "advanced"
                   ? "bg-sky-600 text-white shadow-2xs"
                   : "text-slate-600 hover:bg-slate-100"
@@ -217,7 +217,7 @@ export const MathToolbar: React.FC<MathToolbarProps> = ({
             <button
               type="button"
               onClick={() => setActiveTab("presets")}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition flex items-center gap-1 ${
+              className={`px-2.5 py-1.5 sm:py-1 rounded-lg text-[11px] font-semibold transition flex items-center gap-1 whitespace-nowrap shrink-0 min-h-9 sm:min-h-0 ${
                 activeTab === "presets"
                   ? "bg-amber-600 text-white shadow-2xs"
                   : "text-amber-700 hover:bg-amber-50"
