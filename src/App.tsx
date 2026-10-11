@@ -74,12 +74,6 @@ function buildPaperMetaFromQuestions(questions: QuestionItem[]) {
   };
 }
 
-function compareCaptureTime(a: QuestionItem, b: QuestionItem) {
-  const dt = (a.createdAt || 0) - (b.createdAt || 0);
-  if (dt !== 0) return dt;
-  return String(a.id).localeCompare(String(b.id));
-}
-
 function newestFirst(items: QuestionItem[]): QuestionItem[] {
   if (items.length < 2) return items;
   let newerFirst = 0;
