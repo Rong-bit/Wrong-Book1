@@ -151,6 +151,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
       const compressed = await compressImage(file);
       onUpdateQuestion(question.id, {
         imageBase64: compressed,
+        figureImageBase64: undefined,
         imageSettings: {
           ...question.imageSettings,
           includeInExport: true,
@@ -540,7 +541,12 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => onUpdateQuestion(question.id, { imageBase64: "" })}
+                  onClick={() =>
+                    onUpdateQuestion(question.id, {
+                      imageBase64: "",
+                      figureImageBase64: undefined,
+                    })
+                  }
                   className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 rounded-lg transition"
                 >
                   移除截圖

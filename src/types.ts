@@ -23,6 +23,9 @@ export interface QuestionItem {
   /**
    * Diagram / map crop only (from 選圖形). Used by PDF「僅排版文字」so the stem
    * screenshot is not repeated next to OCR text.
+   * - string: attach this figure
+   * - "" : explicitly no figure (text-only paint crop)
+   * - undefined: legacy question; may fall back to imageBase64
    */
   figureImageBase64?: string;
   imageSettings: ImageSettings;
@@ -51,6 +54,7 @@ export interface QuestionItem {
 /** One calibrated wrong-question crop from ImageCalibrationModal. */
 export interface CalibratedCrop {
   imageBase64: string;
+  /** Diagram-only attach; "" when paint had no 選圖形 island. */
   figureImageBase64?: string;
 }
 

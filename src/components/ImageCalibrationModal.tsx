@@ -471,8 +471,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     if (selectRegionsRef.current.length > 0) {
       const regions = selectRegionsRef.current;
       const imageBase64 = await applyMultiRegionCrop(currentImage, regions, 0.92);
-      const figureImageBase64 = await cropFigureRegionsOnly(currentImage, regions, 0.92);
-      return { imageBase64, figureImageBase64 };
+      const figureOnly = await cropFigureRegionsOnly(currentImage, regions, 0.92);
+      // "" = explicit none so PDF textOnly won't fall back to the stem screenshot
+      return { imageBase64, figureImageBase64: figureOnly || "" };
     }
     const imageBase64 = await applyCrop(
       currentImage,

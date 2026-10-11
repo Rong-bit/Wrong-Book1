@@ -15,11 +15,15 @@ export function questionDependsOnFigure(questionText: string): boolean {
 /**
  * In text-only PDF mode: keep the crop when the stem needs a figure,
  * or when OCR text is essentially missing (photo is the only content).
+ *
+ * `figureImageBase64 === ""` means the crop was saved without a diagram
+ * (explicit none) — do not fall back to the stem screenshot.
  */
 export function shouldShowFigureInTextOnlyMode(
   q: Pick<QuestionItem, "questionText" | "imageBase64" | "imageSettings" | "figureImageBase64">
 ): boolean {
   if (q.imageSettings && q.imageSettings.includeInExport === false) return false;
+  if (q.figureImageBase64 === "") return false;
   // Dedicated diagram crop from 選圖形 → always attach in text-only mode
   if (q.figureImageBase64) return true;
   if (!q.imageBase64) return false;
@@ -31,12 +35,13 @@ export function shouldShowFigureInTextOnlyMode(
 /**
  * Image to show beside layout text in「僅排版文字」mode.
  * Prefer figure-only crop; never prefer the dual text+diagram composite when a
- * dedicated figure exists.
+ * dedicated figure exists. Empty string = explicitly no figure.
  */
 export function getTextOnlyFigureSrc(
   q: Pick<QuestionItem, "imageBase64" | "figureImageBase64" | "imageSettings" | "questionText">
 ): string | null {
   if (q.imageSettings && q.imageSettings.includeInExport === false) return null;
+  if (q.figureImageBase64 === "") return null;
   if (q.figureImageBase64) return q.figureImageBase64;
   // Legacy questions without figureImageBase64: fall back to full image when needed
   if (shouldShowFigureInTextOnlyMode(q) && q.imageBase64) return q.imageBase64;

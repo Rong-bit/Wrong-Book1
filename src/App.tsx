@@ -224,7 +224,8 @@ export default function App() {
       const newQuestionPlaceholder: QuestionItem = {
         id: tempId,
         imageBase64: base64Data,
-        figureImageBase64: figureImageBase64 || undefined,
+        // Keep "" (explicit no-figure) distinct from undefined (legacy)
+        figureImageBase64: figureImageBase64,
         imageSettings: {
           zoom: 100,
           rotation: 0,
@@ -368,7 +369,8 @@ export default function App() {
       const first = items[0];
       handleUpdateQuestion(targetId, {
         imageBase64: first.imageBase64,
-        figureImageBase64: first.figureImageBase64,
+        figureImageBase64:
+          first.figureImageBase64 === undefined ? undefined : first.figureImageBase64,
         imageSettings: {
           zoom: 100,
           rotation: 0,
@@ -376,20 +378,24 @@ export default function App() {
           includeInExport: true,
         },
       });
-      setSelectedQuestionForImageModal((prev) =>
-        prev && prev.id === targetId
-          ? {
-              ...prev,
-              imageBase64: first.imageBase64,
-              figureImageBase64: first.figureImageBase64,
-              imageSettings: {
-                ...prev.imageSettings,
-                zoom: 100,
-                rotation: 0,
-              },
-            }
-          : null
-      );
+      setSelectedQuestionForImageModal((prev) => {
+        if (!prev || prev.id !== targetId) return null;
+        const next = {
+          ...prev,
+          imageBase64: first.imageBase64,
+          imageSettings: {
+            ...prev.imageSettings,
+            zoom: 100,
+            rotation: 0,
+          },
+        };
+        if (first.figureImageBase64 === undefined) {
+          delete next.figureImageBase64;
+        } else {
+          next.figureImageBase64 = first.figureImageBase64;
+        }
+        return next;
+      });
       setCalibrationModal({ isOpen: false, imageSrc: "" });
       return;
     }
@@ -480,8 +486,21 @@ export default function App() {
   };
 
   const handleUpdateQuestion = (id: string, updated: Partial<QuestionItem>) => {
+    // Replacing the main crop without a new figure must drop the stale map attach
+    const patch =
+      "imageBase64" in updated && !("figureImageBase64" in updated)
+        ? { ...updated, figureImageBase64: undefined }
+        : updated;
     setQuestions((prev) =>
-      prev.map((q) => (q.id === id ? { ...q, ...updated } : q))
+      prev.map((q) => {
+        if (q.id !== id) return q;
+        const next = { ...q, ...patch };
+        // Ensure explicit clear survives (undefined from patch)
+        if ("figureImageBase64" in patch && patch.figureImageBase64 == null) {
+          delete next.figureImageBase64;
+        }
+        return next;
+      })
     );
   };
 
@@ -498,15 +517,16 @@ export default function App() {
 
   const handleRemoveImageOnly = (id: string) => {
     setQuestions((prev) =>
-      prev.map((q) =>
-        q.id === id
-          ? {
-              ...q,
-              imageBase64: "",
-              imageSettings: { ...q.imageSettings, includeInExport: false },
-            }
-          : q
-      )
+      prev.map((q) => {
+        if (q.id !== id) return q;
+        const next = {
+          ...q,
+          imageBase64: "",
+          imageSettings: { ...q.imageSettings, includeInExport: false },
+        };
+        delete next.figureImageBase64;
+        return next;
+      })
     );
   };
 
@@ -1001,21 +1021,23 @@ export default function App() {
           onReplaceImage={(newBase64) => {
             handleUpdateQuestion(selectedQuestionForImageModal.id, {
               imageBase64: newBase64,
+              figureImageBase64: undefined,
               imageSettings: {
                 ...selectedQuestionForImageModal.imageSettings,
                 zoom: 100,
                 includeInExport: true,
               },
             });
-            setSelectedQuestionForImageModal((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    imageBase64: newBase64,
-                    imageSettings: { ...prev.imageSettings, zoom: 100, includeInExport: true },
-                  }
-                : null
-            );
+            setSelectedQuestionForImageModal((prev) => {
+              if (!prev) return null;
+              const next = {
+                ...prev,
+                imageBase64: newBase64,
+                imageSettings: { ...prev.imageSettings, zoom: 100, includeInExport: true },
+              };
+              delete next.figureImageBase64;
+              return next;
+            });
           }}
         />
       )}
@@ -1033,6 +1055,7 @@ export default function App() {
             if (calibrationModal.targetQuestionId) {
               handleUpdateQuestion(calibrationModal.targetQuestionId, {
                 imageBase64: newImg,
+                figureImageBase64: undefined,
               });
             }
           }}
