@@ -22,9 +22,12 @@ import { getTextOnlyFigureSrc } from "../utils/questionExport";
 
 interface PdfExportModalProps {
   isOpen: boolean;
+  /** Ready questions (already excludes analyzing). */
   questions: QuestionItem[];
   /** Total notebook size (may include analyzing); shown when export skips some. */
   notebookTotal?: number;
+  /** Notebook subject chip when opening export — default export scope. */
+  initialSubjectFilter?: string;
   settings: PaperSettings;
   onClose: () => void;
   onUpdateSettings: (newSettings: PaperSettings) => void;
@@ -47,12 +50,14 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   isOpen,
   questions,
   notebookTotal,
+  initialSubjectFilter = "全部",
   settings,
   onClose,
   onUpdateSettings,
 }) => {
   const [exportError, setExportError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [exportSubject, setExportSubject] = useState(initialSubjectFilter);
   const previewRef = useRef<HTMLDivElement>(null);
 
   const isCornellCompact = settings.questionsPerPage === "compact";
@@ -60,16 +65,42 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   /** Shrinks when a compact page overflows so no question is clipped. */
   const [compactFitSize, setCompactFitSize] = useState(estimatedCompactSize);
 
+  const subjectOptions = useMemo(() => {
+    const set = new Set<string>();
+    questions.forEach((q) => {
+      if (q.subject) set.add(q.subject);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hant"));
+  }, [questions]);
+
+  /** Questions actually printed / previewed for the chosen subject scope. */
+  const exportQuestions = useMemo(() => {
+    if (exportSubject === "全部") return questions;
+    return questions.filter((q) => q.subject === exportSubject);
+  }, [questions, exportSubject]);
+
   useEffect(() => {
     if (!isOpen) {
       setShowPreview(false);
       setExportError(null);
+      return;
     }
-  }, [isOpen]);
+    // Open with the notebook's current subject chip (地理 → only 地理)
+    const next =
+      initialSubjectFilter &&
+      (initialSubjectFilter === "全部" ||
+        questions.some((q) => q.subject === initialSubjectFilter))
+        ? initialSubjectFilter
+        : "全部";
+    setExportSubject(next);
+  }, [isOpen, initialSubjectFilter, questions]);
 
   const questionsFitKey = useMemo(
-    () => questions.map((q) => `${q.id}:${q.figureImageBase64 ? "f" : q.imageBase64 ? "i" : "n"}`).join("|"),
-    [questions]
+    () =>
+      exportQuestions
+        .map((q) => `${q.id}:${q.figureImageBase64 ? "f" : q.imageBase64 ? "i" : "n"}`)
+        .join("|"),
+    [exportQuestions]
   );
 
   useEffect(() => {
@@ -79,6 +110,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     settings.questionsPerPage,
     settings.questionDisplayMode,
     questionsFitKey,
+    exportSubject,
     isOpen,
   ]);
 
@@ -91,8 +123,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   const cornellPages = useMemo(() => {
     const pages: { pageIndex: number; questions: { q: QuestionItem; index: number }[] }[] =
       [];
-    for (let i = 0; i < questions.length; i += cornellPageSize) {
-      const chunk = questions.slice(i, i + cornellPageSize).map((q, offset) => ({
+    for (let i = 0; i < exportQuestions.length; i += cornellPageSize) {
+      const chunk = exportQuestions.slice(i, i + cornellPageSize).map((q, offset) => ({
         q,
         index: i + offset,
       }));
@@ -102,7 +134,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       });
     }
     return pages;
-  }, [questions, cornellPageSize]);
+  }, [exportQuestions, cornellPageSize]);
 
   // Compact pages use fixed paper height; re-measure after images / KaTeX / resize
   useLayoutEffect(() => {
@@ -385,6 +417,50 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   </span>
                 </button>
               </div>
+            </div>
+
+            {/* Subject scope — follows notebook filter by default */}
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1.5">
+                匯出科目範圍
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setExportSubject("全部")}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                    exportSubject === "全部"
+                      ? "bg-slate-900 text-white border-slate-900"
+                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  全部 ({questions.length})
+                </button>
+                {subjectOptions.map((subj) => {
+                  const count = questions.filter((q) => q.subject === subj).length;
+                  return (
+                    <button
+                      key={subj}
+                      type="button"
+                      onClick={() => setExportSubject(subj)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                        exportSubject === subj
+                          ? "bg-sky-600 text-white border-sky-600"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      {subj} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1.5 text-[10px] text-slate-500 leading-snug">
+                預設帶入錯題本目前科目篩選
+                {initialSubjectFilter && initialSubjectFilter !== "全部"
+                  ? `（${initialSubjectFilter}）`
+                  : ""}
+                ；選「全部」才會混入其他科目。
+              </p>
             </div>
 
             {/* Export Mode: Cornell vs Notebook vs Exam Paper */}
@@ -1158,7 +1234,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
                   {/* Questions List */}
                   <div className="space-y-6">
-                    {questions.map((q, idx) => (
+                    {exportQuestions.map((q, idx) => (
                       <div
                         key={q.id}
                         className="print-avoid-break pb-4 border-b border-slate-200/80 last:border-0"
@@ -1355,12 +1431,13 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                       【參考答案與詳細步驟解析】
                     </h2>
                     <p className="text-xs text-slate-500">
-                      適用試卷：{settings.title || "錯題複習強化卷"} · 共 {questions.length} 題
+                      適用試卷：{settings.title || "錯題複習強化卷"} · 共 {exportQuestions.length} 題
+                      {exportSubject !== "全部" ? `（${exportSubject}）` : ""}
                     </p>
                   </div>
 
                   <div className="space-y-4 text-xs">
-                    {questions.map((q, idx) => (
+                    {exportQuestions.map((q, idx) => (
                       <div
                         key={q.id}
                         className="p-3 bg-slate-50 rounded-lg border border-slate-200 print-avoid-break"
@@ -1416,9 +1493,10 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
         <div className="app-safe-footer px-4 pt-3 md:px-6 md:pt-3.5 bg-white border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0 no-print">
           <div className="text-[11px] sm:text-xs text-slate-500 flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
             <span>
-              匯出 {questions.length} 道試題
-              {typeof notebookTotal === "number" && notebookTotal > questions.length
-                ? `（錯題本 ${notebookTotal}，已略過分析中 ${notebookTotal - questions.length}）`
+              匯出 {exportQuestions.length} 道
+              {exportSubject !== "全部" ? `「${exportSubject}」` : ""}試題
+              {typeof notebookTotal === "number" && notebookTotal !== exportQuestions.length
+                ? `（錯題本共 ${notebookTotal}）`
                 : ""}
               {isCornellCompact ? ` · 密排約 ${cornellPageSize} 題／頁` : ""}
             </span>
