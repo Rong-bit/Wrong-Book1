@@ -49,6 +49,7 @@ import {
   clusterTightStrokeRects,
   CropRect,
   LabeledCropRect,
+  RegionKind,
 } from "../utils/imageUtils";
 import { removeHandwritingWithAI } from "../services/aiService";
 
@@ -68,6 +69,8 @@ type CalibrationMode = "perspective" | "crop";
 /** paint = 畫過文字／圖緊貼框選；frame = 矩形微調 */
 type CropTool = "paint" | "frame";
 type AspectRatioMode = "free" | "4:3" | "16:9" | "1:1" | "paper";
+/** Explicit paint target: start with text, tap again for diagram. */
+type PaintKind = RegionKind;
 
 /** Thin stroke preview while painting (normalized width factor). */
 const PAINT_PREVIEW_WIDTH = 0.018;
@@ -103,14 +106,21 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const [isImageReady, setIsImageReady] = useState<boolean>(false);
   const [pendingCrops, setPendingCrops] = useState<string[]>([]);
   const [cropTool, setCropTool] = useState<CropTool>("paint");
+  /** Default 選文字；切到 選圖形 後筆畫強制標成圖區。 */
+  const [paintKind, setPaintKind] = useState<PaintKind>("text");
   const [selectPaintStrokes, setSelectPaintStrokes] = useState<Point[][]>([]);
+  const [selectStrokeKinds, setSelectStrokeKinds] = useState<RegionKind[]>([]);
   const [selectRegions, setSelectRegions] = useState<LabeledCropRect[]>([]);
   const [activeSelectStroke, setActiveSelectStroke] = useState<Point[] | null>(null);
   const [isSelectPainting, setIsSelectPainting] = useState(false);
   const selectStrokeRef = useRef<Point[] | null>(null);
   const selectPaintStrokesRef = useRef<Point[][]>([]);
+  const selectStrokeKindsRef = useRef<RegionKind[]>([]);
   const selectRegionsRef = useRef<LabeledCropRect[]>([]);
+  const paintKindRef = useRef<PaintKind>("text");
   const cropDirtyAfterAddRef = useRef(false);
+  paintKindRef.current = paintKind;
+  selectStrokeKindsRef.current = selectStrokeKinds;
   const currentImageRef = useRef(currentImage);
   currentImageRef.current = currentImage;
   selectPaintStrokesRef.current = selectPaintStrokes;
@@ -236,8 +246,12 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
       setPendingCrops([]);
       setCropTool("paint");
+      setPaintKind("text");
+      paintKindRef.current = "text";
       setSelectPaintStrokes([]);
       selectPaintStrokesRef.current = [];
+      setSelectStrokeKinds([]);
+      selectStrokeKindsRef.current = [];
       setSelectRegions([]);
       selectRegionsRef.current = [];
       setActiveSelectStroke(null);
@@ -323,6 +337,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const clearSelectPaint = () => {
     setSelectPaintStrokes([]);
     selectPaintStrokesRef.current = [];
+    setSelectStrokeKinds([]);
+    selectStrokeKindsRef.current = [];
     setSelectRegions([]);
     selectRegionsRef.current = [];
     setActiveSelectStroke(null);
@@ -330,15 +346,18 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     setIsSelectPainting(false);
   };
 
-  const syncPaintRegionsFromStrokes = (strokes: Point[][]) => {
+  const syncPaintRegionsFromStrokes = (
+    strokes: Point[][],
+    kinds: RegionKind[] = selectStrokeKindsRef.current
+  ) => {
     const img = imgRef.current;
     if (!img || !(img.naturalWidth || img.width) || !strokes.length) {
       selectRegionsRef.current = [];
       setSelectRegions([]);
       return;
     }
-    // Nearby strokes (multi-line text) merge; distant (text vs diagram) stay 2+ rects
-    const regions = clusterTightStrokeRects(img, strokes, 0.02, 0.035);
+    // Explicit kinds from 選文字／選圖形; different kinds stay separate & non-overlapping
+    const regions = clusterTightStrokeRects(img, strokes, 0.02, 0.035, kinds);
     selectRegionsRef.current = regions;
     setSelectRegions(regions);
     const overall = unionCropRects(regions);
@@ -357,6 +376,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     setCropBox(cropBoxFromCorners(corners));
     setMode("crop");
     setCropTool("paint");
+    setPaintKind("text");
+    paintKindRef.current = "text";
     clearSelectPaint();
   };
 
@@ -398,9 +419,11 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       const corrected = await applyPerspectiveCorrection(currentImage, realCorners);
       pushHistory(corrected);
 
-      // After straightening, default to paint-select so user can finger-highlight the wrong region
+      // After straightening, default to 選文字 so user paints stem first
       setMode("crop");
       setCropTool("paint");
+      setPaintKind("text");
+      paintKindRef.current = "text";
       clearSelectPaint();
       setCorners(FULL_FRAME_CORNERS);
       setCropBox(cropBoxFromCorners(FULL_FRAME_CORNERS));
@@ -464,7 +487,11 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const handleAddPendingCrop = async () => {
     if (isProcessing || isExistingQuestion || mode !== "crop") return;
     if (cropTool === "paint" && selectRegionsRef.current.length === 0) {
-      setProcessingText("請先用手指畫過錯題文字／圖的範圍");
+      setProcessingText(
+        paintKind === "diagram"
+          ? "請先用「選圖形」畫過地圖／圖形範圍"
+          : "請先用「選文字」畫過題幹文字範圍"
+      );
       setIsProcessing(true);
       setTimeout(() => setIsProcessing(false), 1400);
       return;
@@ -483,6 +510,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         // Keep base image; reset for the next wrong region (paint again)
         setCropBox({ x: 0.08, y: 0.08, w: 0.84, h: 0.35 });
         setCropTool("paint");
+        setPaintKind("text");
+        paintKindRef.current = "text";
         clearSelectPaint();
         cropDirtyAfterAddRef.current = false;
       }
@@ -850,10 +879,14 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setActiveSelectStroke(null);
       setIsSelectPainting(false);
       if (points.length < 2) return;
+      const kind = paintKindRef.current;
       const nextStrokes = [...selectPaintStrokesRef.current, points];
+      const nextKinds = [...selectStrokeKindsRef.current, kind];
       selectPaintStrokesRef.current = nextStrokes;
+      selectStrokeKindsRef.current = nextKinds;
       setSelectPaintStrokes(nextStrokes);
-      syncPaintRegionsFromStrokes(nextStrokes);
+      setSelectStrokeKinds(nextKinds);
+      syncPaintRegionsFromStrokes(nextStrokes, nextKinds);
     };
 
     window.addEventListener("mousemove", handlePointerMove);
@@ -1412,23 +1445,44 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200 mr-0.5">
                   <button
                     type="button"
-                    onClick={() => setCropTool("paint")}
+                    onClick={() => {
+                      setCropTool("paint");
+                      setPaintKind("text");
+                      paintKindRef.current = "text";
+                    }}
                     className={`px-2 py-1 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
-                      cropTool === "paint"
+                      cropTool === "paint" && paintKind === "text"
                         ? "bg-emerald-600 text-white shadow-2xs"
                         : "text-slate-600 hover:bg-white"
                     }`}
-                    title="持續畫選即可：先畫文字→文字區，再直接畫地圖→圖區（不必再按畫選）"
+                    title="先畫題幹文字；此筆畫會標成文字區"
                   >
                     <Paintbrush className="w-3 h-3" />
-                    畫選
+                    選文字
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCropTool("paint");
+                      setPaintKind("diagram");
+                      paintKindRef.current = "diagram";
+                    }}
+                    className={`px-2 py-1 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
+                      cropTool === "paint" && paintKind === "diagram"
+                        ? "bg-sky-600 text-white shadow-2xs"
+                        : "text-slate-600 hover:bg-white"
+                    }`}
+                    title="再點此後畫地圖／圖形；與文字區分開且不重疊"
+                  >
+                    <Paintbrush className="w-3 h-3" />
+                    選圖形
                   </button>
                   <button
                     type="button"
                     onClick={() => setCropTool("frame")}
                     className={`px-2 py-1 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
                       cropTool === "frame"
-                        ? "bg-sky-600 text-white shadow-2xs"
+                        ? "bg-indigo-600 text-white shadow-2xs"
                         : "text-slate-600 hover:bg-white"
                     }`}
                     title="矩形框微調範圍"
@@ -1734,12 +1788,24 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                       );
                     })}
                     <svg className="absolute inset-0 w-full h-full pointer-events-none">
-                      {[...selectPaintStrokes, ...(activeSelectStroke ? [activeSelectStroke] : [])].map(
-                        (stroke, idx) => (
+                      {[
+                        ...selectPaintStrokes.map((stroke, i) => ({
+                          stroke,
+                          kind: selectStrokeKinds[i] || "text",
+                          key: `done-${i}`,
+                        })),
+                        ...(activeSelectStroke
+                          ? [{ stroke: activeSelectStroke, kind: paintKind, key: "active" }]
+                          : []),
+                      ].map(({ stroke, kind, key }) => (
                           <polyline
-                            key={`sel-${idx}`}
+                            key={key}
                             fill="none"
-                            stroke="rgba(16, 185, 129, 0.45)"
+                            stroke={
+                              kind === "diagram"
+                                ? "rgba(14, 165, 233, 0.5)"
+                                : "rgba(16, 185, 129, 0.45)"
+                            }
                             strokeWidth={
                               Math.min(displayDimensions.width, displayDimensions.height) *
                               PAINT_PREVIEW_WIDTH
@@ -1785,12 +1851,14 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           >
             {cropTool === "paint"
               ? selectRegions.length > 1
-                ? `同一題 ${selectRegions.length} 區塊（文字／圖分開拼接）→ 按下方「加入此錯題」`
+                ? `同一題 ${selectRegions.length} 區塊（文字／圖分開、不重疊）→ 按下方「加入此錯題」`
                 : selectPaintStrokes.length > 0
-                ? selectRegions[0]?.kind === "diagram"
-                  ? "已圈圖區；直接再畫文字即可（不必再按畫選），或按下方「加入此錯題」"
-                  : "已圈文字區；直接再畫地圖即可出現圖區（不必再按畫選）"
-                : "先畫文字→文字區，接著直接畫地圖→圖區（同一模式連續畫，不必重按畫選）"
+                ? paintKind === "diagram"
+                  ? "目前「選圖形」：畫地圖／圖形（與文字區不重疊）"
+                  : "已圈文字區 → 點「選圖形」再畫地圖"
+                : paintKind === "diagram"
+                ? "「選圖形」：請畫地圖／圖形範圍"
+                : "「選文字」：請先畫題幹文字，完成後再點「選圖形」"
               : "「框選」可微調範圍；建議先「AI 去手寫」，再按「加入此錯題」。"}
           </div>
         )}
