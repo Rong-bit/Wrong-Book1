@@ -958,6 +958,11 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
 
     /** Commit final corner from the release event (changedTouches on touchend). */
     const handlePointerUp = (e: MouseEvent | TouchEvent) => {
+      // Touch-owned drag: ignore compatibility mouseup (no aim offset; can overwrite drop)
+      if (activeTouchIdRef.current != null && e.type === "mouseup") {
+        return;
+      }
+
       if (activeDragCorner !== null) {
         // Only end when the owning finger lifts/cancels (ignore other fingers)
         if (
