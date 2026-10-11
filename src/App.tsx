@@ -205,7 +205,7 @@ export default function App() {
   // Process new image (from Ctrl+V paste or camera / upload)
   const processNewImage = useCallback(
     async (base64Data: string, subjectHint?: string) => {
-      const tempId = "q_" + Date.now();
+      const tempId = `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       analyzingCountRef.current += 1;
       setIsAnalyzing(true);
       setAnalyzingMessage("AI 正在辨識考題圖片並分析科目與單元...");
@@ -343,9 +343,16 @@ export default function App() {
     [autoCalibrateOnCapture, processNewImage]
   );
 
-  const handleCalibrationConfirm = (processedBase64: string) => {
+  const handleCalibrationConfirm = async (processedImages: string[]) => {
+    const images = (processedImages || []).filter(Boolean);
+    if (images.length === 0) {
+      setCalibrationModal({ isOpen: false, imageSrc: "" });
+      return;
+    }
+
     if (calibrationModal.targetQuestionId) {
       const targetId = calibrationModal.targetQuestionId;
+      const processedBase64 = images[0];
       handleUpdateQuestion(targetId, {
         imageBase64: processedBase64,
         imageSettings: {
@@ -368,10 +375,17 @@ export default function App() {
             }
           : null
       );
-    } else {
-      processNewImage(processedBase64, calibrationModal.subjectHint);
+      setCalibrationModal({ isOpen: false, imageSrc: "" });
+      return;
     }
+
+    const subjectHint = calibrationModal.subjectHint;
     setCalibrationModal({ isOpen: false, imageSrc: "" });
+    // Serial analysis to avoid API bursts. Reverse so the first framed region
+    // ends on top (processNewImage prepends each new card).
+    for (const img of [...images].reverse()) {
+      await processNewImage(img, subjectHint);
+    }
   };
 
   const handleCalibrationSkip = () => {
@@ -1008,10 +1022,7 @@ export default function App() {
             }
           }}
           onClose={() => {
-            if (!calibrationModal.targetQuestionId && calibrationModal.imageSrc) {
-              handleCalibrationSkip();
-              return;
-            }
+            // X / Escape only closes; use「略過校正」to analyze the original uncropped image
             setCalibrationModal({ isOpen: false, imageSrc: "" });
           }}
         />

@@ -880,6 +880,81 @@ export async function applyCrop(
   });
 }
 
+export interface BrushStroke {
+  /** Normalized points in [0, 1] image space */
+  points: Point[];
+  /** Brush radius as a fraction of min(imageWidth, imageHeight) */
+  radiusNorm: number;
+}
+
+/**
+ * Paint opaque white brush strokes onto an image (for covering handwritten answers).
+ */
+export async function paintWhiteBrushOnImage(
+  imageSrc: string,
+  stroke: BrushStroke,
+  quality = 0.92
+): Promise<string> {
+  const normSrc = normalizeImageSrc(imageSrc);
+  if (!normSrc || !stroke.points.length) return normSrc;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    if (normSrc.startsWith("http://") || normSrc.startsWith("https://")) {
+      img.crossOrigin = "anonymous";
+    }
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        if (w < 2 || h < 2) {
+          resolve(normSrc);
+          return;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(normSrc);
+          return;
+        }
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+
+        const radius = Math.max(4, Math.min(w, h) * stroke.radiusNorm);
+        ctx.strokeStyle = "#ffffff";
+        ctx.fillStyle = "#ffffff";
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.lineWidth = radius * 2;
+
+        const pts = stroke.points;
+        if (pts.length === 1) {
+          ctx.beginPath();
+          ctx.arc(pts[0].x * w, pts[0].y * h, radius, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x * w, pts[0].y * h);
+          for (let i = 1; i < pts.length; i++) {
+            ctx.lineTo(pts[i].x * w, pts[i].y * h);
+          }
+          ctx.stroke();
+        }
+
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      } catch (err) {
+        console.error("White brush paint failed:", err);
+        resolve(normSrc);
+      }
+    };
+    img.onerror = () => resolve(normSrc);
+    img.src = normSrc;
+  });
+}
+
 /**
  * Rotates an image by 90, -90, or 180 degrees
  */
