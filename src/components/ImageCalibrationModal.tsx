@@ -1527,7 +1527,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           </div>
         </div>
 
-        {/* 8 Resize Handles */}
+        {/* 8 resize hit-targets: invisible so they don't cover text/figures; drag edges/corners still works */}
         {handles.map((h) => (
           <div
             key={h.id}
@@ -1539,20 +1539,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               cursor: h.cursor,
               touchAction: "none",
             }}
-            className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-20 group w-11 h-11 flex items-center justify-center"
-          >
-            <div
-              className={`w-3.5 h-3.5 rounded-sm bg-white border-2 shadow-md group-hover:scale-130 transition-transform ${
-                isDiagramFrame ? "border-sky-600" : "border-emerald-600"
-              } ${
-                activeCropHandle === h.id
-                  ? isDiagramFrame
-                    ? "scale-140 bg-sky-500 border-white ring-2 ring-sky-300"
-                    : "scale-140 bg-emerald-500 border-white ring-2 ring-emerald-300"
-                  : ""
-              }`}
-            />
-          </div>
+            className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-20 w-11 h-11"
+            aria-label={`調整裁切框 ${h.id}`}
+            title="拖曳邊角調整範圍"
+          />
         ))}
       </div>
     );
