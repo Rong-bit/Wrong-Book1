@@ -1298,6 +1298,34 @@ function rectsNearOrOverlap(a: CropRect, b: CropRect, gap: number): boolean {
   return !(ax2 + gap < b.x || bx2 + gap < a.x || ay2 + gap < b.y || by2 + gap < a.y);
 }
 
+/**
+ * Merge multi-line text islands, but keep side-by-side text|diagram separate
+ * even when the horizontal gap is tiny (common on exam pages like geo Q11).
+ */
+function shouldMergePaintIslands(a: CropRect, b: CropRect, mergeGap: number): boolean {
+  const ax2 = a.x + a.width;
+  const ay2 = a.y + a.height;
+  const bx2 = b.x + b.width;
+  const by2 = b.y + b.height;
+
+  const overlapX = Math.max(0, Math.min(ax2, bx2) - Math.max(a.x, b.x));
+  const overlapY = Math.max(0, Math.min(ay2, by2) - Math.max(a.y, b.y));
+  const gapY = Math.max(0, Math.max(a.y, b.y) - Math.min(ay2, by2));
+  const minW = Math.min(a.width, b.width);
+  const minArea = Math.min(a.width * a.height, b.width * b.height);
+
+  // Substantial area overlap → same painted island
+  if (overlapX > 0 && overlapY > 0) {
+    return overlapX * overlapY >= minArea * 0.22;
+  }
+
+  // Vertically stacked with column alignment (multi-line stem text)
+  if (gapY <= mergeGap && overlapX >= minW * 0.4) return true;
+
+  // Side-by-side (text | map) stays as two rects
+  return false;
+}
+
 function unionRects(a: CropRect, b: CropRect): CropRect {
   const x = Math.min(a.x, b.x);
   const y = Math.min(a.y, b.y);
@@ -1334,6 +1362,34 @@ export function mergeNearbyCropRects(rects: CropRect[], mergeGap = 0.035): CropR
   return current;
 }
 
+/** Merge stacked text lines only — do not glue left text to right diagram. */
+export function mergePaintIslandRects(rects: CropRect[], mergeGap = 0.035): CropRect[] {
+  if (!rects.length) return [];
+  let current = rects.map((r) => ({ ...r }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const next: CropRect[] = [];
+    const used = new Set<number>();
+    for (let i = 0; i < current.length; i++) {
+      if (used.has(i)) continue;
+      let acc = { ...current[i] };
+      for (let j = i + 1; j < current.length; j++) {
+        if (used.has(j)) continue;
+        if (shouldMergePaintIslands(acc, current[j], mergeGap)) {
+          acc = unionRects(acc, current[j]);
+          used.add(j);
+          changed = true;
+        }
+      }
+      used.add(i);
+      next.push(acc);
+    }
+    current = next;
+  }
+  return current;
+}
+
 /**
  * Cluster paint strokes into one or more rectangles for a single question.
  * Nearby / overlapping strokes (e.g. multi-line text) merge; distant islands
@@ -1352,6 +1408,7 @@ export function clusterPaintStrokesToRects(
 
 /**
  * Build tight content-aware rects from paint strokes (text one island, diagram another).
+ * Side-by-side text|map (e.g. geo Q11) stay as two rects even when nearly touching.
  */
 export function clusterTightStrokeRects(
   img: HTMLImageElement,
@@ -1362,7 +1419,7 @@ export function clusterTightStrokeRects(
   const seed = strokes
     .map((s) => tightCropRectAlongStroke(img, s, corridorNorm))
     .filter((r): r is CropRect => Boolean(r));
-  return mergeNearbyCropRects(seed, mergeGap);
+  return mergePaintIslandRects(seed, mergeGap);
 }
 
 export function unionCropRects(rects: CropRect[]): CropRect | null {
