@@ -77,12 +77,29 @@ export const ByokModal: React.FC<ByokModalProps> = ({
 
   const handlePasteClipboard = async () => {
     try {
+      if (!navigator.clipboard?.readText) {
+        setTestResult({
+          valid: false,
+          message: "此瀏覽器不支援自動貼上，請長按輸入框手動貼上金鑰。",
+        });
+        return;
+      }
       const text = await navigator.clipboard.readText();
       if (text) {
         setApiKey(text.trim());
+        setTestResult(null);
+      } else {
+        setTestResult({
+          valid: false,
+          message: "剪貼簿是空的，請先複製 API Key 後再貼上。",
+        });
       }
     } catch (e) {
       console.warn("Clipboard access denied or unavailable", e);
+      setTestResult({
+        valid: false,
+        message: "無法讀取剪貼簿（常見於手機瀏覽器）。請長按輸入框選擇「貼上」。",
+      });
     }
   };
 
@@ -105,32 +122,32 @@ export const ByokModal: React.FC<ByokModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200 relative flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-xs p-0 sm:p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200 relative flex flex-col max-h-[92vh] sm:max-h-[90vh]">
         {/* Modal Header */}
-        <div className="px-6 py-4 bg-slate-50/80 border-b border-slate-200 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200 shadow-2xs">
+        <div className="px-4 sm:px-6 py-3.5 sm:py-4 bg-slate-50/80 border-b border-slate-200 flex items-start sm:items-center justify-between gap-2 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200 shadow-2xs shrink-0">
               <Key className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-base font-bold text-slate-900">
-                  BYOK (Bring Your Own Key) 自備金鑰
+                  BYOK 自備金鑰
                 </h3>
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
                   Gemini API
                 </span>
               </div>
               <p className="text-xs text-slate-500">
-                本機安全加密儲存 · 支援自訂模型與即時連線測試
+                本機安全儲存 · 支援自訂模型與連線測試
               </p>
             </div>
           </div>
           <button
             id="close-byok-modal-btn"
             onClick={onClose}
-            className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition"
+            className="p-2.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/60 transition min-w-11 min-h-11 inline-flex items-center justify-center shrink-0"
             title="關閉"
           >
             <X className="w-5 h-5" />
@@ -165,7 +182,7 @@ export const ByokModal: React.FC<ByokModalProps> = ({
         </div>
 
         {/* Body Content */}
-        <div className="p-6 overflow-y-auto space-y-4 text-xs">
+        <div className="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs overscroll-contain">
           {activeTab === "guide" ? (
             <div className="space-y-3.5 leading-relaxed text-slate-600">
               <div className="p-3 bg-sky-50 rounded-xl border border-sky-200 text-sky-900">
@@ -263,7 +280,7 @@ export const ByokModal: React.FC<ByokModalProps> = ({
                   <button
                     type="button"
                     onClick={handlePasteClipboard}
-                    className="text-[11px] text-sky-600 hover:text-sky-700 hover:underline flex items-center gap-1 font-medium"
+                    className="text-[11px] text-sky-600 hover:text-sky-700 hover:underline flex items-center gap-1 font-medium min-h-9 px-1"
                   >
                     <ClipboardPaste className="w-3 h-3" />
                     從剪貼簿貼上
@@ -280,13 +297,17 @@ export const ByokModal: React.FC<ByokModalProps> = ({
                       setApiKey(e.target.value);
                       setTestResult(null);
                     }}
-                    className="w-full pl-3.5 pr-20 py-2.5 text-xs font-mono rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-sky-500 focus:border-sky-500 bg-slate-50 focus:bg-white transition"
+                    className="w-full pl-3.5 pr-20 py-3 sm:py-2.5 text-base sm:text-xs font-mono rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-sky-500 focus:border-sky-500 bg-slate-50 focus:bg-white transition"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
                   />
                   <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
                     <button
                       type="button"
                       onClick={() => setShowKey(!showKey)}
-                      className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/50 transition"
+                      className="p-2 sm:p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-200/50 transition min-w-9 min-h-9 sm:min-w-0 sm:min-h-0 inline-flex items-center justify-center"
                       title={showKey ? "隱藏金鑰" : "顯示金鑰"}
                     >
                       {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
@@ -298,7 +319,7 @@ export const ByokModal: React.FC<ByokModalProps> = ({
                           setApiKey("");
                           setTestResult(null);
                         }}
-                        className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
+                        className="p-2 sm:p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition min-w-9 min-h-9 sm:min-w-0 sm:min-h-0 inline-flex items-center justify-center"
                         title="清空文字"
                       >
                         <X className="w-3.5 h-3.5" />

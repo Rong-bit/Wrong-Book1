@@ -4,11 +4,13 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import {
   buildAnalyzePrompt,
+  buildRewriteExplanationPrompt,
   buildSimilarPrompt,
   createGeminiClient,
   formatErrorMessage,
   generateContentWithRetry,
   getAnalyzeResponseSchema,
+  getRewriteExplanationResponseSchema,
   getSimilarResponseSchema,
   parseJsonResponse,
   resolveModel,
@@ -219,6 +221,86 @@ app.post("/api/generate-similar-questions", async (req, res) => {
     });
   } catch (error: any) {
     console.error("Generate similar question error:", error);
+    const { message: friendlyMessage, isKeyProblem, isTransient } = formatErrorMessage(error);
+    return res.status(isTransient ? 503 : 500).json({
+      error: friendlyMessage,
+      isKeyProblem,
+      isTransient,
+      rawError: error?.message,
+    });
+  }
+});
+
+// Rewrite explanation from a user-corrected answer
+app.post("/api/rewrite-explanation", async (req, res) => {
+  try {
+    const {
+      questionText,
+      answer,
+      subject,
+      gradeLevel,
+      chapter,
+      unit,
+      previousExplanation,
+      customApiKey,
+      selectedModel = "gemini-3.1-flash-lite",
+    } = req.body;
+
+    if (!answer || typeof answer !== "string" || !answer.trim()) {
+      return res.status(400).json({ error: "需提供使用者指定的正確答案" });
+    }
+    if (!questionText || typeof questionText !== "string" || !questionText.trim()) {
+      return res.status(400).json({ error: "需提供題目文字內容" });
+    }
+
+    const isUsingCustomKey = Boolean(
+      customApiKey && typeof customApiKey === "string" && customApiKey.trim().length > 0
+    );
+    const effectiveApiKey = isUsingCustomKey
+      ? customApiKey.trim()
+      : process.env.GEMINI_API_KEY;
+
+    if (!effectiveApiKey) {
+      return res.status(401).json({
+        error: "未配置 Gemini API Key。請點擊右上角「自備金鑰 BYOK」設定您的 API Key。",
+        needKey: true,
+      });
+    }
+
+    const targetModel = resolveModel(selectedModel);
+    const ai = createGeminiClient(effectiveApiKey);
+
+    const { response, modelUsed, attempts, fallbackUsed } = await generateContentWithRetry(
+      ai,
+      targetModel,
+      {
+        contents: buildRewriteExplanationPrompt({
+          questionText,
+          answer: answer.trim(),
+          subject,
+          gradeLevel,
+          chapter,
+          unit,
+          previousExplanation,
+        }),
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: getRewriteExplanationResponseSchema(),
+        },
+      }
+    );
+
+    const parsedData = parseJsonResponse(response.text || "{}");
+
+    return res.json({
+      success: true,
+      data: parsedData,
+      modelUsed,
+      attempts,
+      fallbackUsed,
+    });
+  } catch (error: any) {
+    console.error("Rewrite explanation error:", error);
     const { message: friendlyMessage, isKeyProblem, isTransient } = formatErrorMessage(error);
     return res.status(isTransient ? 503 : 500).json({
       error: friendlyMessage,

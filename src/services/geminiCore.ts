@@ -259,3 +259,55 @@ export function getSimilarResponseSchema() {
     required: ["題目文字", "答案", "詳解步驟", "變形設計重點"],
   };
 }
+
+export interface RewriteExplanationParams {
+  questionText: string;
+  answer: string;
+  subject?: string;
+  gradeLevel?: string;
+  chapter?: string;
+  unit?: string;
+  previousExplanation?: string;
+}
+
+export function buildRewriteExplanationPrompt(params: RewriteExplanationParams): string {
+  return `你是一位精通中學與高中課綱的資深名師。學生已手動訂正「標準答案」，請依題幹與該指定答案，重寫一份能推導到該答案的完整詳解。
+
+【題目資料】
+- 科目：${params.subject || "未指定"}
+- 年級教材冊別：${params.gradeLevel || "未指定"}
+- 章節與單元：${params.chapter || ""} ${params.unit || ""}
+- 題目文字：
+${params.questionText || "（無題幹）"}
+- 【使用者指定的正確答案】（必須視為 ground truth，禁止改寫或否定）：
+${params.answer}
+${params.previousExplanation ? `- 先前詳解（僅供參考，請依指定答案重寫，勿原樣照抄）：\n${params.previousExplanation}` : ""}
+
+【寫作原則】
+1. 詳解步驟必須邏輯嚴謹、逐步推導，最終結論必須與「使用者指定的正確答案」一致。
+2. 絕對不可自行更改、質疑或替換使用者指定的答案；輸出中不要另給不同答案。
+3. 若題幹與指定答案明顯矛盾，仍依指定答案撰寫推導，並在詳解開頭用一句話簡短標註「題幹與指定答案可能不一致，以下依指定答案說明」。
+4. 數學式與科學符號一律使用標準 LaTeX，以 $...$ 或 $$...$$ 包裹；JSON 字串中反斜線需合法雙重轉義。
+5. 使用台灣繁體中文。
+
+請嚴格輸出合法 JSON（不要 Markdown 外框）：
+{
+  "詳解步驟": "能推導至指定答案的完整逐步詳解",
+  "核心考點": "本題核心公式、定理或觀念",
+  "易錯陷阱": "學生最容易犯錯的盲點",
+  "關鍵技巧": "解題關鍵口訣或審題注意點"
+}`;
+}
+
+export function getRewriteExplanationResponseSchema() {
+  return {
+    type: Type.OBJECT,
+    properties: {
+      詳解步驟: { type: Type.STRING, description: "依指定答案重寫的詳細解題流程" },
+      核心考點: { type: Type.STRING, description: "關鍵知識點" },
+      易錯陷阱: { type: Type.STRING, description: "學生常錯痛點" },
+      關鍵技巧: { type: Type.STRING, description: "答題技巧" },
+    },
+    required: ["詳解步驟"],
+  };
+}

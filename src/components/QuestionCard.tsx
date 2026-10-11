@@ -31,7 +31,7 @@ import {
   Maximize2,
 } from "lucide-react";
 import { QuestionItem, ViewLayout, SimilarQuestionVariant } from "../types";
-import { generateSimilarQuestion } from "../services/aiService";
+import { generateSimilarQuestion, rewriteExplanationFromAnswer } from "../services/aiService";
 import { MathRenderer } from "./MathRenderer";
 import { MathToolbar } from "./MathToolbar";
 import { normalizeImageSrc, compressImage } from "../utils/imageUtils";
@@ -75,9 +75,17 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   const [editedChapter, setEditedChapter] = useState(question.chapter || "");
   const [editedUnit, setEditedUnit] = useState(question.unit || "");
   const [editedText, setEditedText] = useState(question.questionText);
+  const [editedAnswer, setEditedAnswer] = useState(question.answer || "");
   const [editedExplanation, setEditedExplanation] = useState(question.explanation);
+  const [editedCoreConcepts, setEditedCoreConcepts] = useState(question.coreConcepts || "");
+  const [editedCommonPitfalls, setEditedCommonPitfalls] = useState(question.commonPitfalls || "");
+  const [editedTips, setEditedTips] = useState(question.tips || "");
   const [editedNotes, setEditedNotes] = useState(question.myNotes || "");
   const [showAnswerInPaper, setShowAnswerInPaper] = useState(false);
+  const [isRewritingExplanation, setIsRewritingExplanation] = useState(false);
+  const [rewriteError, setRewriteError] = useState<string | null>(null);
+  const rewriteRequestIdRef = useRef(0);
+  const explanationSectionRef = useRef<HTMLDivElement>(null);
 
   const fillEditFromQuestion = () => {
     setEditedSubject(question.subject || "");
@@ -85,8 +93,13 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     setEditedChapter(question.chapter || "");
     setEditedUnit(question.unit || "");
     setEditedText(question.questionText);
+    setEditedAnswer(question.answer || "");
     setEditedExplanation(question.explanation);
+    setEditedCoreConcepts(question.coreConcepts || "");
+    setEditedCommonPitfalls(question.commonPitfalls || "");
+    setEditedTips(question.tips || "");
     setEditedNotes(question.myNotes || "");
+    setRewriteError(null);
   };
 
   useEffect(() => {
@@ -99,7 +112,11 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     question.chapter,
     question.unit,
     question.questionText,
+    question.answer,
     question.explanation,
+    question.coreConcepts,
+    question.commonPitfalls,
+    question.tips,
     question.myNotes,
   ]);
 
@@ -120,8 +137,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   const [imageLoadError, setImageLoadError] = useState(false);
   const replaceImageInputRef = useRef<HTMLInputElement>(null);
   const questionTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const answerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const explanationTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [showQuestionMathToolbar, setShowQuestionMathToolbar] = useState(false);
+  const [showAnswerMathToolbar, setShowAnswerMathToolbar] = useState(false);
   const [showExplanationMathToolbar, setShowExplanationMathToolbar] = useState(false);
   const [showStudyDetails, setShowStudyDetails] = useState(false);
 
@@ -153,10 +172,74 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
       chapter: editedChapter,
       unit: editedUnit,
       questionText: editedText,
+      answer: editedAnswer,
       explanation: editedExplanation,
+      coreConcepts: editedCoreConcepts,
+      commonPitfalls: editedCommonPitfalls,
+      tips: editedTips,
       myNotes: editedNotes,
     });
+    setRewriteError(null);
     setIsEditing(false);
+  };
+
+  const handleRewriteExplanation = async () => {
+    if (isRewritingExplanation) return;
+
+    const answerTrimmed = editedAnswer.trim();
+    const textTrimmed = editedText.trim();
+    if (!answerTrimmed) {
+      setRewriteError("請先填寫正確的標準答案，再重寫詳解。");
+      return;
+    }
+    if (!textTrimmed) {
+      setRewriteError("請先填寫題目文字內容，再重寫詳解。");
+      return;
+    }
+
+    const requestId = ++rewriteRequestIdRef.current;
+    setIsRewritingExplanation(true);
+    setRewriteError(null);
+    try {
+      const res = await rewriteExplanationFromAnswer({
+        questionText: textTrimmed,
+        answer: answerTrimmed,
+        subject: editedSubject,
+        gradeLevel: editedGradeLevel,
+        chapter: editedChapter,
+        unit: editedUnit,
+        previousExplanation: editedExplanation,
+      });
+
+      // Ignore stale responses if a newer rewrite started or edit was abandoned
+      if (requestId !== rewriteRequestIdRef.current) return;
+
+      if (res.詳解步驟 && res.詳解步驟.trim()) {
+        setEditedExplanation(res.詳解步驟);
+      } else {
+        setRewriteError("AI 未回傳有效詳解，已保留原本內容，請再試一次。");
+      }
+      if (res.核心考點) setEditedCoreConcepts(res.核心考點);
+      if (res.易錯陷阱) setEditedCommonPitfalls(res.易錯陷阱);
+      if (res.關鍵技巧) setEditedTips(res.關鍵技巧);
+
+      // Mobile: scroll rewritten explanation into view after keyboard/toolbar shift
+      requestAnimationFrame(() => {
+        explanationSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
+    } catch (err: any) {
+      if (requestId !== rewriteRequestIdRef.current) return;
+      console.error("Failed to rewrite explanation:", err);
+      const msg = err?.message || "依答案重寫詳解失敗";
+      setRewriteError(msg);
+      if (err?.needKey && onOpenByokModal) {
+        onOpenByokModal();
+      }
+    } finally {
+      if (requestId === rewriteRequestIdRef.current) {
+        setIsRewritingExplanation(false);
+      }
+    }
   };
 
   const handleGenerateSimilar = async () => {
@@ -362,24 +445,35 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             </button>
             <button
               type="button"
-              disabled={question.status === "analyzing"}
-              onClick={() => (isEditing ? setIsEditing(false) : beginEdit())}
-              className={`p-1.5 rounded-lg transition ${
+              disabled={question.status === "analyzing" || isRewritingExplanation}
+              onClick={() => {
+                if (isRewritingExplanation) return;
+                if (isEditing) {
+                  rewriteRequestIdRef.current += 1;
+                  setIsRewritingExplanation(false);
+                  setRewriteError(null);
+                  setIsEditing(false);
+                } else {
+                  beginEdit();
+                }
+              }}
+              className={`p-2 sm:p-1.5 rounded-lg transition min-w-9 min-h-9 sm:min-w-0 sm:min-h-0 inline-flex items-center justify-center ${
                 isEditing ? "bg-sky-100 text-sky-700" : "text-slate-400 hover:text-slate-700 hover:bg-slate-100"
               } disabled:opacity-40 disabled:pointer-events-none`}
-              title="編輯題目文字與詳解"
+              title={isRewritingExplanation ? "詳解重寫中，請稍候" : "編輯題目文字與詳解"}
             >
               <Edit3 className="w-4 h-4" />
             </button>
             <button
               type="button"
+              disabled={isRewritingExplanation}
               onClick={() => setIsConfirmingDelete(true)}
-              className={`p-1.5 rounded-lg transition ${
+              className={`p-2 sm:p-1.5 rounded-lg transition min-w-9 min-h-9 sm:min-w-0 sm:min-h-0 inline-flex items-center justify-center ${
                 isConfirmingDelete
                   ? "bg-rose-100 text-rose-600"
                   : "text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-              }`}
-              title="刪除題目"
+              } disabled:opacity-40 disabled:pointer-events-none`}
+              title={isRewritingExplanation ? "詳解重寫中，請稍候" : "刪除題目"}
             >
               <Trash2 className="w-4 h-4" />
             </button>
@@ -621,7 +715,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 value={editedSubject}
                 onChange={(e) => setEditedSubject(e.target.value)}
                 placeholder="例如：數學"
-                className="w-full text-xs p-2 rounded-lg border border-slate-300 bg-white"
+                className="w-full text-base sm:text-xs p-2.5 sm:p-2 rounded-lg border border-slate-300 bg-white"
               />
             </div>
             <div>
@@ -633,7 +727,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 value={editedGradeLevel}
                 onChange={(e) => setEditedGradeLevel(e.target.value)}
                 placeholder="例如：國二上 (第3冊)"
-                className="w-full text-xs p-2 rounded-lg border border-slate-300 bg-white"
+                className="w-full text-base sm:text-xs p-2.5 sm:p-2 rounded-lg border border-slate-300 bg-white"
               />
             </div>
             <div>
@@ -645,7 +739,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 value={editedChapter}
                 onChange={(e) => setEditedChapter(e.target.value)}
                 placeholder="例如：第2章 平方根"
-                className="w-full text-xs p-2 rounded-lg border border-slate-300 bg-white"
+                className="w-full text-base sm:text-xs p-2.5 sm:p-2 rounded-lg border border-slate-300 bg-white"
               />
             </div>
             <div>
@@ -657,32 +751,33 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 value={editedUnit}
                 onChange={(e) => setEditedUnit(e.target.value)}
                 placeholder="例如：2-1 平方根的意義"
-                className="w-full text-xs p-2 rounded-lg border border-slate-300 bg-white"
+                className="w-full text-base sm:text-xs p-2.5 sm:p-2 rounded-lg border border-slate-300 bg-white"
               />
             </div>
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
               <label className="text-[11px] font-bold text-slate-700">
                 題目文字內容
               </label>
               <button
                 type="button"
                 onClick={() => setShowQuestionMathToolbar(!showQuestionMathToolbar)}
-                className={`text-[11px] font-semibold px-2 py-0.5 rounded-lg border transition flex items-center gap-1 ${
+                className={`text-[11px] font-semibold px-2.5 py-1.5 sm:py-0.5 rounded-lg border transition flex items-center gap-1 min-h-9 sm:min-h-0 ${
                   showQuestionMathToolbar
                     ? "bg-sky-600 text-white border-sky-600 shadow-2xs"
                     : "bg-white text-sky-700 border-sky-200 hover:bg-sky-50"
                 }`}
               >
                 <Calculator className="w-3 h-3" />
-                {showQuestionMathToolbar ? "隱藏公式工具列" : "📐 數學公式工具列"}
+                <span className="hidden sm:inline">{showQuestionMathToolbar ? "隱藏公式工具列" : "📐 數學公式工具列"}</span>
+                <span className="sm:hidden">{showQuestionMathToolbar ? "隱藏公式" : "公式"}</span>
               </button>
             </div>
 
             {showQuestionMathToolbar && (
-              <div className="mb-2">
+              <div className="mb-2 min-w-0">
                 <MathToolbar
                   textareaRef={questionTextareaRef}
                   value={editedText}
@@ -696,18 +791,18 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
               rows={4}
               value={editedText}
               onChange={(e) => setEditedText(e.target.value)}
-              className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white leading-relaxed font-sans"
+              className="w-full text-base sm:text-xs p-2.5 rounded-lg border border-slate-300 bg-white leading-relaxed font-sans"
               placeholder="支援輸入數學公式，例如 $x^2 - 4x + 3 = 0$ 或點擊上方工具列一鍵插入"
             />
 
             {/* Live Math Preview */}
             {editedText && (
-              <div className="mt-1.5 p-2.5 bg-sky-50/40 rounded-lg border border-sky-200/80 text-xs">
+              <div className="mt-1.5 p-2.5 bg-sky-50/40 rounded-lg border border-sky-200/80 text-xs min-w-0">
                 <div className="text-[10px] text-sky-800 font-bold mb-1 flex items-center gap-1">
                   <Calculator className="w-3 h-3 text-sky-600" />
                   即時排版預覽 (KaTeX)
                 </div>
-                <div className="text-slate-800 font-sans leading-relaxed">
+                <div className="text-slate-800 font-sans leading-relaxed overflow-x-auto break-words">
                   <MathRenderer content={editedText} />
                 </div>
               </div>
@@ -715,26 +810,108 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
           </div>
 
           <div>
-            <div className="flex items-center justify-between mb-1.5">
+            <div className="flex flex-col gap-2 mb-1.5 sm:flex-row sm:items-center sm:justify-between">
+              <label className="text-[11px] font-bold text-slate-700">
+                標準答案
+              </label>
+              <div className="grid grid-cols-2 gap-1.5 sm:flex sm:items-center sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setShowAnswerMathToolbar(!showAnswerMathToolbar)}
+                  className={`text-[11px] font-semibold px-2.5 py-2 sm:py-0.5 rounded-lg border transition flex items-center justify-center gap-1 min-h-10 sm:min-h-0 ${
+                    showAnswerMathToolbar
+                      ? "bg-sky-600 text-white border-sky-600 shadow-2xs"
+                      : "bg-white text-sky-700 border-sky-200 hover:bg-sky-50"
+                  }`}
+                >
+                  <Calculator className="w-3.5 h-3.5 sm:w-3 sm:h-3 shrink-0" />
+                  <span className="sm:hidden">{showAnswerMathToolbar ? "隱藏公式" : "公式"}</span>
+                  <span className="hidden sm:inline">{showAnswerMathToolbar ? "隱藏公式工具列" : "📐 數學公式工具列"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRewriteExplanation}
+                  disabled={isRewritingExplanation}
+                  title="依此答案重寫詳解"
+                  className="text-[11px] font-semibold px-2.5 py-2 sm:py-0.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition flex items-center justify-center gap-1 min-h-10 sm:min-h-0 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isRewritingExplanation ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 sm:w-3 sm:h-3 animate-spin shrink-0" />
+                      重寫中…
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5 sm:w-3 sm:h-3 shrink-0" />
+                      <span className="sm:hidden">重寫詳解</span>
+                      <span className="hidden sm:inline">依此答案重寫詳解</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {showAnswerMathToolbar && (
+              <div className="mb-2 min-w-0">
+                <MathToolbar
+                  textareaRef={answerTextareaRef}
+                  value={editedAnswer}
+                  onChange={setEditedAnswer}
+                />
+              </div>
+            )}
+
+            <textarea
+              ref={answerTextareaRef}
+              rows={2}
+              value={editedAnswer}
+              onChange={(e) => setEditedAnswer(e.target.value)}
+              disabled={isRewritingExplanation}
+              className="w-full text-base sm:text-xs p-2.5 rounded-lg border border-emerald-300 bg-white leading-relaxed font-sans disabled:bg-emerald-50/40 disabled:opacity-80"
+              placeholder="例如：(C) 或 $x = 3$；改正後可點「依此答案重寫詳解」"
+            />
+
+            {editedAnswer && (
+              <div className="mt-1.5 p-2.5 bg-emerald-50/50 rounded-lg border border-emerald-200/80 text-xs min-w-0">
+                <div className="text-[10px] text-emerald-800 font-bold mb-1">
+                  答案預覽
+                </div>
+                <div className="text-emerald-900 font-sans leading-relaxed overflow-x-auto break-words">
+                  <MathRenderer content={editedAnswer} />
+                </div>
+              </div>
+            )}
+
+            {rewriteError && (
+              <div className="mt-1.5 p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-[11px] text-rose-700 flex items-start gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span className="break-words min-w-0">{rewriteError}</span>
+              </div>
+            )}
+          </div>
+
+          <div ref={explanationSectionRef}>
+            <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
               <label className="text-[11px] font-bold text-slate-700">
                 詳細推導步驟
               </label>
               <button
                 type="button"
                 onClick={() => setShowExplanationMathToolbar(!showExplanationMathToolbar)}
-                className={`text-[11px] font-semibold px-2 py-0.5 rounded-lg border transition flex items-center gap-1 ${
+                className={`text-[11px] font-semibold px-2.5 py-1.5 sm:py-0.5 rounded-lg border transition flex items-center gap-1 min-h-9 sm:min-h-0 ${
                   showExplanationMathToolbar
                     ? "bg-sky-600 text-white border-sky-600 shadow-2xs"
                     : "bg-white text-sky-700 border-sky-200 hover:bg-sky-50"
                 }`}
               >
                 <Calculator className="w-3 h-3" />
-                {showExplanationMathToolbar ? "隱藏公式工具列" : "📐 數學公式工具列"}
+                <span className="sm:hidden">{showExplanationMathToolbar ? "隱藏公式" : "公式"}</span>
+                <span className="hidden sm:inline">{showExplanationMathToolbar ? "隱藏公式工具列" : "📐 數學公式工具列"}</span>
               </button>
             </div>
 
             {showExplanationMathToolbar && (
-              <div className="mb-2">
+              <div className="mb-2 min-w-0">
                 <MathToolbar
                   textareaRef={explanationTextareaRef}
                   value={editedExplanation}
@@ -748,18 +925,19 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
               rows={4}
               value={editedExplanation}
               onChange={(e) => setEditedExplanation(e.target.value)}
-              className="w-full text-xs p-2.5 rounded-lg border border-slate-300 bg-white leading-relaxed font-sans"
+              disabled={isRewritingExplanation}
+              className="w-full text-base sm:text-xs p-2.5 rounded-lg border border-slate-300 bg-white leading-relaxed font-sans disabled:bg-slate-50 disabled:opacity-80"
               placeholder="支援輸入計算過程與 LaTeX 算式，例如 $\Delta = b^2 - 4ac$"
             />
 
             {/* Live Math Preview */}
             {editedExplanation && (
-              <div className="mt-1.5 p-2.5 bg-sky-50/40 rounded-lg border border-sky-200/80 text-xs">
+              <div className="mt-1.5 p-2.5 bg-sky-50/40 rounded-lg border border-sky-200/80 text-xs min-w-0">
                 <div className="text-[10px] text-sky-800 font-bold mb-1 flex items-center gap-1">
                   <Calculator className="w-3 h-3 text-sky-600" />
                   即時推導預覽 (KaTeX)
                 </div>
-                <div className="text-slate-800 font-sans leading-relaxed">
+                <div className="text-slate-800 font-sans leading-relaxed overflow-x-auto break-words">
                   <MathRenderer content={editedExplanation} />
                 </div>
               </div>
@@ -775,22 +953,29 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
               value={editedNotes}
               onChange={(e) => setEditedNotes(e.target.value)}
               placeholder="寫下您為何做錯、解題卡在哪個步驟..."
-              className="w-full text-xs p-2 rounded-lg border border-slate-300 bg-white"
+              className="w-full text-base sm:text-xs p-2.5 sm:p-2 rounded-lg border border-slate-300 bg-white"
             />
           </div>
 
-          <div className="flex justify-end gap-2 pt-1">
+          <div className="flex justify-stretch sm:justify-end gap-2 pt-1">
             <button
               type="button"
-              onClick={() => setIsEditing(false)}
-              className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200 rounded-lg transition"
+              onClick={() => {
+                rewriteRequestIdRef.current += 1;
+                setIsRewritingExplanation(false);
+                setRewriteError(null);
+                setIsEditing(false);
+              }}
+              disabled={isRewritingExplanation}
+              className="flex-1 sm:flex-none px-3 py-2.5 sm:py-1.5 text-sm sm:text-xs text-slate-600 hover:bg-slate-200 rounded-lg transition disabled:opacity-50 min-h-11 sm:min-h-0"
             >
               取消
             </button>
             <button
               type="button"
               onClick={handleSaveEdit}
-              className="px-4 py-1.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition flex items-center gap-1 shadow-xs"
+              disabled={isRewritingExplanation}
+              className="flex-1 sm:flex-none px-4 py-2.5 sm:py-1.5 text-sm sm:text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition flex items-center justify-center gap-1 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed min-h-11 sm:min-h-0"
             >
               <Check className="w-3.5 h-3.5" /> 儲存變更
             </button>
