@@ -2,7 +2,6 @@ import { QuestionItem } from "../types";
 
 /**
  * Detect questions that depend on a printed figure / map / diagram.
- * Used so "僅排版文字" still attaches the screenshot when text alone is insufficient.
  */
 export function questionDependsOnFigure(questionText: string): boolean {
   const t = (questionText || "").replace(/\s+/g, "");
@@ -13,37 +12,24 @@ export function questionDependsOnFigure(questionText: string): boolean {
 }
 
 /**
- * In text-only PDF mode: keep the crop when the stem needs a figure,
- * or when OCR text is essentially missing (photo is the only content).
- *
- * `figureImageBase64 === ""` means the crop was saved without a diagram
- * (explicit none) — do not fall back to the stem screenshot.
+ * Whether「僅排版文字」should attach a figure.
+ * Only dedicated 選圖形 crops — never the stem / text screenshot (imageBase64).
  */
 export function shouldShowFigureInTextOnlyMode(
   q: Pick<QuestionItem, "questionText" | "imageBase64" | "imageSettings" | "figureImageBase64">
 ): boolean {
-  if (q.imageSettings && q.imageSettings.includeInExport === false) return false;
-  if (q.figureImageBase64 === "") return false;
-  // Dedicated diagram crop from 選圖形 → always attach in text-only mode
-  if (q.figureImageBase64) return true;
-  if (!q.imageBase64) return false;
-  const t = (q.questionText || "").trim();
-  if (!t || t.length < 10) return true;
-  return questionDependsOnFigure(t);
+  return Boolean(getTextOnlyFigureSrc(q));
 }
 
 /**
- * Image to show beside layout text in「僅排版文字」mode.
- * Prefer figure-only crop; never prefer the dual text+diagram composite when a
- * dedicated figure exists. Empty string = explicitly no figure.
+ * Image for「僅排版文字」mode: figure/map crop only.
+ * Never returns imageBase64 (that is the text or dual-panel screenshot).
  */
 export function getTextOnlyFigureSrc(
   q: Pick<QuestionItem, "imageBase64" | "figureImageBase64" | "imageSettings" | "questionText">
 ): string | null {
   if (q.imageSettings && q.imageSettings.includeInExport === false) return null;
-  if (q.figureImageBase64 === "") return null;
-  if (q.figureImageBase64) return q.figureImageBase64;
-  // Legacy questions without figureImageBase64: fall back to full image when needed
-  if (shouldShowFigureInTextOnlyMode(q) && q.imageBase64) return q.imageBase64;
+  const fig = q.figureImageBase64;
+  if (typeof fig === "string" && fig.length > 0) return fig;
   return null;
 }

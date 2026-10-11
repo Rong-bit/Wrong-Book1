@@ -59,7 +59,8 @@ export interface CalibratedCrop {
 }
 
 export type PaperSize = "B5" | "A4";
-export type QuestionDisplayMode = "both" | "imageOnly" | "textOnly";
+/** textOnly = 排版文字＋圖區附圖；textPlain = 純文字、完全無截圖 */
+export type QuestionDisplayMode = "both" | "imageOnly" | "textOnly" | "textPlain";
 
 export interface PaperSettings {
   title: string;
@@ -71,7 +72,7 @@ export interface PaperSettings {
   paperSize: PaperSize;
   orientation: "portrait" | "landscape";
   mode: "cornell" | "notebook" | "exam"; // "cornell" (康乃爾雙欄手寫訂正本) vs "notebook" (含解析筆記) vs "exam" (挖空作答卷)
-  questionDisplayMode: QuestionDisplayMode; // "both" | "imageOnly" | "textOnly"（文字為主；需附圖／地圖的題仍附截圖）
+  questionDisplayMode: QuestionDisplayMode; // both | imageOnly | textOnly(附圖) | textPlain(無截圖)
   /**
    * 康乃爾每頁密度：
    * 1 / 2 = 固定每頁題數（大演算／黃金比例）；

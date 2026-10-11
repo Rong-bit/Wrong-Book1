@@ -22,9 +22,12 @@ import { getTextOnlyFigureSrc } from "../utils/questionExport";
 
 interface PdfExportModalProps {
   isOpen: boolean;
+  /** Ready questions (already excludes analyzing). */
   questions: QuestionItem[];
   /** Total notebook size (may include analyzing); shown when export skips some. */
   notebookTotal?: number;
+  /** Notebook subject chip when opening export — default export scope. */
+  initialSubjectFilter?: string;
   settings: PaperSettings;
   onClose: () => void;
   onUpdateSettings: (newSettings: PaperSettings) => void;
@@ -47,12 +50,14 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   isOpen,
   questions,
   notebookTotal,
+  initialSubjectFilter = "全部",
   settings,
   onClose,
   onUpdateSettings,
 }) => {
   const [exportError, setExportError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const [exportSubject, setExportSubject] = useState(initialSubjectFilter);
   const previewRef = useRef<HTMLDivElement>(null);
 
   const isCornellCompact = settings.questionsPerPage === "compact";
@@ -60,16 +65,42 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   /** Shrinks when a compact page overflows so no question is clipped. */
   const [compactFitSize, setCompactFitSize] = useState(estimatedCompactSize);
 
+  const subjectOptions = useMemo(() => {
+    const set = new Set<string>();
+    questions.forEach((q) => {
+      if (q.subject) set.add(q.subject);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hant"));
+  }, [questions]);
+
+  /** Questions actually printed / previewed for the chosen subject scope. */
+  const exportQuestions = useMemo(() => {
+    if (exportSubject === "全部") return questions;
+    return questions.filter((q) => q.subject === exportSubject);
+  }, [questions, exportSubject]);
+
   useEffect(() => {
     if (!isOpen) {
       setShowPreview(false);
       setExportError(null);
+      return;
     }
-  }, [isOpen]);
+    // Open with the notebook's current subject chip (地理 → only 地理)
+    const next =
+      initialSubjectFilter &&
+      (initialSubjectFilter === "全部" ||
+        questions.some((q) => q.subject === initialSubjectFilter))
+        ? initialSubjectFilter
+        : "全部";
+    setExportSubject(next);
+  }, [isOpen, initialSubjectFilter, questions]);
 
   const questionsFitKey = useMemo(
-    () => questions.map((q) => `${q.id}:${q.figureImageBase64 ? "f" : q.imageBase64 ? "i" : "n"}`).join("|"),
-    [questions]
+    () =>
+      exportQuestions
+        .map((q) => `${q.id}:${q.figureImageBase64 ? "f" : q.imageBase64 ? "i" : "n"}`)
+        .join("|"),
+    [exportQuestions]
   );
 
   useEffect(() => {
@@ -79,6 +110,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     settings.questionsPerPage,
     settings.questionDisplayMode,
     questionsFitKey,
+    exportSubject,
     isOpen,
   ]);
 
@@ -91,8 +123,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   const cornellPages = useMemo(() => {
     const pages: { pageIndex: number; questions: { q: QuestionItem; index: number }[] }[] =
       [];
-    for (let i = 0; i < questions.length; i += cornellPageSize) {
-      const chunk = questions.slice(i, i + cornellPageSize).map((q, offset) => ({
+    for (let i = 0; i < exportQuestions.length; i += cornellPageSize) {
+      const chunk = exportQuestions.slice(i, i + cornellPageSize).map((q, offset) => ({
         q,
         index: i + offset,
       }));
@@ -102,7 +134,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       });
     }
     return pages;
-  }, [questions, cornellPageSize]);
+  }, [exportQuestions, cornellPageSize]);
 
   // Compact pages use fixed paper height; re-measure after images / KaTeX / resize
   useLayoutEffect(() => {
@@ -267,8 +299,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     settings.questionDisplayMode ||
     (settings.includeImages ? "both" : "textOnly");
 
-  /** imageOnly / both: full crop; textOnly: figure-only (or legacy fallback) */
+  /** imageOnly / both: full crop; textOnly: figure-only; textPlain: never */
   const shouldRenderQuestionImage = (q: QuestionItem): boolean => {
+    if (displayMode === "textPlain") return false;
     if (q.imageSettings?.includeInExport === false) return false;
     if (displayMode === "imageOnly" || displayMode === "both") {
       return Boolean(q.imageBase64);
@@ -385,6 +418,50 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   </span>
                 </button>
               </div>
+            </div>
+
+            {/* Subject scope — follows notebook filter by default */}
+            <div>
+              <label className="block font-semibold text-slate-700 mb-1.5">
+                匯出科目範圍
+              </label>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setExportSubject("全部")}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                    exportSubject === "全部"
+                      ? "bg-slate-900 text-white border-slate-900"
+                      : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                  }`}
+                >
+                  全部 ({questions.length})
+                </button>
+                {subjectOptions.map((subj) => {
+                  const count = questions.filter((q) => q.subject === subj).length;
+                  return (
+                    <button
+                      key={subj}
+                      type="button"
+                      onClick={() => setExportSubject(subj)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                        exportSubject === subj
+                          ? "bg-sky-600 text-white border-sky-600"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                      }`}
+                    >
+                      {subj} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="mt-1.5 text-[10px] text-slate-500 leading-snug">
+                預設帶入錯題本目前科目篩選
+                {initialSubjectFilter && initialSubjectFilter !== "全部"
+                  ? `（${initialSubjectFilter}）`
+                  : ""}
+                ；選「全部」才會混入其他科目。
+              </p>
             </div>
 
             {/* Export Mode: Cornell vs Notebook vs Exam Paper */}
@@ -712,7 +789,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   </div>
                 </button>
 
-                {/* Option 3: Text Only */}
+                {/* Option 3: Text + figure attach */}
                 <button
                   type="button"
                   onClick={() =>
@@ -731,9 +808,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   <div className="flex items-center gap-2">
                     <AlignLeft className="w-4 h-4 text-indigo-600 shrink-0" />
                     <div>
-                      <span className="block text-xs">僅排版文字 (附圖仍保留)</span>
+                      <span className="block text-xs">僅排版文字（附圖形圖）</span>
                       <span className="block text-[10px] text-slate-500 font-normal">
-                        只顯示排版文字；有「選圖形」時附圖置於文字右下方（不含文字截圖）
+                        印排版文字；有「選圖形」才附地圖／圖區於右下，不附文字截圖
                       </span>
                     </div>
                   </div>
@@ -745,6 +822,49 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                     }`}
                   >
                     {displayMode === "textOnly" && (
+                      <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                    )}
+                  </div>
+                </button>
+
+                {/* Option 4: Pure text — no screenshots at all */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    onUpdateSettings({
+                      ...settings,
+                      questionDisplayMode: "textPlain",
+                      includeImages: false,
+                    })
+                  }
+                  className={`w-full p-2 rounded-xl border flex items-center justify-between text-left transition ${
+                    displayMode === "textPlain"
+                      ? "bg-emerald-50 border-emerald-400 text-emerald-950 font-bold shadow-2xs"
+                      : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <AlignLeft className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs">僅排版文字 (無截圖)</span>
+                        <span className="text-[9px] bg-emerald-200 text-emerald-900 px-1.5 py-0.2 rounded font-bold">
+                          省墨
+                        </span>
+                      </div>
+                      <span className="block text-[10px] text-slate-500 font-normal">
+                        純文字印刷排版；不放文字截圖、也不放地圖／圖形截圖
+                      </span>
+                    </div>
+                  </div>
+                  <div
+                    className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                      displayMode === "textPlain"
+                        ? "border-emerald-600 bg-emerald-600"
+                        : "border-slate-300"
+                    }`}
+                  >
+                    {displayMode === "textPlain" && (
                       <div className="w-1.5 h-1.5 rounded-full bg-white" />
                     )}
                   </div>
@@ -986,7 +1106,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                       <MathRenderer content={q.questionText} />
                                     </div>
                                   )
-                                ) : displayMode === "textOnly" ? (
+                                ) : displayMode === "textOnly" ||
+                                  displayMode === "textPlain" ? (
                                   <div className="space-y-1">
                                     <div
                                       className={`text-slate-900 leading-relaxed whitespace-pre-line ${
@@ -995,26 +1116,27 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                     >
                                       <MathRenderer content={q.questionText} />
                                     </div>
-                                    {(() => {
-                                      const figureSrc = getTextOnlyFigureSrc(q);
-                                      if (!figureSrc) return null;
-                                      return (
-                                        <div className="flex justify-end pt-0.5">
-                                          <img
-                                            src={normalizeImageSrc(figureSrc)}
-                                            alt="題目附圖（地圖／圖示）"
-                                            className={`object-contain border border-slate-200 rounded ${
-                                              isCornellCompact ? "max-h-16" : "max-h-28"
-                                            }`}
-                                            style={{
-                                              transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
-                                                (q.imageSettings.zoom || 100) / 100
-                                              })`,
-                                            }}
-                                          />
-                                        </div>
-                                      );
-                                    })()}
+                                    {displayMode === "textOnly" &&
+                                      (() => {
+                                        const figureSrc = getTextOnlyFigureSrc(q);
+                                        if (!figureSrc) return null;
+                                        return (
+                                          <div className="flex justify-end pt-0.5">
+                                            <img
+                                              src={normalizeImageSrc(figureSrc)}
+                                              alt="題目附圖（地圖／圖示）"
+                                              className={`object-contain border border-slate-200 rounded ${
+                                                isCornellCompact ? "max-h-16" : "max-h-28"
+                                              }`}
+                                              style={{
+                                                transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
+                                                  (q.imageSettings.zoom || 100) / 100
+                                                })`,
+                                              }}
+                                            />
+                                          </div>
+                                        );
+                                      })()}
                                   </div>
                                 ) : (
                                   <>
@@ -1158,7 +1280,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
                   {/* Questions List */}
                   <div className="space-y-6">
-                    {questions.map((q, idx) => (
+                    {exportQuestions.map((q, idx) => (
                       <div
                         key={q.id}
                         className="print-avoid-break pb-4 border-b border-slate-200/80 last:border-0"
@@ -1217,30 +1339,31 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                               <MathRenderer content={q.questionText} />
                             </div>
                           )
-                        ) : displayMode === "textOnly" ? (
+                        ) : displayMode === "textOnly" || displayMode === "textPlain" ? (
                           <div className="space-y-1.5">
                             <div className="text-sm leading-relaxed whitespace-pre-line text-slate-900">
                               <MathRenderer content={q.questionText} />
                             </div>
-                            {(() => {
-                              const figureSrc = getTextOnlyFigureSrc(q);
-                              if (!figureSrc) return null;
-                              return (
-                                <div className="flex justify-end">
-                                  <img
-                                    src={normalizeImageSrc(figureSrc)}
-                                    alt="題目附圖（地圖／圖示）"
-                                    className="max-h-40 object-contain border border-slate-200 rounded"
-                                    style={{
-                                      transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
-                                        (q.imageSettings.zoom || 100) / 100
-                                      })`,
-                                      transformOrigin: "center center",
-                                    }}
-                                  />
-                                </div>
-                              );
-                            })()}
+                            {displayMode === "textOnly" &&
+                              (() => {
+                                const figureSrc = getTextOnlyFigureSrc(q);
+                                if (!figureSrc) return null;
+                                return (
+                                  <div className="flex justify-end">
+                                    <img
+                                      src={normalizeImageSrc(figureSrc)}
+                                      alt="題目附圖（地圖／圖示）"
+                                      className="max-h-40 object-contain border border-slate-200 rounded"
+                                      style={{
+                                        transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
+                                          (q.imageSettings.zoom || 100) / 100
+                                        })`,
+                                        transformOrigin: "center center",
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              })()}
                           </div>
                         ) : (
                           <>
@@ -1355,12 +1478,13 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                       【參考答案與詳細步驟解析】
                     </h2>
                     <p className="text-xs text-slate-500">
-                      適用試卷：{settings.title || "錯題複習強化卷"} · 共 {questions.length} 題
+                      適用試卷：{settings.title || "錯題複習強化卷"} · 共 {exportQuestions.length} 題
+                      {exportSubject !== "全部" ? `（${exportSubject}）` : ""}
                     </p>
                   </div>
 
                   <div className="space-y-4 text-xs">
-                    {questions.map((q, idx) => (
+                    {exportQuestions.map((q, idx) => (
                       <div
                         key={q.id}
                         className="p-3 bg-slate-50 rounded-lg border border-slate-200 print-avoid-break"
@@ -1416,9 +1540,10 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
         <div className="app-safe-footer px-4 pt-3 md:px-6 md:pt-3.5 bg-white border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0 no-print">
           <div className="text-[11px] sm:text-xs text-slate-500 flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
             <span>
-              匯出 {questions.length} 道試題
-              {typeof notebookTotal === "number" && notebookTotal > questions.length
-                ? `（錯題本 ${notebookTotal}，已略過分析中 ${notebookTotal - questions.length}）`
+              匯出 {exportQuestions.length} 道
+              {exportSubject !== "全部" ? `「${exportSubject}」` : ""}試題
+              {typeof notebookTotal === "number" && notebookTotal !== exportQuestions.length
+                ? `（錯題本共 ${notebookTotal}）`
                 : ""}
               {isCornellCompact ? ` · 密排約 ${cornellPageSize} 題／頁` : ""}
             </span>
@@ -1440,7 +1565,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 ? "僅截圖照片 (無文字)"
                 : displayMode === "both"
                 ? "文字與照片"
-                : "文字為主（圖區右下）"}
+                : displayMode === "textPlain"
+                ? "純文字（無截圖）"
+                : "排版文字＋圖區（無文字圖）"}
             </span>
           </div>
 

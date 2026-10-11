@@ -733,7 +733,7 @@ export default function App() {
     return new Map(ordered.map((q, i) => [q.id, i + 1]));
   }, [questions]);
 
-  /** PDF 匯出用全部錯題（不受科目篩選影響）；略過仍在分析中的占位題 */
+  /** PDF 可匯出題庫（略過分析中）；實際科目範圍由匯出視窗依篩選決定 */
   const printQuestions = useMemo(
     () =>
       [...questions]
@@ -1082,6 +1082,7 @@ export default function App() {
         isOpen={isPdfModalOpen}
         questions={printQuestions}
         notebookTotal={questions.length}
+        initialSubjectFilter={selectedSubjectFilter}
         settings={paperSettings}
         onClose={() => setIsPdfModalOpen(false)}
         onUpdateSettings={(next) => {
