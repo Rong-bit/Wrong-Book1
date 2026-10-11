@@ -67,13 +67,18 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     }
   }, [isOpen]);
 
+  const questionsFitKey = useMemo(
+    () => questions.map((q) => `${q.id}:${q.figureImageBase64 ? "f" : q.imageBase64 ? "i" : "n"}`).join("|"),
+    [questions]
+  );
+
   useEffect(() => {
     setCompactFitSize(settings.paperSize === "B5" ? 5 : 6);
   }, [
     settings.paperSize,
     settings.questionsPerPage,
     settings.questionDisplayMode,
-    questions.length,
+    questionsFitKey,
     isOpen,
   ]);
 
@@ -99,19 +104,75 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     return pages;
   }, [questions, cornellPageSize]);
 
-  // Compact pages use fixed paper height; if content overflows, pack fewer per page
+  // Compact pages use fixed paper height; re-measure after images / KaTeX / resize
   useLayoutEffect(() => {
     if (!isOpen || !showPreview || !isCornellCompact) return;
     const root = previewRef.current;
     if (!root) return;
-    const bodies = root.querySelectorAll<HTMLElement>("[data-cornell-body]");
-    let overflow = false;
-    bodies.forEach((el) => {
-      if (el.scrollHeight > el.clientHeight + 2) overflow = true;
-    });
-    if (overflow) {
-      setCompactFitSize((n) => (n > 1 ? n - 1 : n));
+
+    let cancelled = false;
+    let shrinkQueued = false;
+
+    const pageOverflows = () => {
+      const bodies = root.querySelectorAll<HTMLElement>("[data-cornell-body]");
+      for (let i = 0; i < bodies.length; i++) {
+        const el = bodies[i];
+        if (el.scrollHeight > el.clientHeight + 2) return true;
+      }
+      return false;
+    };
+
+    const shrinkIfNeeded = () => {
+      if (cancelled || shrinkQueued) return;
+      if (!pageOverflows()) return;
+      shrinkQueued = true;
+      // Defer setState so ResizeObserver callbacks settle first
+      requestAnimationFrame(() => {
+        shrinkQueued = false;
+        if (cancelled) return;
+        if (!pageOverflows()) return;
+        setCompactFitSize((n) => (n > 1 ? n - 1 : n));
+      });
+    };
+
+    shrinkIfNeeded();
+
+    const ro =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => shrinkIfNeeded())
+        : null;
+    root.querySelectorAll("[data-cornell-body]").forEach((el) => ro?.observe(el));
+
+    const onAssetSettle = () => shrinkIfNeeded();
+    const imgs: HTMLImageElement[] = Array.from(
+      root.querySelectorAll("img")
+    ) as HTMLImageElement[];
+    for (const img of imgs) {
+      if (!img.complete) {
+        img.addEventListener("load", onAssetSettle);
+        img.addEventListener("error", onAssetSettle);
+      }
     }
+
+    // KaTeX / font metrics often settle after first paint
+    const t1 = window.setTimeout(onAssetSettle, 120);
+    const t2 = window.setTimeout(onAssetSettle, 500);
+    const t3 = window.setTimeout(onAssetSettle, 1400);
+    if (typeof document !== "undefined" && "fonts" in document) {
+      void document.fonts.ready.then(onAssetSettle).catch(() => undefined);
+    }
+
+    return () => {
+      cancelled = true;
+      ro?.disconnect();
+      for (const img of imgs) {
+        img.removeEventListener("load", onAssetSettle);
+        img.removeEventListener("error", onAssetSettle);
+      }
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(t3);
+    };
   }, [
     isOpen,
     showPreview,
@@ -129,6 +190,20 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       previewRef.current ||
       document.getElementById("printable-paper-container");
     if (!source) return;
+
+    // Last-chance fit check after images loaded; avoid printing clipped compact pages
+    if (isCornellCompact) {
+      const bodies = source.querySelectorAll<HTMLElement>("[data-cornell-body]");
+      let overflow = false;
+      bodies.forEach((el) => {
+        if (el.scrollHeight > el.clientHeight + 2) overflow = true;
+      });
+      if (overflow && compactFitSize > 1) {
+        setCompactFitSize((n) => n - 1);
+        setExportError("密排仍在依內容調整每頁題數，請確認預覽無裁切後再列印一次");
+        return;
+      }
+    }
 
     const root = document.documentElement;
     const isB5 = settings.paperSize === "B5";
