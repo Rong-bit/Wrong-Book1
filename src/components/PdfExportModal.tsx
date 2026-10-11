@@ -704,16 +704,16 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                             key={q.id}
                             className={`border border-slate-300 rounded-lg overflow-hidden flex flex-row relative bg-white ${
                               isCornellCompact
-                                ? "shrink-0"
+                                ? "shrink-0 items-start"
                                 : "flex-1 min-h-0"
                             }`}
                           >
                             {/* LEFT SIDEBAR: Metadata & Mistake Reason Analysis */}
                             <div
-                              className={`shrink-0 bg-slate-50 border-r border-slate-300 flex flex-col justify-between text-[11px] font-sans ${
+                              className={`shrink-0 bg-slate-50 border-r border-slate-300 flex flex-col text-[11px] font-sans ${
                                 isCornellCompact
                                   ? "w-36 sm:w-40 p-1.5"
-                                  : "w-48 sm:w-52 p-2.5"
+                                  : "w-48 sm:w-52 p-2.5 justify-between"
                               }`}
                             >
                               <div className={isCornellCompact ? "space-y-1" : "space-y-2"}>
