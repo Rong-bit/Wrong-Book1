@@ -74,12 +74,6 @@ function buildPaperMetaFromQuestions(questions: QuestionItem[]) {
   };
 }
 
-function compareCaptureTime(a: QuestionItem, b: QuestionItem) {
-  const dt = (a.createdAt || 0) - (b.createdAt || 0);
-  if (dt !== 0) return dt;
-  return String(a.id).localeCompare(String(b.id));
-}
-
 function newestFirst(items: QuestionItem[]): QuestionItem[] {
   if (items.length < 2) return items;
   let newerFirst = 0;
@@ -406,8 +400,9 @@ export default function App() {
     const subjectHint = calibrationModal.subjectHint;
     setCalibrationModal({ isOpen: false, imageSrc: "" });
     // Serial analysis to avoid API bursts.
-    // pending 縮圖左→右 = 題號由小到大：先處理右邊再 prepend，使左邊停在列表最上 = 第 1 題。
-    for (const crop of [...items].reverse()) {
+    // pending 縮圖左→右 = 題號由小到大；processNewImage 每次 prepend，
+    // 故依左→右處理後右邊（最大題號）停在錯題本最上方。
+    for (const crop of items) {
       await processNewImage(crop.imageBase64, subjectHint, crop.figureImageBase64);
     }
   };
@@ -732,16 +727,20 @@ export default function App() {
   }, [questions, selectedSubjectFilter]);
 
   /**
-   * Badge / PDF 題號：依錯題本目前排列（上→下 = 1→n）。
-   * 校正「已選」縮圖左→右會被放在列表最上方，故左=第1題（最小）、右=最大。
+   * Badge 題號：依錯題本目前排列重編（上→下 = n→1，最大在上）。
+   * ↑↓ 移動後號碼跟著位置走；校正多選左→右仍對應第1→n（右最上）。
    */
   const captureNumberById = useMemo(() => {
-    return new Map(questions.map((q, i) => [q.id, i + 1]));
+    const n = questions.length;
+    return new Map(questions.map((q, i) => [q.id, n - i]));
   }, [questions]);
 
-  /** PDF 可匯出題庫（略過分析中）；順序與錯題本一致，勿再依 createdAt 重排打亂左右 */
+  /** PDF：略過分析中，依題號由小到大（第1題先印 = 錯題本由下往上） */
   const printQuestions = useMemo(
-    () => questions.filter((q) => q.status !== "analyzing"),
+    () =>
+      [...questions]
+        .filter((q) => q.status !== "analyzing")
+        .reverse(),
     [questions]
   );
 

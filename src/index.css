@@ -158,9 +158,8 @@
     break-after: auto !important;
   }
 
-  html.printing-exam #exam-print-root .paper-sheet-fit * {
-    min-height: 0 !important;
-  }
+  /* Do NOT force min-height:0 on all descendants — that undoes Cornell
+     cards' min-h-min and re-enables flex shrink + overflow clip on print. */
 
   html.printing-exam #exam-print-root .overflow-y-auto,
   html.printing-exam #exam-print-root .overflow-x-auto {
