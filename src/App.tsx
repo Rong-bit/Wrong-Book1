@@ -406,8 +406,9 @@ export default function App() {
     const subjectHint = calibrationModal.subjectHint;
     setCalibrationModal({ isOpen: false, imageSrc: "" });
     // Serial analysis to avoid API bursts.
-    // pending 縮圖左→右 = 題號由小到大：先處理右邊再 prepend，使左邊停在列表最上 = 第 1 題。
-    for (const crop of [...items].reverse()) {
+    // pending 縮圖左→右 = 題號由小到大；processNewImage 每次 prepend，
+    // 故依左→右處理後右邊（最大題號）停在錯題本最上方。
+    for (const crop of items) {
       await processNewImage(crop.imageBase64, subjectHint, crop.figureImageBase64);
     }
   };
@@ -732,16 +733,20 @@ export default function App() {
   }, [questions, selectedSubjectFilter]);
 
   /**
-   * Badge / PDF 題號：依錯題本目前排列（上→下 = 1→n）。
-   * 校正「已選」縮圖左→右會被放在列表最上方，故左=第1題（最小）、右=最大。
+   * Badge 題號：依拍攝／加入時間由小到大（最早=1）。
+   * 錯題本列表最新在上，故最大題號在最上面；校正縮圖左→右 = 第1→n。
    */
   const captureNumberById = useMemo(() => {
-    return new Map(questions.map((q, i) => [q.id, i + 1]));
+    const ordered = [...questions].sort(compareCaptureTime);
+    return new Map(ordered.map((q, i) => [q.id, i + 1]));
   }, [questions]);
 
-  /** PDF 可匯出題庫（略過分析中）；順序與錯題本一致，勿再依 createdAt 重排打亂左右 */
+  /** PDF：略過分析中，依題號由小到大（第1題先印） */
   const printQuestions = useMemo(
-    () => questions.filter((q) => q.status !== "analyzing"),
+    () =>
+      [...questions]
+        .filter((q) => q.status !== "analyzing")
+        .sort(compareCaptureTime),
     [questions]
   );
 
