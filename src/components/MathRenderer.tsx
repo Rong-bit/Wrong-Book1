@@ -88,9 +88,9 @@ export function normalizeMathText(raw: string): string {
     "\\frac{$1\\text{$2}}{$3}"
   );
 
-  // Mild split only when there is whitespace around "2. " — helps $ pairing,
-  // and will NOT shatter mileage lists like「臺北為25、臺中為178」.
-  text = text.replace(/(?<!\n)\s+(?=([2-9]|[1-9]\d)[.、．]\s)/g, "\n\n");
+  // Do NOT split on "2. " / "2、 " here — this runs for 題幹 too.
+  // Numbered 詳解 steps use breakNumberedExplanationSteps (opt-in) instead.
+  // Splitting here broke stems like「參考圖 2. 回答…」and「臺北為 25、 臺中…」.
 
   // One formula per line: drop extra trailing $$, then close an unmatched opening $
   text = text

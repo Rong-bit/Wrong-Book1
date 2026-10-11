@@ -314,14 +314,16 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     printRoot.appendChild(source.cloneNode(true));
     document.body.appendChild(printRoot);
 
+    // Match preview paperHeightStyle (257/297) so fit-check and print use the same box.
+    // Mobile uses a shorter sheet for browser chrome, but keep desktop exact.
     const sheetWidth = isMobile ? "100%" : isB5 ? "182mm" : "210mm";
     const sheetHeight = isMobile
       ? isB5
         ? "220mm"
         : "248mm"
       : isB5
-        ? "255mm"
-        : "295mm";
+        ? "257mm"
+        : "297mm";
 
     const pageStyle = document.createElement("style");
     pageStyle.id = "exam-print-page-size";

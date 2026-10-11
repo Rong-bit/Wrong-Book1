@@ -143,7 +143,7 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
         {/* Optional Subject Hint Tag Selector */}
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-xs font-semibold text-slate-500 mr-1">優先科目：</span>
-          {["自動辨識", "數學", "物理", "化學", "生物", "英文", "國文"].map((subj) => {
+          {["自動辨識", "數學", "物理", "化學", "生物", "英文", "國文", "地理", "歷史", "公民"].map((subj) => {
             const val = subj === "自動辨識" ? "" : subj;
             const active = selectedSubject === val;
             return (

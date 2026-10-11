@@ -406,6 +406,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     setActiveSelectStroke(null);
     selectStrokeRef.current = null;
     setIsSelectPainting(false);
+    // Avoid「清除」後完成仍以殘留 cropBox 追加幽靈裁切
+    cropDirtyAfterAddRef.current = false;
   };
 
   /** Undo last 選文字／選圖形 stroke or 框選 lock — not a full clear */
@@ -519,6 +521,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     }
     // Leaving frame: commit active rectangle so paint can refine both islands
     if (cropTool === "frame") {
+      pushSelectHistory();
       upsertFrameRegion(paintKindRef.current, cropBoxRef.current);
     }
     setCropTool("paint");
@@ -568,17 +571,31 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       return;
     }
     // Explicit kinds from 選文字／選圖形; different kinds stay separate & non-overlapping
-    const regions = clusterTightStrokeRects(img, strokes, 0.02, 0.035, kinds);
+    const fromStrokes = clusterTightStrokeRects(img, strokes, 0.02, 0.035, kinds);
+    // Keep frame-only islands whose kind has no paint strokes yet
+    // (e.g. 框圖形後再選文字，不應抹掉圖區)
+    const kindsInStrokes = new Set(
+      strokes.map((_, i) => kinds[i]).filter((k): k is RegionKind => Boolean(k))
+    );
+    const preserved = selectRegionsRef.current.filter(
+      (r) => !kindsInStrokes.has(r.kind)
+    );
+    const regions = separateDifferentKindRects([
+      ...preserved,
+      ...fromStrokes,
+    ]).filter((r) => r.width >= 0.012 && r.height >= 0.012);
     selectRegionsRef.current = regions;
     setSelectRegions(regions);
     const overall = unionCropRects(regions);
     if (overall) {
-      setCropBox({
+      const box = {
         x: overall.x,
         y: overall.y,
         w: overall.width,
         h: overall.height,
-      });
+      };
+      cropBoxRef.current = box;
+      setCropBox(box);
       cropDirtyAfterAddRef.current = true;
     }
   };
@@ -1271,25 +1288,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       // After resizing/moving a frame, lock it into the dual-region store so
       // the other kind's box stays visible alongside it.
       if (activeCropHandle !== null && cropToolRef.current === "frame") {
-        const box = cropBoxRef.current;
-        const kind = paintKindRef.current;
-        if (box.w >= 0.02 && box.h >= 0.02) {
-          // History was pushed on pointer down (pre-drag)
-          const frameRegion: LabeledCropRect = {
-            x: box.x,
-            y: box.y,
-            width: box.w,
-            height: box.h,
-            kind,
-          };
-          const others = selectRegionsRef.current.filter((r) => r.kind !== kind);
-          const next = separateDifferentKindRects([...others, frameRegion]).filter(
-            (r) => r.width >= 0.012 && r.height >= 0.012
-          );
-          selectRegionsRef.current = next;
-          setSelectRegions(next);
-          cropDirtyAfterAddRef.current = true;
-        }
+        // History was pushed on pointer down (pre-drag); sync cropBox after carve
+        upsertFrameRegion(paintKindRef.current, cropBoxRef.current);
       }
       activeTouchIdRef.current = null;
       lastCornerAimRef.current = null;
@@ -1856,6 +1856,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                     <button
                       type="button"
                       onClick={() => {
+                        pushSelectHistory();
                         markCropDirty();
                         const full = { x: 0, y: 0, w: 1, h: 1 };
                         cropBoxRef.current = full;
