@@ -48,6 +48,7 @@ import {
   applyMultiRegionCrop,
   clusterTightStrokeRects,
   cropFigureRegionsOnly,
+  separateDifferentKindRects,
   CropRect,
   LabeledCropRect,
   RegionKind,
@@ -120,8 +121,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const selectStrokeKindsRef = useRef<RegionKind[]>([]);
   const selectRegionsRef = useRef<LabeledCropRect[]>([]);
   const paintKindRef = useRef<PaintKind>("text");
+  const cropToolRef = useRef<CropTool>("paint");
   const cropDirtyAfterAddRef = useRef(false);
   paintKindRef.current = paintKind;
+  cropToolRef.current = cropTool;
   selectStrokeKindsRef.current = selectStrokeKinds;
   const currentImageRef = useRef(currentImage);
   currentImageRef.current = currentImage;
@@ -208,6 +211,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const [cropBox, setCropBox] = useState<{ x: number; y: number; w: number; h: number }>(
     cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS)
   );
+  const cropBoxRef = useRef(cropBox);
+  cropBoxRef.current = cropBox;
 
   // Dragging states
   const [activeDragCorner, setActiveDragCorner] = useState<number | null>(null);
@@ -353,24 +358,123 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     paintKindRef.current = kind;
   };
 
+  /** Suggest a second frame that sits beside / below an existing island. */
+  const defaultBoxForKind = (
+    kind: PaintKind,
+    existing: LabeledCropRect[]
+  ): { x: number; y: number; w: number; h: number } => {
+    const other = existing.find((r) => r.kind !== kind);
+    if (!other) {
+      return kind === "text"
+        ? { x: 0.08, y: 0.08, w: 0.84, h: 0.35 }
+        : { x: 0.52, y: 0.42, w: 0.4, h: 0.42 };
+    }
+    const right = 1 - (other.x + other.width);
+    if (right >= 0.22) {
+      return {
+        x: Math.min(0.98 - 0.2, other.x + other.width + 0.02),
+        y: other.y,
+        w: Math.max(0.18, Math.min(0.42, right - 0.03)),
+        h: Math.max(0.18, Math.min(0.5, other.height || 0.3)),
+      };
+    }
+    const below = 1 - (other.y + other.height);
+    if (below >= 0.18) {
+      return {
+        x: other.x,
+        y: Math.min(0.98 - 0.16, other.y + other.height + 0.02),
+        w: Math.max(0.2, Math.min(0.55, other.width || 0.4)),
+        h: Math.max(0.16, Math.min(0.4, below - 0.03)),
+      };
+    }
+    return { x: 0.48, y: 0.48, w: 0.36, h: 0.32 };
+  };
+
+  /** Lock / update one kind's rectangle into the dual-region store (non-overlapping). */
+  const upsertFrameRegion = (
+    kind: PaintKind,
+    box: { x: number; y: number; w: number; h: number } = cropBoxRef.current
+  ) => {
+    if (box.w < 0.02 || box.h < 0.02) return selectRegionsRef.current;
+    const frameRegion: LabeledCropRect = {
+      x: box.x,
+      y: box.y,
+      width: box.w,
+      height: box.h,
+      kind,
+    };
+    const others = selectRegionsRef.current.filter((r) => r.kind !== kind);
+    const next = separateDifferentKindRects([...others, frameRegion]).filter(
+      (r) => r.width >= 0.012 && r.height >= 0.012
+    );
+    selectRegionsRef.current = next;
+    setSelectRegions(next);
+    cropDirtyAfterAddRef.current = true;
+    const active = next.find((r) => r.kind === kind);
+    if (active && kind === paintKindRef.current) {
+      const synced = {
+        x: active.x,
+        y: active.y,
+        w: active.width,
+        h: active.height,
+      };
+      cropBoxRef.current = synced;
+      setCropBox(synced);
+    }
+    return next;
+  };
+
+  const loadCropBoxForKind = (kind: PaintKind) => {
+    const existing = selectRegionsRef.current.find((r) => r.kind === kind);
+    const next = existing
+      ? { x: existing.x, y: existing.y, w: existing.width, h: existing.height }
+      : defaultBoxForKind(kind, selectRegionsRef.current);
+    cropBoxRef.current = next;
+    setCropBox(next);
+  };
+
   /** 選文字／選圖形合併為一鍵：進工具預設文字，再點切換圖形。 */
   const activatePaintTool = () => {
     if (cropTool === "paint") {
       applyPaintKind(paintKind === "text" ? "diagram" : "text");
       return;
     }
+    // Leaving frame: commit active rectangle so paint can refine both islands
+    if (cropTool === "frame") {
+      upsertFrameRegion(paintKindRef.current, cropBoxRef.current);
+    }
     setCropTool("paint");
     applyPaintKind("text");
   };
 
-  /** 框文字／框圖形合併為一鍵：進工具預設文字，再點切換圖形。 */
+  /**
+   * 框文字／框圖形合併為一鍵。
+   * 再點切換時會鎖定目前矩形為一區，並打開另一 kind 的第二框（與畫選雙區塊對齊）。
+   */
   const activateFrameTool = () => {
     if (cropTool === "frame") {
-      applyPaintKind(paintKind === "text" ? "diagram" : "text");
+      upsertFrameRegion(paintKind, cropBoxRef.current);
+      const nextKind: PaintKind = paintKind === "text" ? "diagram" : "text";
+      applyPaintKind(nextKind);
+      loadCropBoxForKind(nextKind);
       return;
     }
     setCropTool("frame");
     applyPaintKind("text");
+    const textReg = selectRegionsRef.current.find((r) => r.kind === "text");
+    if (textReg) {
+      const box = {
+        x: textReg.x,
+        y: textReg.y,
+        w: textReg.width,
+        h: textReg.height,
+      };
+      cropBoxRef.current = box;
+      setCropBox(box);
+    } else if (selectRegionsRef.current.length > 0) {
+      loadCropBoxForKind("text");
+    }
+    // else keep current cropBox as the starting 框文字
   };
 
   const syncPaintRegionsFromStrokes = (
@@ -491,22 +595,22 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       const imageBase64 = await applyPendingTransforms();
       return { imageBase64 };
     }
-    // Frame tool must win over leftover paint islands: user may paint 文字 then
-    // switch to「框圖形」and confirm the visible rectangle as the diagram.
+    // Frame: commit active rectangle into the dual-region store (文字 + 圖形)
+    // before packing — same two-island model as 選文字／選圖形.
     let regions: LabeledCropRect[];
     if (cropTool === "frame") {
-      const frameRegion: LabeledCropRect = {
-        x: cropBox.x,
-        y: cropBox.y,
-        width: cropBox.w,
-        height: cropBox.h,
-        kind: paintKindRef.current,
-      };
-      // Keep opposite-kind paint islands; replace same-kind with the active frame
-      const kept = selectRegionsRef.current.filter(
-        (r) => r.kind !== paintKindRef.current
-      );
-      regions = [...kept, frameRegion];
+      regions = upsertFrameRegion(paintKindRef.current, cropBoxRef.current);
+      if (regions.length === 0) {
+        regions = [
+          {
+            x: cropBox.x,
+            y: cropBox.y,
+            width: cropBox.w,
+            height: cropBox.h,
+            kind: paintKindRef.current,
+          },
+        ];
+      }
     } else if (selectRegionsRef.current.length > 0) {
       regions = selectRegionsRef.current;
     } else {
@@ -543,6 +647,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       return;
     }
     setIsProcessing(true);
+    // Frame may still need one last upsert before counting islands
+    if (cropTool === "frame") {
+      upsertFrameRegion(paintKindRef.current, cropBoxRef.current);
+    }
     const regionCount = selectRegionsRef.current.length;
     setProcessingText(
       regionCount > 1
@@ -991,7 +1099,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           const newX = Math.max(0, Math.min(1 - orig.w, orig.x + dx));
           const newY = Math.max(0, Math.min(1 - orig.h, orig.y + dy));
           cropDirtyAfterAddRef.current = true;
-          setCropBox({ ...orig, x: newX, y: newY });
+          const moved = { ...orig, x: newX, y: newY };
+          cropBoxRef.current = moved;
+          setCropBox(moved);
         } else {
           let newX = orig.x;
           let newY = orig.y;
@@ -1030,7 +1140,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           }
 
           cropDirtyAfterAddRef.current = true;
-          setCropBox({ x: newX, y: newY, w: newW, h: newH });
+          const resized = { x: newX, y: newY, w: newW, h: newH };
+          cropBoxRef.current = resized;
+          setCropBox(resized);
         }
       }
     };
@@ -1070,6 +1182,28 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             next[activeDragCorner] = drop;
             return next;
           });
+        }
+      }
+      // After resizing/moving a frame, lock it into the dual-region store so
+      // the other kind's box stays visible alongside it.
+      if (activeCropHandle !== null && cropToolRef.current === "frame") {
+        const box = cropBoxRef.current;
+        const kind = paintKindRef.current;
+        if (box.w >= 0.02 && box.h >= 0.02) {
+          const frameRegion: LabeledCropRect = {
+            x: box.x,
+            y: box.y,
+            width: box.w,
+            height: box.h,
+            kind,
+          };
+          const others = selectRegionsRef.current.filter((r) => r.kind !== kind);
+          const next = separateDifferentKindRects([...others, frameRegion]).filter(
+            (r) => r.width >= 0.012 && r.height >= 0.012
+          );
+          selectRegionsRef.current = next;
+          setSelectRegions(next);
+          cropDirtyAfterAddRef.current = true;
         }
       }
       activeTouchIdRef.current = null;
@@ -1298,21 +1432,61 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     const currentCropPixelsW = Math.round(cropBox.w * naturalDimensions.width);
     const currentCropPixelsH = Math.round(cropBox.h * naturalDimensions.height);
     const isDiagramFrame = paintKind === "diagram";
+    // Locked opposite-kind island (文字 ↔ 圖形) — same dual-block model as paint
+    const lockedRegions = selectRegions.filter((r) => r.kind !== paintKind);
 
-    const x1 = cropBox.x * 100;
-    const y1 = cropBox.y * 100;
-    const x2 = (cropBox.x + cropBox.w) * 100;
-    const y2 = (cropBox.y + cropBox.h) * 100;
-    const cropBackdropPath = `M 0 0 L 100 0 L 100 100 L 0 100 Z M ${x1} ${y1} L ${x2} ${y1} L ${x2} ${y2} L ${x1} ${y2} Z`;
+    const holeRects = [
+      cropBox,
+      ...lockedRegions.map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })),
+    ];
+    const holesPath = holeRects
+      .map((b) => {
+        const x1 = b.x * 100;
+        const y1 = b.y * 100;
+        const x2 = (b.x + b.w) * 100;
+        const y2 = (b.y + b.h) * 100;
+        return `M ${x1} ${y1} L ${x2} ${y1} L ${x2} ${y2} L ${x1} ${y2} Z`;
+      })
+      .join(" ");
+    const cropBackdropPath = `M 0 0 L 100 0 L 100 100 L 0 100 Z ${holesPath}`;
 
     return (
       <div className="absolute inset-0 pointer-events-none">
         <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-          {/* Dark shaded backdrop outside crop box using robust evenodd cutout */}
+          {/* Dark shaded backdrop; cut out active frame + locked second island */}
           <path d={cropBackdropPath} fill="rgba(15, 23, 42, 0.5)" fillRule="evenodd" />
         </svg>
 
-        {/* The Crop Box itself */}
+        {/* Locked second region (not currently being edited) */}
+        {lockedRegions.map((r, idx) => {
+          const isDiagram = r.kind === "diagram";
+          return (
+            <div
+              key={`locked-frame-${r.kind}-${idx}`}
+              className={`absolute border-2 rounded-sm z-[5] ${
+                isDiagram
+                  ? "border-sky-500 bg-sky-400/15"
+                  : "border-emerald-500 bg-emerald-400/15"
+              }`}
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.width * 100}%`,
+                height: `${r.height * 100}%`,
+              }}
+            >
+              <div
+                className={`absolute -top-5 left-0 px-1.5 py-0.5 rounded text-white text-[9px] font-bold whitespace-nowrap ${
+                  isDiagram ? "bg-sky-700/90" : "bg-emerald-700/90"
+                }`}
+              >
+                {isDiagram ? "圖區（已鎖定）" : "文字區（已鎖定）"}
+              </div>
+            </div>
+          );
+        })}
+
+        {/* The active Crop Box itself */}
         <div
           onMouseDown={(e) => handleCropHandleDown("move", e)}
           onTouchStart={(e) => handleCropHandleDown("move", e)}
@@ -1551,18 +1725,21 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                       : "框文字"}
                   </button>
                 </div>
-                {cropTool === "paint" ? (
-                  selectRegions.length > 0 ? (
-                    <button
-                      type="button"
-                      onClick={clearSelectPaint}
-                      className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap"
-                      title="清除畫選，重新描繪"
-                    >
-                      清除
-                    </button>
-                  ) : null
-                ) : (
+                {selectRegions.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={clearSelectPaint}
+                    className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap"
+                    title={
+                      cropTool === "paint"
+                        ? "清除畫選，重新描繪"
+                        : "清除已鎖定的文字／圖形框"
+                    }
+                  >
+                    清除
+                  </button>
+                ) : null}
+                {cropTool === "frame" ? (
                   <>
                     <span className="hidden sm:inline text-slate-500 font-medium mr-1 text-[11px]">比例：</span>
                     {(
@@ -1594,7 +1771,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                       type="button"
                       onClick={() => {
                         markCropDirty();
-                        setCropBox({ x: 0, y: 0, w: 1, h: 1 });
+                        const full = { x: 0, y: 0, w: 1, h: 1 };
+                        cropBoxRef.current = full;
+                        setCropBox(full);
+                        upsertFrameRegion(paintKindRef.current, full);
                       }}
                       className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap"
                       title="裁切框貼齊照片四邊"
@@ -1602,7 +1782,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                       貼齊
                     </button>
                   </>
-                )}
+                ) : null}
               </div>
             )}
           </div>
@@ -1902,9 +2082,11 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         {!isExistingQuestion && mode === "crop" && (
           <div
             className={`px-2 sm:px-5 py-1.5 text-[10px] sm:text-[11px] border-t shrink-0 ${
-              cropTool === "paint" && selectRegions.length > 1
+              selectRegions.length > 1
                 ? "bg-emerald-50 text-emerald-900 border-emerald-100 font-semibold"
                 : cropTool === "paint" && selectPaintStrokes.length > 0
+                ? "bg-sky-50 text-sky-900 border-sky-100 font-medium"
+                : cropTool === "frame" && selectRegions.length > 0
                 ? "bg-sky-50 text-sky-900 border-sky-100 font-medium"
                 : "bg-slate-50 text-slate-500 border-slate-100"
             }`}
@@ -1919,9 +2101,13 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 : paintKind === "diagram"
                 ? "「選圖形」：請畫地圖／圖形範圍；再點按鈕可切回選文字"
                 : "「選文字」：請先畫題幹文字；再點同一按鈕可切換「選圖形」"
+              : selectRegions.filter((r) => r.kind !== paintKind).length > 0
+              ? paintKind === "diagram"
+                ? "已鎖定文字區 → 調整「框圖形」矩形；兩者會一併裁切"
+                : "已鎖定圖區 → 調整「框文字」矩形；兩者會一併裁切"
               : paintKind === "diagram"
-              ? "「框圖形」：拖曳矩形框選地圖／圖形；再點按鈕可切回框文字"
-              : "「框文字」：拖曳矩形框選題幹；再點同一按鈕可切換「框圖形」"}
+              ? "「框圖形」：拖曳矩形框選地圖／圖形；再點按鈕可切回框文字（會保留雙區塊）"
+              : "「框文字」：先框題幹；再點同一按鈕切換「框圖形」即可出現第二區塊"}
           </div>
         )}
         {!isExistingQuestion && pendingCrops.length > 0 && (
