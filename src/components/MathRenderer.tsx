@@ -12,6 +12,34 @@ interface Segment {
 }
 
 /**
+ * Force each numbered 詳解 step onto its own line.
+ * Handles glued AI output like「……。2、判定」or「……。2. 判定」(no newline/space).
+ * Avoids decimals (2.5) and does not touch steps already at line start.
+ */
+export function breakNumberedExplanationSteps(raw: string): string {
+  if (!raw) return "";
+  let text = raw.replace(/\r\n/g, "\n");
+
+  // "……。2、" / "…… 2." / "……2、" → newline before step 2+
+  // Delimiter: . 、 ． ； after optional spaces; not followed by another digit (skip 2.5)
+  text = text.replace(
+    /([^\n])([ \t\u00a0]*)(?=([2-9]|[1-9]\d)[.、．](?!\d))/g,
+    "$1\n"
+  );
+
+  // Parenthesis steps: "……。(2)" / "……（2）"
+  text = text.replace(
+    /([^\n])([ \t\u00a0]*)(?=[(（]([2-9]|[1-9]\d)[)）])/g,
+    "$1\n"
+  );
+
+  // Soft-wrap: if step marker sits mid-line after CJK/period with only one space, keep single \n
+  // Collapse runaway blank lines introduced by prior "\n\n" splitters
+  text = text.replace(/\n{3,}/g, "\n\n");
+  return text;
+}
+
+/**
  * Normalizes math text by:
  * 1. Repairing corrupted control characters (e.g. \x0c -> \f from JSON escaping, \x08 -> \b)
  * 2. Unifying unicode minus signs (− -> -) in math contexts
@@ -52,8 +80,9 @@ export function normalizeMathText(raw: string): string {
     "\\frac{$1\\text{$2}}{$3}"
   );
 
-  // Split "2. …" "3. …" before pairing $...$, otherwise one `$` can swallow later steps
-  text = text.replace(/(?<!\n)\s+(?=([2-9]|[1-9]\d)[.、．]\s)/g, "\n\n");
+  // Split numbered steps onto their own lines BEFORE pairing $...$
+  // AI often returns "1、……。2、……" with no space/newline — must not keep "2、" glued to step 1.
+  text = breakNumberedExplanationSteps(text);
 
   // One formula per line: drop extra trailing $$, then close an unmatched opening $
   text = text
