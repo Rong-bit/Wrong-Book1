@@ -11,7 +11,14 @@ import {
   Loader2,
   CheckCircle,
 } from "lucide-react";
-import { QuestionItem, PaperSettings, ViewLayout, ImageSettings, SimilarQuestionVariant } from "./types";
+import {
+  QuestionItem,
+  PaperSettings,
+  ViewLayout,
+  ImageSettings,
+  SimilarQuestionVariant,
+  CalibratedCrop,
+} from "./types";
 import { initialSampleQuestions } from "./data/sampleQuestions";
 import {
   analyzeQuestionImage,
@@ -202,9 +209,13 @@ export default function App() {
     refreshKeyStatus();
   }, [refreshKeyStatus]);
 
-  // Process new image (from Ctrl+V paste or camera / upload)
+  // Process new image (from Ctrl+V paste or camera / upload / calibration)
   const processNewImage = useCallback(
-    async (base64Data: string, subjectHint?: string) => {
+    async (
+      base64Data: string,
+      subjectHint?: string,
+      figureImageBase64?: string
+    ) => {
       const tempId = `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       analyzingCountRef.current += 1;
       setIsAnalyzing(true);
@@ -213,6 +224,7 @@ export default function App() {
       const newQuestionPlaceholder: QuestionItem = {
         id: tempId,
         imageBase64: base64Data,
+        figureImageBase64: figureImageBase64 || undefined,
         imageSettings: {
           zoom: 100,
           rotation: 0,
@@ -234,6 +246,7 @@ export default function App() {
       setScrollToQuestionId(tempId);
 
       try {
+        // Prefer stem composite for OCR; figure-only is kept for PDF text-only attach
         const result = await analyzeQuestionImage(
           base64Data,
           subjectHint,
@@ -343,18 +356,19 @@ export default function App() {
     [autoCalibrateOnCapture, processNewImage]
   );
 
-  const handleCalibrationConfirm = async (processedImages: string[]) => {
-    const images = (processedImages || []).filter(Boolean);
-    if (images.length === 0) {
+  const handleCalibrationConfirm = async (crops: CalibratedCrop[]) => {
+    const items = (crops || []).filter((c) => Boolean(c?.imageBase64));
+    if (items.length === 0) {
       setCalibrationModal({ isOpen: false, imageSrc: "" });
       return;
     }
 
     if (calibrationModal.targetQuestionId) {
       const targetId = calibrationModal.targetQuestionId;
-      const processedBase64 = images[0];
+      const first = items[0];
       handleUpdateQuestion(targetId, {
-        imageBase64: processedBase64,
+        imageBase64: first.imageBase64,
+        figureImageBase64: first.figureImageBase64,
         imageSettings: {
           zoom: 100,
           rotation: 0,
@@ -366,7 +380,8 @@ export default function App() {
         prev && prev.id === targetId
           ? {
               ...prev,
-              imageBase64: processedBase64,
+              imageBase64: first.imageBase64,
+              figureImageBase64: first.figureImageBase64,
               imageSettings: {
                 ...prev.imageSettings,
                 zoom: 100,
@@ -383,8 +398,8 @@ export default function App() {
     setCalibrationModal({ isOpen: false, imageSrc: "" });
     // Serial analysis to avoid API bursts. Reverse so the first framed region
     // ends on top (processNewImage prepends each new card).
-    for (const img of [...images].reverse()) {
-      await processNewImage(img, subjectHint);
+    for (const crop of [...items].reverse()) {
+      await processNewImage(crop.imageBase64, subjectHint, crop.figureImageBase64);
     }
   };
 
