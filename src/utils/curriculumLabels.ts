@@ -20,6 +20,34 @@ const CHINESE_NUM: Record<string, string> = {
   十: "10",
 };
 
+/** Normalize subject so 地理 / 地科 aliases still match within the same family when needed. */
+export function normalizeSubjectKey(subject?: string): string {
+  if (!subject) return "";
+  const raw = subject.replace(/\s/g, "").toLowerCase();
+  if (!raw || raw === "未歸類" || raw === "未知") return "";
+  if (raw.includes("數學") || raw.includes("math")) return "數學";
+  if (raw.includes("物理") || raw.includes("physics")) return "物理";
+  if (raw.includes("化學") || raw.includes("chemistry")) return "化學";
+  if (raw.includes("生物") || raw.includes("biology")) return "生物";
+  if (raw.includes("地理") || raw.includes("地球科學") || raw.includes("地科") || raw.includes("earth")) {
+    // Keep 地理 and 地球科學 distinct for junior-high vs senior-high catalogs.
+    if (raw.includes("地球") || raw.includes("地科") || raw.includes("earth")) return "地球科學";
+    return "地理";
+  }
+  if (raw.includes("國文") || raw.includes("國語") || raw.includes("chinese")) return "國文";
+  if (raw.includes("英文") || raw.includes("英語") || raw.includes("english")) return "英文";
+  if (raw.includes("歷史") || raw.includes("history")) return "歷史";
+  if (raw.includes("公民") || raw.includes("civics")) return "公民";
+  return raw;
+}
+
+export function sameSubject(a?: string, b?: string): boolean {
+  const left = normalizeSubjectKey(a);
+  const right = normalizeSubjectKey(b);
+  if (!left || !right) return false;
+  return left === right;
+}
+
 export function normalizeGradeKey(grade?: string): string {
   if (!grade) return "";
   return grade
@@ -68,7 +96,9 @@ export function formatExistingLabelsForPrompt(labels: CurriculumLabel[]): string
   const seen = new Set<string>();
   const lines: string[] = [];
   for (const label of labels) {
-    const line = [label.gradeLevel, label.chapter, label.unit].filter(Boolean).join(" / ");
+    const line = [label.subject, label.gradeLevel, label.chapter, label.unit]
+      .filter(Boolean)
+      .join(" / ");
     if (!line || seen.has(line)) continue;
     seen.add(line);
     lines.push(`- ${line}`);
@@ -84,12 +114,15 @@ function sameBook(a?: string, b?: string): boolean {
   return left === right || left.startsWith(right) || right.startsWith(left);
 }
 
-/** Prefer an existing notebook label over a near-synonym the model just invented. */
-export function alignAnalysisLabels<T extends { 冊別?: string; 章節?: string; 單元?: string }>(
-  result: T,
-  existing: CurriculumLabel[]
-): T {
-  const book = existing.filter((item) => sameBook(item.gradeLevel, result.冊別));
+/**
+ * Prefer an existing notebook label over a near-synonym the model just invented.
+ * Matching is scoped by subject + book so 地理 never inherits 數學 chapter/unit names.
+ */
+export function alignAnalysisLabels<
+  T extends { 科目?: string; 冊別?: string; 章節?: string; 單元?: string }
+>(result: T, existing: CurriculumLabel[]): T {
+  const subjectPeers = existing.filter((item) => sameSubject(item.subject, result.科目));
+  const book = subjectPeers.filter((item) => sameBook(item.gradeLevel, result.冊別));
   const chapterNo = extractChapterNo(result.章節);
 
   if (chapterNo) {
@@ -104,7 +137,7 @@ export function alignAnalysisLabels<T extends { 冊別?: string; 章節?: string
   const unitNo = extractUnitNo(result.單元);
   if (unitNo) {
     const matchedUnit =
-      existing.find(
+      subjectPeers.find(
         (item) =>
           item.chapter === result.章節 &&
           extractUnitNo(item.unit) === unitNo &&
@@ -124,7 +157,7 @@ export function alignAnalysisLabels<T extends { 冊別?: string; 章節?: string
   return result;
 }
 
-/** Keep one chapter/unit name per book + section number across the notebook. */
+/** Keep one chapter/unit name per subject + book + section number across the notebook. */
 export function alignQuestionCollection(questions: QuestionItem[]): QuestionItem[] {
   const chapterCanon = new Map<string, string>();
   const unitCanon = new Map<string, string>();
@@ -134,15 +167,16 @@ export function alignQuestionCollection(questions: QuestionItem[]): QuestionItem
     .sort((a, b) => a.createdAt - b.createdAt);
 
   for (const q of ready) {
+    const subjectKey = normalizeSubjectKey(q.subject);
     const gradeKey = normalizeGradeKey(q.gradeLevel);
     const chapterNo = extractChapterNo(q.chapter);
-    if (gradeKey && chapterNo && q.chapter) {
-      const key = `${gradeKey}#${chapterNo}`;
+    if (subjectKey && gradeKey && chapterNo && q.chapter) {
+      const key = `${subjectKey}#${gradeKey}#${chapterNo}`;
       if (!chapterCanon.has(key)) chapterCanon.set(key, q.chapter);
     }
     const unitNo = extractUnitNo(q.unit);
-    if (gradeKey && chapterNo && unitNo && q.unit) {
-      const key = `${gradeKey}#${chapterNo}#${unitNo}`;
+    if (subjectKey && gradeKey && chapterNo && unitNo && q.unit) {
+      const key = `${subjectKey}#${gradeKey}#${chapterNo}#${unitNo}`;
       if (!unitCanon.has(key)) unitCanon.set(key, q.unit);
     }
   }
@@ -150,14 +184,15 @@ export function alignQuestionCollection(questions: QuestionItem[]): QuestionItem
   let changed = false;
   const next = questions.map((q) => {
     if (q.status !== "ready") return q;
+    const subjectKey = normalizeSubjectKey(q.subject);
     const gradeKey = normalizeGradeKey(q.gradeLevel);
     const chapterNo = extractChapterNo(q.chapter);
-    if (!gradeKey || !chapterNo) return q;
+    if (!subjectKey || !gradeKey || !chapterNo) return q;
 
-    const chapter = chapterCanon.get(`${gradeKey}#${chapterNo}`) || q.chapter;
+    const chapter = chapterCanon.get(`${subjectKey}#${gradeKey}#${chapterNo}`) || q.chapter;
     const unitNo = extractUnitNo(q.unit);
     const unit =
-      (unitNo && unitCanon.get(`${gradeKey}#${chapterNo}#${unitNo}`)) || q.unit;
+      (unitNo && unitCanon.get(`${subjectKey}#${gradeKey}#${chapterNo}#${unitNo}`)) || q.unit;
 
     if (chapter === q.chapter && unit === q.unit) return q;
     changed = true;
