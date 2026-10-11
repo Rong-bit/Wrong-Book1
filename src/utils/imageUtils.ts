@@ -880,6 +880,172 @@ export async function applyCrop(
   });
 }
 
+/** Bounding box of one paint stroke (normalized), with brush padding. */
+export function strokeToCropRect(
+  stroke: Point[],
+  brushNorm: number,
+  padExtra = 0.015
+): CropRect | null {
+  if (!stroke.length) return null;
+  const pad = brushNorm + padExtra;
+  let minX = 1;
+  let minY = 1;
+  let maxX = 0;
+  let maxY = 0;
+  for (const p of stroke) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  const x = Math.max(0, minX - pad);
+  const y = Math.max(0, minY - pad);
+  const x2 = Math.min(1, maxX + pad);
+  const y2 = Math.min(1, maxY + pad);
+  return {
+    x,
+    y,
+    width: Math.max(0.04, x2 - x),
+    height: Math.max(0.04, y2 - y),
+  };
+}
+
+function rectsNearOrOverlap(a: CropRect, b: CropRect, gap: number): boolean {
+  const ax2 = a.x + a.width;
+  const ay2 = a.y + a.height;
+  const bx2 = b.x + b.width;
+  const by2 = b.y + b.height;
+  return !(ax2 + gap < b.x || bx2 + gap < a.x || ay2 + gap < b.y || by2 + gap < a.y);
+}
+
+function unionRects(a: CropRect, b: CropRect): CropRect {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  const x2 = Math.max(a.x + a.width, b.x + b.width);
+  const y2 = Math.max(a.y + a.height, b.y + b.height);
+  return { x, y, width: x2 - x, height: y2 - y };
+}
+
+/**
+ * Cluster paint strokes into one or more rectangles for a single question.
+ * Nearby / overlapping strokes (e.g. multi-line text) merge; distant islands
+ * (e.g. stem vs map at bottom-right) stay as separate rects.
+ */
+export function clusterPaintStrokesToRects(
+  strokes: Point[][],
+  brushNorm: number,
+  mergeGap = 0.05
+): CropRect[] {
+  const seed = strokes
+    .map((s) => strokeToCropRect(s, brushNorm))
+    .filter((r): r is CropRect => Boolean(r));
+  if (!seed.length) return [];
+
+  let current = seed.map((r) => ({ ...r }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const next: CropRect[] = [];
+    const used = new Set<number>();
+    for (let i = 0; i < current.length; i++) {
+      if (used.has(i)) continue;
+      let acc = { ...current[i] };
+      for (let j = i + 1; j < current.length; j++) {
+        if (used.has(j)) continue;
+        if (rectsNearOrOverlap(acc, current[j], mergeGap)) {
+          acc = unionRects(acc, current[j]);
+          used.add(j);
+          changed = true;
+        }
+      }
+      used.add(i);
+      next.push(acc);
+    }
+    current = next;
+  }
+  return current;
+}
+
+export function unionCropRects(rects: CropRect[]): CropRect | null {
+  if (!rects.length) return null;
+  return rects.reduce((acc, r) => unionRects(acc, r));
+}
+
+/**
+ * Crop one question that may span multiple rectangular islands.
+ * Keeps relative layout: overall bbox with non-selected gaps filled paper-white
+ * so intervening unrelated content is not included.
+ */
+export async function applyMultiRegionCrop(
+  imageSrc: string,
+  regions: CropRect[],
+  quality = 0.92
+): Promise<string> {
+  const normSrc = normalizeImageSrc(imageSrc);
+  if (!normSrc || !regions.length) return "";
+  if (regions.length === 1) {
+    return applyCrop(normSrc, regions[0], quality);
+  }
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    if (normSrc.startsWith("http://") || normSrc.startsWith("https://")) {
+      img.crossOrigin = "anonymous";
+    }
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        if (w < 2 || h < 2) {
+          resolve(normSrc);
+          return;
+        }
+
+        const overall = unionCropRects(regions);
+        if (!overall) {
+          resolve(normSrc);
+          return;
+        }
+
+        const ox = Math.round(overall.x * w);
+        const oy = Math.round(overall.y * h);
+        const ow = Math.max(1, Math.round(overall.width * w));
+        const oh = Math.max(1, Math.round(overall.height * h));
+
+        const canvas = document.createElement("canvas");
+        canvas.width = ow;
+        canvas.height = oh;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(normSrc);
+          return;
+        }
+
+        // Paper fill for gaps between islands
+        ctx.fillStyle = "#f7f4ec";
+        ctx.fillRect(0, 0, ow, oh);
+
+        for (const r of regions) {
+          const sx = Math.round(r.x * w);
+          const sy = Math.round(r.y * h);
+          const sw = Math.max(1, Math.round(r.width * w));
+          const sh = Math.max(1, Math.round(r.height * h));
+          const dx = sx - ox;
+          const dy = sy - oy;
+          ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+        }
+
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      } catch (err) {
+        console.error("Multi-region crop failed:", err);
+        resolve(normSrc);
+      }
+    };
+    img.onerror = () => resolve(normSrc);
+    img.src = normSrc;
+  });
+}
+
 export interface BrushStroke {
   /** Normalized points in [0, 1] image space */
   points: Point[];

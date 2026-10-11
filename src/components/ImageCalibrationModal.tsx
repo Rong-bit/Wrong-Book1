@@ -28,6 +28,7 @@ import {
   Plus,
   Eraser,
   Trash2,
+  Paintbrush,
 } from "lucide-react";
 import {
   Point,
@@ -43,6 +44,10 @@ import {
   FULL_FRAME_CORNERS,
   cropBoxFromCorners,
   paintWhiteBrushOnImage,
+  clusterPaintStrokesToRects,
+  unionCropRects,
+  applyMultiRegionCrop,
+  CropRect,
 } from "../utils/imageUtils";
 import { removeHandwritingWithAI } from "../services/aiService";
 
@@ -59,7 +64,8 @@ interface ImageCalibrationModalProps {
 }
 
 type CalibrationMode = "perspective" | "crop";
-type CropTool = "frame" | "erase";
+/** paint = 著色／拖曳選取；frame = 矩形微調；erase = 塗白手寫 */
+type CropTool = "paint" | "frame" | "erase";
 type AspectRatioMode = "free" | "4:3" | "16:9" | "1:1" | "paper";
 type BrushSizeKey = "s" | "m" | "l";
 
@@ -68,6 +74,14 @@ const BRUSH_RADIUS_NORM: Record<BrushSizeKey, number> = {
   m: 0.022,
   l: 0.038,
 };
+
+/** Wider highlighter-style brush for paint-to-select (text drag / diagram fill). */
+const SELECT_BRUSH_RADIUS_NORM: Record<BrushSizeKey, number> = {
+  s: 0.02,
+  m: 0.034,
+  l: 0.055,
+};
+
 
 export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   isOpen,
@@ -93,17 +107,26 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const [imageLoadError, setImageLoadError] = useState<boolean>(false);
   const [isImageReady, setIsImageReady] = useState<boolean>(false);
   const [pendingCrops, setPendingCrops] = useState<string[]>([]);
-  const [cropTool, setCropTool] = useState<CropTool>("frame");
+  const [cropTool, setCropTool] = useState<CropTool>("paint");
   const [brushSize, setBrushSize] = useState<BrushSizeKey>("m");
   const [eraseStrokePoints, setEraseStrokePoints] = useState<Point[] | null>(null);
   const [isErasing, setIsErasing] = useState(false);
   const [isErasingBusy, setIsErasingBusy] = useState(false);
+  const [selectPaintStrokes, setSelectPaintStrokes] = useState<Point[][]>([]);
+  const [selectRegions, setSelectRegions] = useState<CropRect[]>([]);
+  const [activeSelectStroke, setActiveSelectStroke] = useState<Point[] | null>(null);
+  const [isSelectPainting, setIsSelectPainting] = useState(false);
   const eraseStrokeRef = useRef<Point[] | null>(null);
+  const selectStrokeRef = useRef<Point[] | null>(null);
+  const selectPaintStrokesRef = useRef<Point[][]>([]);
+  const selectRegionsRef = useRef<CropRect[]>([]);
   const cropDirtyAfterAddRef = useRef(false);
   const currentImageRef = useRef(currentImage);
   const brushSizeRef = useRef(brushSize);
   currentImageRef.current = currentImage;
   brushSizeRef.current = brushSize;
+  selectPaintStrokesRef.current = selectPaintStrokes;
+  selectRegionsRef.current = selectRegions;
 
   // Track container dimensions to dynamically scale image to fit viewport
   useEffect(() => {
@@ -212,12 +235,19 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setCorners(FALLBACK_PERSPECTIVE_CORNERS);
       setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
       setPendingCrops([]);
-      setCropTool("frame");
+      setCropTool("paint");
       setBrushSize("m");
       setEraseStrokePoints(null);
       setIsErasing(false);
       setIsErasingBusy(false);
       eraseStrokeRef.current = null;
+      setSelectPaintStrokes([]);
+      selectPaintStrokesRef.current = [];
+      setSelectRegions([]);
+      selectRegionsRef.current = [];
+      setActiveSelectStroke(null);
+      selectStrokeRef.current = null;
+      setIsSelectPainting(false);
       cropDirtyAfterAddRef.current = false;
 
       // Immediate pre-decode test
@@ -295,10 +325,38 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     setCurrentImage(prev);
   };
 
+  const clearSelectPaint = () => {
+    setSelectPaintStrokes([]);
+    selectPaintStrokesRef.current = [];
+    setSelectRegions([]);
+    selectRegionsRef.current = [];
+    setActiveSelectStroke(null);
+    selectStrokeRef.current = null;
+    setIsSelectPainting(false);
+  };
+
+  const syncPaintRegions = (strokes: Point[][]) => {
+    const brush = SELECT_BRUSH_RADIUS_NORM[brushSizeRef.current];
+    const regions = clusterPaintStrokesToRects(strokes, brush, 0.05);
+    selectRegionsRef.current = regions;
+    setSelectRegions(regions);
+    const overall = unionCropRects(regions);
+    if (overall) {
+      setCropBox({
+        x: overall.x,
+        y: overall.y,
+        w: overall.width,
+        h: overall.height,
+      });
+      cropDirtyAfterAddRef.current = true;
+    }
+  };
+
   const enterCropMode = () => {
     setCropBox(cropBoxFromCorners(corners));
     setMode("crop");
-    setCropTool("frame");
+    setCropTool("paint");
+    clearSelectPaint();
   };
 
   const handleResetToOriginal = () => {
@@ -339,9 +397,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       const corrected = await applyPerspectiveCorrection(currentImage, realCorners);
       pushHistory(corrected);
 
-      // After straightening, default next step to free crop so user can immediately frame the exact question
-      // Flattened image edges ARE the paper corners the user just aligned.
+      // After straightening, default to paint-select so user can finger-highlight the wrong region
       setMode("crop");
+      setCropTool("paint");
+      clearSelectPaint();
       setCorners(FULL_FRAME_CORNERS);
       setCropBox(cropBoxFromCorners(FULL_FRAME_CORNERS));
     } catch (err) {
@@ -380,6 +439,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     if (mode === "perspective") {
       return applyPendingTransforms();
     }
+    // Same question may be multiple paint islands (stem + map) → multi-rect composite
+    if (selectRegionsRef.current.length > 0) {
+      return applyMultiRegionCrop(currentImage, selectRegionsRef.current, 0.92);
+    }
     return applyCrop(
       currentImage,
       {
@@ -399,15 +462,27 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
 
   const handleAddPendingCrop = async () => {
     if (isProcessing || isErasingBusy || isExistingQuestion || mode !== "crop") return;
+    if (cropTool === "paint" && selectPaintStrokesRef.current.length === 0) {
+      setProcessingText("請先用手指著色／拖過錯題範圍");
+      setIsProcessing(true);
+      setTimeout(() => setIsProcessing(false), 1400);
+      return;
+    }
     setIsProcessing(true);
-    setProcessingText("正在加入錯題範圍...");
+    const regionCount = selectRegionsRef.current.length;
+    setProcessingText(
+      regionCount > 1
+        ? `正在合成同一題的 ${regionCount} 個範圍...`
+        : "正在加入錯題範圍..."
+    );
     try {
       const cropped = await cropCurrentBox();
       if (cropped) {
         setPendingCrops((prev) => [...prev, cropped]);
-        // Keep base image; reset frame for the next wrong region
+        // Keep base image; reset for the next wrong region (paint again)
         setCropBox({ x: 0.08, y: 0.08, w: 0.84, h: 0.35 });
-        setCropTool("frame");
+        setCropTool("paint");
+        clearSelectPaint();
         cropDirtyAfterAddRef.current = false;
       }
     } catch (err) {
@@ -498,6 +573,27 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     eraseStrokeRef.current = [pos];
     setEraseStrokePoints([pos]);
     setIsErasing(true);
+  };
+
+  const commitSelectPaintStroke = (stroke: Point[]) => {
+    if (!stroke.length) return;
+    const nextStrokes = [...selectPaintStrokesRef.current, stroke];
+    selectPaintStrokesRef.current = nextStrokes;
+    setSelectPaintStrokes(nextStrokes);
+    syncPaintRegions(nextStrokes);
+  };
+
+  /** Finger-drag like highlighter: paint over text/diagram to define crop region. */
+  const handleSelectPaintDown = (e: React.MouseEvent | React.TouchEvent) => {
+    if (cropTool !== "paint" || mode !== "crop" || isProcessing || isErasingBusy) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+    const pos = getNormalizedPos(clientX, clientY);
+    selectStrokeRef.current = [pos];
+    setActiveSelectStroke([pos]);
+    setIsSelectPainting(true);
   };
 
   // Remove shadows and binarize: pure white background and crisp black text
@@ -641,7 +737,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
 
   // Crop handles pointer events
   const handleCropHandleDown = (handle: string, e: React.MouseEvent | React.TouchEvent) => {
-    if (cropTool === "erase") return;
+    if (cropTool === "erase" || cropTool === "paint") return;
     e.preventDefault();
     e.stopPropagation();
     setActiveCropHandle(handle);
@@ -650,6 +746,45 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     const pos = getNormalizedPos(clientX, clientY);
     setCropDragStart({ x: pos.x, y: pos.y, box: { ...cropBox } });
   };
+
+  // Paint-to-select stroke tracking (highlighter / finger drag)
+  useEffect(() => {
+    if (!isSelectPainting) return;
+
+    const handlePointerMove = (e: MouseEvent | TouchEvent) => {
+      if (!selectStrokeRef.current) return;
+      if ("touches" in e) e.preventDefault();
+      const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+      const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+      const pos = getNormalizedPos(clientX, clientY);
+      const next = [...selectStrokeRef.current, pos];
+      selectStrokeRef.current = next;
+      setActiveSelectStroke(next);
+    };
+
+    const handlePointerUp = () => {
+      const points = selectStrokeRef.current || [];
+      selectStrokeRef.current = null;
+      setActiveSelectStroke(null);
+      setIsSelectPainting(false);
+      if (points.length) {
+        commitSelectPaintStroke(points);
+      }
+    };
+
+    window.addEventListener("mousemove", handlePointerMove);
+    window.addEventListener("mouseup", handlePointerUp);
+    window.addEventListener("touchmove", handlePointerMove, { passive: false });
+    window.addEventListener("touchend", handlePointerUp);
+    window.addEventListener("touchcancel", handlePointerUp);
+    return () => {
+      window.removeEventListener("mousemove", handlePointerMove);
+      window.removeEventListener("mouseup", handlePointerUp);
+      window.removeEventListener("touchmove", handlePointerMove);
+      window.removeEventListener("touchend", handlePointerUp);
+      window.removeEventListener("touchcancel", handlePointerUp);
+    };
+  }, [isSelectPainting, getNormalizedPos]);
 
   // Erase brush stroke tracking
   useEffect(() => {
@@ -1023,7 +1158,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 hidden md:block truncate">
-                透視一次後可連續框選多個錯題，並可塗白手寫答案
+                透視一次後用手指著色選取多題（拖文字／塗圖區）
               </p>
             </div>
           </div>
@@ -1051,8 +1186,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              <Crop className="w-3.5 h-3.5 text-emerald-600" />
-              <span>步驟 2：框選裁切</span>
+              <Paintbrush className="w-3.5 h-3.5 text-emerald-600" />
+              <span>步驟 2：著色選取</span>
             </button>
           </div>
 
@@ -1123,13 +1258,26 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200 mr-0.5">
                   <button
                     type="button"
-                    onClick={() => setCropTool("frame")}
+                    onClick={() => setCropTool("paint")}
                     className={`px-2 py-1 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
-                      cropTool === "frame"
+                      cropTool === "paint"
                         ? "bg-emerald-600 text-white shadow-2xs"
                         : "text-slate-600 hover:bg-white"
                     }`}
-                    title="框選錯題範圍"
+                    title="手指拖曳文字、或像著色一樣塗過圖區，選出錯題範圍"
+                  >
+                    <Paintbrush className="w-3 h-3" />
+                    著色選
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCropTool("frame")}
+                    className={`px-2 py-1 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
+                      cropTool === "frame"
+                        ? "bg-sky-600 text-white shadow-2xs"
+                        : "text-slate-600 hover:bg-white"
+                    }`}
+                    title="矩形框微調範圍"
                   >
                     <Crop className="w-3 h-3" />
                     框選
@@ -1148,7 +1296,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                     去手寫
                   </button>
                 </div>
-                {cropTool === "erase" ? (
+                {cropTool === "erase" || cropTool === "paint" ? (
                   <div className="flex items-center gap-0.5">
                     {([
                       { id: "s" as const, label: "細" },
@@ -1161,13 +1309,25 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                         onClick={() => setBrushSize(b.id)}
                         className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
                           brushSize === b.id
-                            ? "bg-rose-600 text-white font-bold"
+                            ? cropTool === "paint"
+                              ? "bg-emerald-600 text-white font-bold"
+                              : "bg-rose-600 text-white font-bold"
                             : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                         }`}
                       >
                         {b.label}
                       </button>
                     ))}
+                    {cropTool === "paint" && selectPaintStrokes.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={clearSelectPaint}
+                        className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap"
+                        title="清除著色，重新選取"
+                      >
+                        清除
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <>
@@ -1190,7 +1350,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                         }}
                         className={`px-2 py-0.5 rounded text-[11px] font-medium transition ${
                           aspectRatioMode === r.id
-                            ? "bg-emerald-600 text-white font-bold shadow-2xs"
+                            ? "bg-sky-600 text-white font-bold shadow-2xs"
                             : "bg-slate-100 text-slate-600 hover:bg-slate-200"
                         }`}
                       >
@@ -1419,6 +1579,65 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                   ? renderCropOverlay()
                   : null}
 
+                {/* Paint-to-select: finger-drag text / color-in diagrams (multi-rect OK) */}
+                {mode === "crop" && cropTool === "paint" && (
+                  <div
+                    className="absolute inset-0 z-30 cursor-crosshair touch-none"
+                    onMouseDown={handleSelectPaintDown}
+                    onTouchStart={handleSelectPaintDown}
+                    style={{ touchAction: "none" }}
+                  >
+                    {/* Multi-rect islands for one question */}
+                    {selectRegions.map((r, idx) => (
+                      <div
+                        key={`reg-${idx}`}
+                        className="absolute border-2 border-emerald-400 bg-emerald-400/10 pointer-events-none rounded-sm"
+                        style={{
+                          left: `${r.x * 100}%`,
+                          top: `${r.y * 100}%`,
+                          width: `${r.width * 100}%`,
+                          height: `${r.height * 100}%`,
+                        }}
+                      >
+                        <div className="absolute -top-5 left-0 px-1.5 py-0.5 rounded bg-emerald-700/90 text-white text-[9px] font-bold whitespace-nowrap">
+                          範圍 {idx + 1}
+                        </div>
+                      </div>
+                    ))}
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                      {[...selectPaintStrokes, ...(activeSelectStroke ? [activeSelectStroke] : [])].map(
+                        (stroke, idx) => (
+                          <polyline
+                            key={`sel-${idx}`}
+                            fill="none"
+                            stroke="rgba(16, 185, 129, 0.55)"
+                            strokeWidth={
+                              Math.min(displayDimensions.width, displayDimensions.height) *
+                              SELECT_BRUSH_RADIUS_NORM[brushSize] *
+                              2
+                            }
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            points={stroke
+                              .map(
+                                (p) =>
+                                  `${p.x * displayDimensions.width},${p.y * displayDimensions.height}`
+                              )
+                              .join(" ")}
+                          />
+                        )
+                      )}
+                    </svg>
+                    <div className="absolute top-2 left-1/2 -translate-x-1/2 px-2 py-1 rounded-full bg-emerald-600/90 text-white text-[10px] font-bold pointer-events-none max-w-[90%] text-center">
+                      {selectRegions.length > 1
+                        ? `同一題 ${selectRegions.length} 個範圍（題幹／圖可分開塗）→ 加入錯題`
+                        : selectPaintStrokes.length > 0
+                        ? "可再塗另一塊（如右下角圖），或按「加入錯題」"
+                        : "手指拖過文字／像著色塗過圖區；同一題可塗多塊"}
+                    </div>
+                  </div>
+                )}
+
                 {/* Erase handwriting canvas layer */}
                 {mode === "crop" && cropTool === "erase" && (
                   <div
@@ -1495,7 +1714,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         {/* Pending multi-crop queue */}
         {!isExistingQuestion && mode === "crop" && (
           <div className="px-2 sm:px-5 py-1 text-[10px] sm:text-[11px] text-slate-500 bg-slate-50 border-t border-slate-100 shrink-0">
-            框好一題後按「加入此錯題」，可再框下一題。建議先按「AI 去手寫」挖空圈選／勾選答案與筆跡；也可用手動「去手寫」塗白。
+            「著色選」：題幹一塊、圖一塊可分開塗成多個矩形（仍算同一題）。建議先「AI 去手寫」挖空選答；也可手動塗白。再按「加入此錯題」。
           </div>
         )}
         {!isExistingQuestion && pendingCrops.length > 0 && (
@@ -1547,10 +1766,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                   type="button"
                   onClick={enterCropMode}
                   className="px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-semibold text-sky-800 bg-sky-50 hover:bg-sky-100 active:scale-95 transition border border-sky-200/80 flex items-center gap-1"
-                  title="切換至步驟 2 框選題目"
+                  title="切換至步驟 2：著色選取錯題"
                 >
-                  <Crop className="w-3.5 h-3.5 text-sky-600" />
-                  框選裁切
+                  <Paintbrush className="w-3.5 h-3.5 text-sky-600" />
+                  著色選取
                   <ChevronRight className="w-3.5 h-3.5 hidden sm:block" />
                 </button>
               </>
@@ -1560,9 +1779,13 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                   <button
                     type="button"
                     onClick={() => void handleAddPendingCrop()}
-                    disabled={isProcessing || cropTool === "erase"}
+                    disabled={
+                      isProcessing ||
+                      cropTool === "erase" ||
+                      (cropTool === "paint" && selectPaintStrokes.length === 0)
+                    }
                     className="flex-1 sm:flex-none px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition shadow-xs flex items-center justify-center gap-1 sm:gap-1.5 disabled:opacity-50 min-h-10"
-                    title="將目前框選加入錯題清單，可再框下一題"
+                    title="將目前著色／框選範圍加入錯題清單，可再選下一題"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     <span className="sm:hidden">加入錯題</span>
