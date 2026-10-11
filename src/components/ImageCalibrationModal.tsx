@@ -1584,15 +1584,6 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                         )
                       )}
                     </svg>
-                    <div className="absolute top-2 left-1/2 -translate-x-1/2 px-2 py-1 rounded-full bg-emerald-600/90 text-white text-[10px] font-bold pointer-events-none max-w-[92%] text-center">
-                      {selectRegions.length > 1
-                        ? `同一題 ${selectRegions.length} 區塊（文字／圖分開拼接）→ 加入錯題`
-                        : selectPaintStrokes.length > 0
-                        ? selectRegions[0]?.kind === "diagram"
-                          ? "已圈圖區；再畫文字區，或按「加入錯題」"
-                          : "已圈文字區；再畫地圖／圖區，或按「加入錯題」"
-                        : "手指畫過文字＝文字區；畫過地圖／圖＝圖區"}
-                    </div>
                   </div>
                 )}
 
@@ -1609,10 +1600,26 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           )}
         </div>
 
-        {/* Pending multi-crop queue */}
+        {/* Status under image — never overlay on top of the crop preview */}
         {!isExistingQuestion && mode === "crop" && (
-          <div className="px-2 sm:px-5 py-1 text-[10px] sm:text-[11px] text-slate-500 bg-slate-50 border-t border-slate-100 shrink-0">
-            「畫選」：手指畫過文字／圖，框線緊貼所畫內容；文字一框、圖一框，加入後分成兩個區塊拼接。建議先「AI 去手寫」；再按「加入此錯題」。
+          <div
+            className={`px-2 sm:px-5 py-1.5 text-[10px] sm:text-[11px] border-t shrink-0 ${
+              cropTool === "paint" && selectRegions.length > 1
+                ? "bg-emerald-50 text-emerald-900 border-emerald-100 font-semibold"
+                : cropTool === "paint" && selectPaintStrokes.length > 0
+                ? "bg-sky-50 text-sky-900 border-sky-100 font-medium"
+                : "bg-slate-50 text-slate-500 border-slate-100"
+            }`}
+          >
+            {cropTool === "paint"
+              ? selectRegions.length > 1
+                ? `同一題 ${selectRegions.length} 區塊（文字／圖分開拼接）→ 按下方「加入此錯題」`
+                : selectPaintStrokes.length > 0
+                ? selectRegions[0]?.kind === "diagram"
+                  ? "已圈圖區；再畫文字區，或按下方「加入此錯題」"
+                  : "已圈文字區；再畫地圖／圖區，或按下方「加入此錯題」"
+                : "手指畫過文字＝文字區；畫過地圖／圖＝圖區。建議先「AI 去手寫」。"
+              : "「框選」可微調範圍；建議先「AI 去手寫」，再按「加入此錯題」。"}
           </div>
         )}
         {!isExistingQuestion && pendingCrops.length > 0 && (
