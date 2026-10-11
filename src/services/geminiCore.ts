@@ -6,6 +6,14 @@ export const VALID_MODELS = [
   "gemini-3.1-pro-preview",
 ] as const;
 
+/** Models that can return edited images (text+image → image). */
+export const IMAGE_EDIT_MODELS = [
+  "gemini-2.5-flash-image",
+  "gemini-3.1-flash-image",
+  "gemini-nano-banana-2.1",
+  "gemini-3.1-flash-lite-image",
+] as const;
+
 export function resolveModel(model?: string): string {
   return VALID_MODELS.includes(model as (typeof VALID_MODELS)[number])
     ? (model as string)
@@ -52,6 +60,19 @@ export function getFallbackModel(currentModel: string): string {
     return "gemini-3.1-flash-lite";
   }
   return "gemini-3.1-flash-lite";
+}
+
+export function getImageEditFallbackModel(currentModel: string): string {
+  const idx = IMAGE_EDIT_MODELS.indexOf(
+    currentModel as (typeof IMAGE_EDIT_MODELS)[number]
+  );
+  if (idx >= 0 && idx < IMAGE_EDIT_MODELS.length - 1) {
+    return IMAGE_EDIT_MODELS[idx + 1];
+  }
+  if (idx === IMAGE_EDIT_MODELS.length - 1) {
+    return IMAGE_EDIT_MODELS[0];
+  }
+  return IMAGE_EDIT_MODELS[0];
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -113,6 +134,116 @@ export async function generateContentWithRetry(
   }
 
   throw new Error("無法取得 AI 回應，請稍候重試。");
+}
+
+/**
+ * Image-edit generateContent with fallback across IMAGE_EDIT_MODELS only.
+ * Does not fall back to text-only models.
+ */
+export async function generateImageContentWithRetry(
+  ai: GoogleGenAI,
+  initialModel: string,
+  params: {
+    contents: any;
+    config?: any;
+  }
+): Promise<GenerateResult> {
+  let modelToUse = IMAGE_EDIT_MODELS.includes(
+    initialModel as (typeof IMAGE_EDIT_MODELS)[number]
+  )
+    ? initialModel
+    : IMAGE_EDIT_MODELS[0];
+  let attempts = 0;
+  const maxAttempts = 4;
+  let fallbackUsed = false;
+  const tried = new Set<string>();
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    tried.add(modelToUse);
+    try {
+      const response = await ai.models.generateContent({
+        model: modelToUse,
+        contents: params.contents,
+        config: params.config,
+      });
+      return { response, modelUsed: modelToUse, attempts, fallbackUsed };
+    } catch (error: any) {
+      const msg = (error?.message || "").toLowerCase();
+      const notFound =
+        msg.includes("not found") ||
+        msg.includes("is not supported") ||
+        msg.includes("unknown model") ||
+        String(error?.status || "") === "404";
+      const isTransient = isTransientError(error);
+
+      if ((isTransient || notFound) && attempts < maxAttempts) {
+        let next = getImageEditFallbackModel(modelToUse);
+        // Prefer an untried model
+        for (let i = 0; i < IMAGE_EDIT_MODELS.length; i++) {
+          if (!tried.has(IMAGE_EDIT_MODELS[i])) {
+            next = IMAGE_EDIT_MODELS[i];
+            break;
+          }
+        }
+        if (next !== modelToUse) {
+          console.log(
+            `[Gemini Image] Switching from ${modelToUse} to ${next}`
+          );
+          modelToUse = next;
+          fallbackUsed = true;
+          await sleep(notFound ? 200 : 600);
+          continue;
+        }
+        await sleep(800);
+        continue;
+      }
+
+      console.warn(
+        `[Gemini Image] Attempt ${attempts}/${maxAttempts} failed on ${modelToUse}:`,
+        error?.message || error
+      );
+      throw error;
+    }
+  }
+
+  throw new Error("無法取得 AI 去手寫結果，請稍候重試。");
+}
+
+/** Pull the first inline image from a generateContent response as a data URL. */
+export function extractInlineImageDataUrl(response: any): string | null {
+  const parts =
+    response?.candidates?.[0]?.content?.parts ||
+    response?.parts ||
+    [];
+  for (const part of parts) {
+    const inline = part?.inlineData || part?.inline_data;
+    const data = inline?.data;
+    if (!data) continue;
+    const mime =
+      inline?.mimeType || inline?.mime_type || "image/png";
+    return `data:${mime};base64,${data}`;
+  }
+  return null;
+}
+
+export function buildRemoveHandwritingPrompt(): string {
+  return `你是考卷影像修復專家。請編輯這張考卷／習作照片：
+
+【必須去除】
+- 所有手寫筆跡：紅筆、藍筆、黑原子筆、鉛筆、螢光筆
+- 手寫答案字母／數字、圈選、打叉、劃線、註記、塗改痕跡
+
+【必須完整保留】
+- 印刷黑字題幹與選項
+- 印刷彩色地圖、圖表、插圖、色塊（地理／科學圖不可漂白或改畫）
+- 題號、排版、紙張比例與構圖
+
+【輸出要求】
+- 以自然紙張底色與印刷紋理填補被移除的手寫區域（inpainting）
+- 不要裁切、旋轉、縮放或改變構圖
+- 不要新增任何文字、圖案或浮水印
+- 輸出一張與原圖相同構圖的清晰照片`;
 }
 
 export function formatErrorMessage(error: any): {

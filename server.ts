@@ -4,14 +4,18 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import {
   buildAnalyzePrompt,
+  buildRemoveHandwritingPrompt,
   buildRewriteExplanationPrompt,
   buildSimilarPrompt,
   createGeminiClient,
+  extractInlineImageDataUrl,
   formatErrorMessage,
   generateContentWithRetry,
+  generateImageContentWithRetry,
   getAnalyzeResponseSchema,
   getRewriteExplanationResponseSchema,
   getSimilarResponseSchema,
+  IMAGE_EDIT_MODELS,
   parseJsonResponse,
   resolveModel,
 } from "./src/services/geminiCore";
@@ -301,6 +305,82 @@ app.post("/api/rewrite-explanation", async (req, res) => {
     });
   } catch (error: any) {
     console.error("Rewrite explanation error:", error);
+    const { message: friendlyMessage, isKeyProblem, isTransient } = formatErrorMessage(error);
+    return res.status(isTransient ? 503 : 500).json({
+      error: friendlyMessage,
+      isKeyProblem,
+      isTransient,
+      rawError: error?.message,
+    });
+  }
+});
+
+// AI remove handwriting (image edit / inpainting)
+app.post("/api/remove-handwriting", async (req, res) => {
+  try {
+    const { imageBase64, mimeType = "image/jpeg", customApiKey } = req.body;
+
+    if (!imageBase64 || typeof imageBase64 !== "string") {
+      return res.status(400).json({ error: "未提供題目圖片數據" });
+    }
+
+    const isUsingCustomKey = Boolean(
+      customApiKey && typeof customApiKey === "string" && customApiKey.trim().length > 0
+    );
+    const effectiveApiKey = isUsingCustomKey
+      ? (customApiKey as string).trim()
+      : process.env.GEMINI_API_KEY;
+
+    if (!effectiveApiKey) {
+      return res.status(400).json({
+        error:
+          "未檢測到有效 Gemini API Key。請在右上角「自備金鑰 (BYOK)」填入您的 API Key，或於伺服器配置 GEMINI_API_KEY。",
+        needKey: true,
+      });
+    }
+
+    const ai = createGeminiClient(effectiveApiKey);
+    const cleanBase64 = imageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "");
+    const resolvedMime =
+      mimeType ||
+      (imageBase64.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,/) || [])[1] ||
+      "image/jpeg";
+
+    const { response, modelUsed, attempts, fallbackUsed } =
+      await generateImageContentWithRetry(ai, IMAGE_EDIT_MODELS[0], {
+        contents: {
+          parts: [
+            {
+              inlineData: {
+                mimeType: resolvedMime,
+                data: cleanBase64,
+              },
+            },
+            { text: buildRemoveHandwritingPrompt() },
+          ],
+        },
+        config: {
+          responseModalities: ["TEXT", "IMAGE"],
+        },
+      });
+
+    const outImage = extractInlineImageDataUrl(response);
+    if (!outImage) {
+      return res.status(502).json({
+        error: "AI 未回傳去手寫後的圖片，請再試一次。",
+      });
+    }
+
+    return res.json({
+      success: true,
+      imageBase64: outImage,
+      keySource: isUsingCustomKey ? "custom_byok" : "server_default",
+      modelUsed,
+      attempts,
+      fallbackUsed,
+    });
+  } catch (error: any) {
+    console.error("AI remove handwriting error:", error);
     const { message: friendlyMessage, isKeyProblem, isTransient } = formatErrorMessage(error);
     return res.status(isTransient ? 503 : 500).json({
       error: friendlyMessage,
