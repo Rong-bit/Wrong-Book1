@@ -19,6 +19,11 @@ import { PaperSettings, QuestionItem, PaperSize } from "../types";
 import { MathRenderer } from "./MathRenderer";
 import { normalizeImageSrc } from "../utils/imageUtils";
 import { getTextOnlyFigureSrc } from "../utils/questionExport";
+import {
+  listSubjectFilterKeys,
+  matchesSubjectFilter,
+  normalizeSubjectKey,
+} from "../utils/curriculumLabels";
 
 interface PdfExportModalProps {
   isOpen: boolean;
@@ -65,18 +70,15 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   /** Shrinks when a compact page overflows so no question is clipped. */
   const [compactFitSize, setCompactFitSize] = useState(estimatedCompactSize);
 
-  const subjectOptions = useMemo(() => {
-    const set = new Set<string>();
-    questions.forEach((q) => {
-      if (q.subject) set.add(q.subject);
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hant"));
-  }, [questions]);
+  const subjectOptions = useMemo(
+    () => listSubjectFilterKeys(questions.map((q) => q.subject)),
+    [questions]
+  );
 
   /** Questions actually printed / previewed for the chosen subject scope. */
   const exportQuestions = useMemo(() => {
     if (exportSubject === "全部") return questions;
-    return questions.filter((q) => q.subject === exportSubject);
+    return questions.filter((q) => matchesSubjectFilter(q.subject, exportSubject));
   }, [questions, exportSubject]);
 
   useEffect(() => {
@@ -85,15 +87,21 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       setExportError(null);
       return;
     }
-    // Open with the notebook's current subject chip (地理 → only 地理)
-    const next =
-      initialSubjectFilter &&
-      (initialSubjectFilter === "全部" ||
-        questions.some((q) => q.subject === initialSubjectFilter))
-        ? initialSubjectFilter
-        : "全部";
-    setExportSubject(next);
-  }, [isOpen, initialSubjectFilter, questions]);
+  }, [isOpen]);
+
+  // Sync notebook chip → export scope only when opening / chip changes.
+  // Do NOT depend on `questions` identity — that used to reset「地理」back to「全部」
+  // (or wipe a manual chip pick) and pull math into the preview again.
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!initialSubjectFilter || initialSubjectFilter === "全部") {
+      setExportSubject("全部");
+      return;
+    }
+    const canonical =
+      normalizeSubjectKey(initialSubjectFilter) || initialSubjectFilter;
+    setExportSubject(canonical);
+  }, [isOpen, initialSubjectFilter]);
 
   const questionsFitKey = useMemo(
     () =>
@@ -438,14 +446,19 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   全部 ({questions.length})
                 </button>
                 {subjectOptions.map((subj) => {
-                  const count = questions.filter((q) => q.subject === subj).length;
+                  const count = questions.filter((q) =>
+                    matchesSubjectFilter(q.subject, subj)
+                  ).length;
+                  const active =
+                    exportSubject !== "全部" &&
+                    matchesSubjectFilter(subj, exportSubject);
                   return (
                     <button
                       key={subj}
                       type="button"
                       onClick={() => setExportSubject(subj)}
                       className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
-                        exportSubject === subj
+                        active
                           ? "bg-sky-600 text-white border-sky-600"
                           : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
                       }`}

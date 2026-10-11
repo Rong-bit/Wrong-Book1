@@ -37,6 +37,9 @@ import { compressImage, normalizeImageSrc } from "./utils/imageUtils";
 import {
   alignQuestionCollection,
   collectExistingLabels,
+  listSubjectFilterKeys,
+  matchesSubjectFilter,
+  normalizeSubjectKey,
 } from "./utils/curriculumLabels";
 
 const STORAGE_QUESTIONS_KEY = "digital_notebook_questions_v1";
@@ -716,16 +719,16 @@ export default function App() {
     setTimeout(() => setPasteToast(null), 3500);
   };
 
-  // Subjects for filtering
-  const availableSubjects = Array.from(
-    new Set(questions.map((q) => q.subject).filter(Boolean))
+  // Subjects for filtering (canonical keys so 地理科 / 地理 share one chip)
+  const availableSubjects = useMemo(
+    () => listSubjectFilterKeys(questions.map((q) => q.subject)),
+    [questions]
   );
 
   const filteredQuestions = useMemo(() => {
-    return questions.filter((q) => {
-      if (selectedSubjectFilter === "全部") return true;
-      return q.subject === selectedSubjectFilter;
-    });
+    return questions.filter((q) =>
+      matchesSubjectFilter(q.subject, selectedSubjectFilter)
+    );
   }, [questions, selectedSubjectFilter]);
 
   const captureNumberById = useMemo(() => {
@@ -821,13 +824,21 @@ export default function App() {
               全部 ({questions.length})
             </button>
             {availableSubjects.map((subj) => {
-              const count = questions.filter((q) => q.subject === subj).length;
-              const active = selectedSubjectFilter === subj;
+              const count = questions.filter((q) =>
+                matchesSubjectFilter(q.subject, subj)
+              ).length;
+              const active =
+                selectedSubjectFilter !== "全部" &&
+                matchesSubjectFilter(subj, selectedSubjectFilter);
               return (
                 <button
                   key={subj}
                   type="button"
-                  onClick={() => setSelectedSubjectFilter(subj)}
+                  onClick={() =>
+                    setSelectedSubjectFilter(
+                      normalizeSubjectKey(subj) || subj
+                    )
+                  }
                   className={`px-3 py-1 rounded-lg text-xs font-semibold transition ${
                     active
                       ? "bg-sky-600 text-white shadow-xs"
