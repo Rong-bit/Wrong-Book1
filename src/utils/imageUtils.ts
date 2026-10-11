@@ -1559,7 +1559,10 @@ export function carveRectAwayFrom(subject: CropRect, obstacle: CropRect): CropRe
   return candidates[0];
 }
 
-/** Ensure text / diagram islands never overlap (diagram yields to text). */
+const MIN_SEPARATED_SIDE = 0.012;
+
+/** Ensure text / diagram islands never overlap. Prefer carving diagram; if that
+ *  would destroy the diagram (e.g. fully inside text), carve text instead. */
 export function separateDifferentKindRects(rects: LabeledCropRect[]): LabeledCropRect[] {
   if (rects.length < 2) return rects.map((r) => ({ ...r }));
   const result = rects.map((r) => ({ ...r }));
@@ -1571,12 +1574,42 @@ export function separateDifferentKindRects(rects: LabeledCropRect[]): LabeledCro
       const diagramIdx =
         result[i].kind === "diagram" ? i : result[j].kind === "diagram" ? j : -1;
       if (textIdx < 0 || diagramIdx < 0) continue;
-      const carved = carveRectAwayFrom(result[diagramIdx], result[textIdx]);
-      result[diagramIdx] = { ...carved, kind: "diagram" };
+
+      const text = result[textIdx];
+      const diagram = result[diagramIdx];
+      const carvedDiagram = carveRectAwayFrom(diagram, text);
+      const diagramSurvives =
+        carvedDiagram.width >= MIN_SEPARATED_SIDE &&
+        carvedDiagram.height >= MIN_SEPARATED_SIDE;
+
+      if (diagramSurvives) {
+        result[diagramIdx] = { ...carvedDiagram, kind: "diagram" };
+        continue;
+      }
+
+      // Diagram fully covered by text — shrink text so the painted map remains
+      const carvedText = carveRectAwayFrom(text, diagram);
+      const textSurvives =
+        carvedText.width >= MIN_SEPARATED_SIDE &&
+        carvedText.height >= MIN_SEPARATED_SIDE;
+      if (textSurvives) {
+        result[textIdx] = { ...carvedText, kind: "text" };
+      } else {
+        // Nested both ways / tiny remnants — keep the larger island only
+        const textArea = text.width * text.height;
+        const diagramArea = diagram.width * diagram.height;
+        if (diagramArea >= textArea) {
+          result[textIdx] = { ...text, width: 0, height: 0 };
+        } else {
+          result[diagramIdx] = { ...diagram, width: 0, height: 0 };
+        }
+      }
     }
   }
 
-  return result.filter((r) => r.width >= 0.012 && r.height >= 0.012);
+  return result.filter(
+    (r) => r.width >= MIN_SEPARATED_SIDE && r.height >= MIN_SEPARATED_SIDE
+  );
 }
 
 /**
