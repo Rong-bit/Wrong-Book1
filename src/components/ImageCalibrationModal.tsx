@@ -348,6 +348,31 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     setIsSelectPainting(false);
   };
 
+  const applyPaintKind = (kind: PaintKind) => {
+    setPaintKind(kind);
+    paintKindRef.current = kind;
+  };
+
+  /** 選文字／選圖形合併為一鍵：進工具預設文字，再點切換圖形。 */
+  const activatePaintTool = () => {
+    if (cropTool === "paint") {
+      applyPaintKind(paintKind === "text" ? "diagram" : "text");
+      return;
+    }
+    setCropTool("paint");
+    applyPaintKind("text");
+  };
+
+  /** 框文字／框圖形合併為一鍵：進工具預設文字，再點切換圖形。 */
+  const activateFrameTool = () => {
+    if (cropTool === "frame") {
+      applyPaintKind(paintKind === "text" ? "diagram" : "text");
+      return;
+    }
+    setCropTool("frame");
+    applyPaintKind("text");
+  };
+
   const syncPaintRegionsFromStrokes = (
     strokes: Point[][],
     kinds: RegionKind[] = selectStrokeKindsRef.current
@@ -475,18 +500,17 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       // "" = explicit none so PDF textOnly won't fall back to the stem screenshot
       return { imageBase64, figureImageBase64: figureOnly || "" };
     }
-    const imageBase64 = await applyCrop(
-      currentImage,
-      {
-        x: cropBox.x,
-        y: cropBox.y,
-        width: cropBox.w,
-        height: cropBox.h,
-      },
-      0.92,
-      imgRef.current
-    );
-    return { imageBase64 };
+    // 框文字／框圖形：單矩形也帶 kind，圖形框才產出 figure 附圖
+    const frameRegion: LabeledCropRect = {
+      x: cropBox.x,
+      y: cropBox.y,
+      width: cropBox.w,
+      height: cropBox.h,
+      kind: paintKindRef.current,
+    };
+    const imageBase64 = await applyMultiRegionCrop(currentImage, [frameRegion], 0.92);
+    const figureOnly = await cropFigureRegionsOnly(currentImage, [frameRegion], 0.92);
+    return { imageBase64, figureImageBase64: figureOnly || "" };
   };
 
   const markCropDirty = () => {
@@ -498,8 +522,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     if (cropTool === "paint" && selectRegionsRef.current.length === 0) {
       setProcessingText(
         paintKind === "diagram"
-          ? "請先用「選圖形」畫過地圖／圖形範圍"
-          : "請先用「選文字」畫過題幹文字範圍"
+          ? "請先畫過地圖／圖形範圍（目前為「選圖形」）"
+          : "請先畫過題幹文字範圍（目前為「選文字」；再點按鈕可切換選圖形）"
       );
       setIsProcessing(true);
       setTimeout(() => setIsProcessing(false), 1400);
@@ -1260,6 +1284,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
 
     const currentCropPixelsW = Math.round(cropBox.w * naturalDimensions.width);
     const currentCropPixelsH = Math.round(cropBox.h * naturalDimensions.height);
+    const isDiagramFrame = paintKind === "diagram";
 
     const x1 = cropBox.x * 100;
     const y1 = cropBox.y * 100;
@@ -1285,25 +1310,33 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             height: `${cropBox.h * 100}%`,
             touchAction: "none",
           }}
-          className="absolute border-2 border-emerald-400 bg-emerald-500/10 pointer-events-auto cursor-move select-none shadow-sm z-10"
+          className={`absolute border-2 pointer-events-auto cursor-move select-none shadow-sm z-10 ${
+            isDiagramFrame
+              ? "border-sky-400 bg-sky-500/10"
+              : "border-emerald-400 bg-emerald-500/10"
+          }`}
         >
           {/* 3x3 Rule-of-thirds alignment grid inside crop box */}
           <div className="w-full h-full grid grid-cols-3 grid-rows-3 pointer-events-none">
-            <div className="border-r border-b border-emerald-400/30" />
-            <div className="border-r border-b border-emerald-400/30" />
-            <div className="border-b border-emerald-400/30" />
-            <div className="border-r border-b border-emerald-400/30" />
-            <div className="border-r border-b border-emerald-400/30" />
-            <div className="border-b border-emerald-400/30" />
-            <div className="border-r border-emerald-400/30" />
-            <div className="border-r border-emerald-400/30" />
+            <div className={`border-r border-b ${isDiagramFrame ? "border-sky-400/30" : "border-emerald-400/30"}`} />
+            <div className={`border-r border-b ${isDiagramFrame ? "border-sky-400/30" : "border-emerald-400/30"}`} />
+            <div className={`border-b ${isDiagramFrame ? "border-sky-400/30" : "border-emerald-400/30"}`} />
+            <div className={`border-r border-b ${isDiagramFrame ? "border-sky-400/30" : "border-emerald-400/30"}`} />
+            <div className={`border-r border-b ${isDiagramFrame ? "border-sky-400/30" : "border-emerald-400/30"}`} />
+            <div className={`border-b ${isDiagramFrame ? "border-sky-400/30" : "border-emerald-400/30"}`} />
+            <div className={`border-r ${isDiagramFrame ? "border-sky-400/30" : "border-emerald-400/30"}`} />
+            <div className={`border-r ${isDiagramFrame ? "border-sky-400/30" : "border-emerald-400/30"}`} />
             <div />
           </div>
 
-          {/* Dimension badge */}
-          <div className="absolute -top-7 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-slate-900/85 text-emerald-300 font-mono text-[10px] whitespace-nowrap pointer-events-none backdrop-blur-xs flex items-center gap-1">
+          {/* Kind + dimension badge */}
+          <div
+            className={`absolute -top-7 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-md bg-slate-900/85 font-mono text-[10px] whitespace-nowrap pointer-events-none backdrop-blur-xs flex items-center gap-1 ${
+              isDiagramFrame ? "text-sky-300" : "text-emerald-300"
+            }`}
+          >
             <Crop className="w-3 h-3" />
-            {currentCropPixelsW} × {currentCropPixelsH} px
+            {isDiagramFrame ? "圖區" : "文字區"} · {currentCropPixelsW} × {currentCropPixelsH} px
           </div>
         </div>
 
@@ -1322,8 +1355,14 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-20 group w-11 h-11 flex items-center justify-center"
           >
             <div
-              className={`w-3.5 h-3.5 rounded-sm bg-white border-2 border-emerald-600 shadow-md group-hover:scale-130 transition-transform ${
-                activeCropHandle === h.id ? "scale-140 bg-emerald-500 border-white ring-2 ring-emerald-300" : ""
+              className={`w-3.5 h-3.5 rounded-sm bg-white border-2 shadow-md group-hover:scale-130 transition-transform ${
+                isDiagramFrame ? "border-sky-600" : "border-emerald-600"
+              } ${
+                activeCropHandle === h.id
+                  ? isDiagramFrame
+                    ? "scale-140 bg-sky-500 border-white ring-2 ring-sky-300"
+                    : "scale-140 bg-emerald-500 border-white ring-2 ring-emerald-300"
+                  : ""
               }`}
             />
           </div>
@@ -1454,50 +1493,49 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200 mr-0.5">
                   <button
                     type="button"
-                    onClick={() => {
-                      setCropTool("paint");
-                      setPaintKind("text");
-                      paintKindRef.current = "text";
-                    }}
+                    onClick={activatePaintTool}
                     className={`px-2 py-1 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
-                      cropTool === "paint" && paintKind === "text"
-                        ? "bg-emerald-600 text-white shadow-2xs"
+                      cropTool === "paint"
+                        ? paintKind === "diagram"
+                          ? "bg-sky-600 text-white shadow-2xs"
+                          : "bg-emerald-600 text-white shadow-2xs"
                         : "text-slate-600 hover:bg-white"
                     }`}
-                    title="先畫題幹文字；此筆畫會標成文字區"
-                  >
-                    <Paintbrush className="w-3 h-3" />
-                    選文字
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCropTool("paint");
-                      setPaintKind("diagram");
-                      paintKindRef.current = "diagram";
-                    }}
-                    className={`px-2 py-1 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
+                    title={
                       cropTool === "paint" && paintKind === "diagram"
-                        ? "bg-sky-600 text-white shadow-2xs"
-                        : "text-slate-600 hover:bg-white"
-                    }`}
-                    title="再點此後畫地圖／圖形；與文字區分開且不重疊"
+                        ? "目前選圖形：再點一次切回選文字"
+                        : cropTool === "paint"
+                        ? "目前選文字：再點一次切換選圖形"
+                        : "畫選題幹文字（預設）；進入後再點可切換選圖形"
+                    }
                   >
                     <Paintbrush className="w-3 h-3" />
-                    選圖形
+                    {cropTool === "paint" && paintKind === "diagram"
+                      ? "選圖形"
+                      : "選文字"}
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCropTool("frame")}
+                    onClick={activateFrameTool}
                     className={`px-2 py-1 rounded-md text-[11px] font-bold transition flex items-center gap-1 ${
                       cropTool === "frame"
-                        ? "bg-indigo-600 text-white shadow-2xs"
+                        ? paintKind === "diagram"
+                          ? "bg-sky-600 text-white shadow-2xs"
+                          : "bg-indigo-600 text-white shadow-2xs"
                         : "text-slate-600 hover:bg-white"
                     }`}
-                    title="矩形框微調範圍"
+                    title={
+                      cropTool === "frame" && paintKind === "diagram"
+                        ? "目前框圖形：再點一次切回框文字"
+                        : cropTool === "frame"
+                        ? "目前框文字：再點一次切換框圖形"
+                        : "矩形框選題幹文字（預設）；進入後再點可切換框圖形"
+                    }
                   >
                     <Crop className="w-3 h-3" />
-                    框選
+                    {cropTool === "frame" && paintKind === "diagram"
+                      ? "框圖形"
+                      : "框文字"}
                   </button>
                 </div>
                 {cropTool === "paint" ? (
@@ -1863,12 +1901,14 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 ? `同一題 ${selectRegions.length} 區塊（文字／圖分開、不重疊）→ 按下方「加入此錯題」`
                 : selectPaintStrokes.length > 0
                 ? paintKind === "diagram"
-                  ? "目前「選圖形」：畫地圖／圖形（與文字區不重疊）"
-                  : "已圈文字區 → 點「選圖形」再畫地圖"
+                  ? "目前「選圖形」：畫地圖／圖形（與文字區不重疊）；再點按鈕可切回選文字"
+                  : "已圈文字區 → 再點「選文字」按鈕切成「選圖形」後畫地圖"
                 : paintKind === "diagram"
-                ? "「選圖形」：請畫地圖／圖形範圍"
-                : "「選文字」：請先畫題幹文字，完成後再點「選圖形」"
-              : "「框選」可微調範圍；建議先「AI 去手寫」，再按「加入此錯題」。"}
+                ? "「選圖形」：請畫地圖／圖形範圍；再點按鈕可切回選文字"
+                : "「選文字」：請先畫題幹文字；再點同一按鈕可切換「選圖形」"
+              : paintKind === "diagram"
+              ? "「框圖形」：拖曳矩形框選地圖／圖形；再點按鈕可切回框文字"
+              : "「框文字」：拖曳矩形框選題幹；再點同一按鈕可切換「框圖形」"}
           </div>
         )}
         {!isExistingQuestion && pendingCrops.length > 0 && (
