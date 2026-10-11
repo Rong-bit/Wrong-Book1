@@ -48,6 +48,30 @@ export function sameSubject(a?: string, b?: string): boolean {
   return left === right;
 }
 
+/**
+ * Notebook / PDF subject chip match.
+ * Uses canonical families (地理 ≈ 地理科) and exact fallback for 未歸類 etc.
+ * Never treats unrelated subjects (數學 vs 地理) as the same.
+ */
+export function matchesSubjectFilter(
+  questionSubject: string | undefined,
+  filter: string | undefined
+): boolean {
+  if (!filter || filter === "全部") return true;
+  if (sameSubject(questionSubject, filter)) return true;
+  return (questionSubject || "") === filter;
+}
+
+/** Unique subject chip keys for filter UI (canonical when known). */
+export function listSubjectFilterKeys(subjects: Iterable<string | undefined>): string[] {
+  const set = new Set<string>();
+  for (const subject of subjects) {
+    if (!subject) continue;
+    set.add(normalizeSubjectKey(subject) || subject);
+  }
+  return Array.from(set).sort((a, b) => a.localeCompare(b, "zh-Hant"));
+}
+
 export function normalizeGradeKey(grade?: string): string {
   if (!grade) return "";
   return grade
