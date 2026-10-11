@@ -1131,6 +1131,165 @@ export function strokeToCropRect(
   };
 }
 
+/**
+ * Fit a tight crop rect to printed content along a finger stroke.
+ * Only ink / diagram pixels near the stroke are included — avoids oversized highlighter boxes.
+ */
+export function tightCropRectAlongStroke(
+  img: HTMLImageElement,
+  stroke: Point[],
+  corridorNorm = 0.02,
+  maxSide = 720
+): CropRect | null {
+  if (!stroke.length) return null;
+  const fallback = strokeToCropRect(stroke, corridorNorm * 0.45, 0.008);
+  const natW = img.naturalWidth || img.width;
+  const natH = img.naturalHeight || img.height;
+  if (natW < 8 || natH < 8) return fallback;
+
+  const scale = Math.min(1, maxSide / Math.max(natW, natH));
+  const w = Math.max(32, Math.round(natW * scale));
+  const h = Math.max(32, Math.round(natH * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return fallback;
+  ctx.drawImage(img, 0, 0, w, h);
+  const { data } = ctx.getImageData(0, 0, w, h);
+
+  const pts = stroke.map((p) => ({
+    x: Math.max(0, Math.min(w - 1, p.x * (w - 1))),
+    y: Math.max(0, Math.min(h - 1, p.y * (h - 1))),
+  }));
+
+  let lumSum = 0;
+  const lum = new Float32Array(w * h);
+  const chroma = new Uint8Array(w * h);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const v = 0.299 * r + 0.587 * g + 0.114 * b;
+    lum[p] = v;
+    lumSum += v;
+    const maxC = r > g ? (r > b ? r : b) : g > b ? g : b;
+    const minC = r < g ? (r < b ? r : b) : g < b ? g : b;
+    chroma[p] = maxC - minC;
+  }
+  const avgLum = lumSum / (w * h);
+  const inkCut = Math.min(172, Math.max(95, avgLum * 0.74));
+
+  const corridorR = Math.max(3, Math.round(Math.min(w, h) * corridorNorm));
+  const corridorR2 = corridorR * corridorR;
+
+  const distToStroke2 = (x: number, y: number): number => {
+    let best = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const dx = x - pts[i].x;
+      const dy = y - pts[i].y;
+      const d = dx * dx + dy * dy;
+      if (d < best) best = d;
+      if (i + 1 < pts.length) {
+        const ax = pts[i].x;
+        const ay = pts[i].y;
+        const bx = pts[i + 1].x;
+        const by = pts[i + 1].y;
+        const vx = bx - ax;
+        const vy = by - ay;
+        const len2 = vx * vx + vy * vy || 1;
+        let t = ((x - ax) * vx + (y - ay) * vy) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const px = ax + t * vx - x;
+        const py = ay + t * vy - y;
+        const seg = px * px + py * py;
+        if (seg < best) best = seg;
+      }
+    }
+    return best;
+  };
+
+  // Bounding box of stroke corridor first (limits scan)
+  let sx0 = w;
+  let sy0 = h;
+  let sx1 = 0;
+  let sy1 = 0;
+  for (const p of pts) {
+    sx0 = Math.min(sx0, Math.floor(p.x - corridorR));
+    sy0 = Math.min(sy0, Math.floor(p.y - corridorR));
+    sx1 = Math.max(sx1, Math.ceil(p.x + corridorR));
+    sy1 = Math.max(sy1, Math.ceil(p.y + corridorR));
+  }
+  sx0 = Math.max(0, sx0);
+  sy0 = Math.max(0, sy0);
+  sx1 = Math.min(w - 1, sx1);
+  sy1 = Math.min(h - 1, sy1);
+
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+  let hit = 0;
+
+  for (let y = sy0; y <= sy1; y++) {
+    for (let x = sx0; x <= sx1; x++) {
+      if (distToStroke2(x, y) > corridorR2) continue;
+      const idx = y * w + x;
+      const isInk = lum[idx] < inkCut;
+      const isDiagram = chroma[idx] >= 28 && lum[idx] < avgLum + 12;
+      if (!isInk && !isDiagram) continue;
+      hit++;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (hit < 8 || maxX < minX) {
+    return fallback;
+  }
+
+  // Slightly expand horizontally on content rows so full characters are included
+  const expandX = Math.max(2, Math.round(w * 0.006));
+  for (let y = minY; y <= maxY; y++) {
+    let rowMin = maxX;
+    let rowMax = minX;
+    for (let x = minX; x <= maxX; x++) {
+      const idx = y * w + x;
+      if (lum[idx] < inkCut || (chroma[idx] >= 28 && lum[idx] < avgLum + 12)) {
+        if (x < rowMin) rowMin = x;
+        if (x > rowMax) rowMax = x;
+      }
+    }
+    if (rowMax < rowMin) continue;
+    for (let x = rowMin - 1; x >= Math.max(0, rowMin - expandX); x--) {
+      if (lum[y * w + x] < inkCut) rowMin = x;
+      else break;
+    }
+    for (let x = rowMax + 1; x <= Math.min(w - 1, rowMax + expandX); x++) {
+      if (lum[y * w + x] < inkCut) rowMax = x;
+      else break;
+    }
+    minX = Math.min(minX, rowMin);
+    maxX = Math.max(maxX, rowMax);
+  }
+
+  const padX = Math.max(1, Math.round(w * 0.006));
+  const padY = Math.max(1, Math.round(h * 0.005));
+  const rx0 = Math.max(0, minX - padX);
+  const ry0 = Math.max(0, minY - padY);
+  const rx1 = Math.min(w - 1, maxX + padX);
+  const ry1 = Math.min(h - 1, maxY + padY);
+
+  return {
+    x: rx0 / w,
+    y: ry0 / h,
+    width: Math.max(0.02, (rx1 - rx0 + 1) / w),
+    height: Math.max(0.015, (ry1 - ry0 + 1) / h),
+  };
+}
+
 function rectsNearOrOverlap(a: CropRect, b: CropRect, gap: number): boolean {
   const ax2 = a.x + a.width;
   const ay2 = a.y + a.height;
@@ -1147,22 +1306,10 @@ function unionRects(a: CropRect, b: CropRect): CropRect {
   return { x, y, width: x2 - x, height: y2 - y };
 }
 
-/**
- * Cluster paint strokes into one or more rectangles for a single question.
- * Nearby / overlapping strokes (e.g. multi-line text) merge; distant islands
- * (e.g. stem vs map at bottom-right) stay as separate rects.
- */
-export function clusterPaintStrokesToRects(
-  strokes: Point[][],
-  brushNorm: number,
-  mergeGap = 0.05
-): CropRect[] {
-  const seed = strokes
-    .map((s) => strokeToCropRect(s, brushNorm))
-    .filter((r): r is CropRect => Boolean(r));
-  if (!seed.length) return [];
-
-  let current = seed.map((r) => ({ ...r }));
+/** Merge nearby / overlapping crop rects (text lines); distant islands stay separate. */
+export function mergeNearbyCropRects(rects: CropRect[], mergeGap = 0.035): CropRect[] {
+  if (!rects.length) return [];
+  let current = rects.map((r) => ({ ...r }));
   let changed = true;
   while (changed) {
     changed = false;
@@ -1185,6 +1332,37 @@ export function clusterPaintStrokesToRects(
     current = next;
   }
   return current;
+}
+
+/**
+ * Cluster paint strokes into one or more rectangles for a single question.
+ * Nearby / overlapping strokes (e.g. multi-line text) merge; distant islands
+ * (e.g. stem vs map at bottom-right) stay as separate rects.
+ */
+export function clusterPaintStrokesToRects(
+  strokes: Point[][],
+  brushNorm: number,
+  mergeGap = 0.05
+): CropRect[] {
+  const seed = strokes
+    .map((s) => strokeToCropRect(s, brushNorm))
+    .filter((r): r is CropRect => Boolean(r));
+  return mergeNearbyCropRects(seed, mergeGap);
+}
+
+/**
+ * Build tight content-aware rects from paint strokes (text one island, diagram another).
+ */
+export function clusterTightStrokeRects(
+  img: HTMLImageElement,
+  strokes: Point[][],
+  corridorNorm = 0.02,
+  mergeGap = 0.035
+): CropRect[] {
+  const seed = strokes
+    .map((s) => tightCropRectAlongStroke(img, s, corridorNorm))
+    .filter((r): r is CropRect => Boolean(r));
+  return mergeNearbyCropRects(seed, mergeGap);
 }
 
 export function unionCropRects(rects: CropRect[]): CropRect | null {
