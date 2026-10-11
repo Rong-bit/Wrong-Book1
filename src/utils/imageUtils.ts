@@ -1005,6 +1005,110 @@ export async function rotateImage(
 
 export type ShadowRemovalMode = "pure_bw" | "clean_gray" | "clean_color";
 
+export interface HandwritingColorFilterOptions {
+  /** Remove saturated colored ink (red/blue/green pens, markers). Default true. */
+  removeColored?: boolean;
+  /** Remove light gray pencil-like strokes (not dark printed black). Default true. */
+  removePencil?: boolean;
+  quality?: number;
+}
+
+/**
+ * Local (non-AI) filter: bleach colored pen marks and light pencil while keeping
+ * dark near-black printed text. Black ballpoint handwriting may remain — use the
+ * manual white brush for those.
+ */
+export async function filterColoredAndPencilInk(
+  imageSrc: string,
+  options: HandwritingColorFilterOptions = {}
+): Promise<string> {
+  const {
+    removeColored = true,
+    removePencil = true,
+    quality = 0.92,
+  } = options;
+
+  const normSrc = normalizeImageSrc(imageSrc);
+  if (!normSrc) return "";
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    if (normSrc.startsWith("http://") || normSrc.startsWith("https://")) {
+      img.crossOrigin = "anonymous";
+    }
+    img.onload = () => {
+      try {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        if (w < 2 || h < 2) {
+          resolve(normSrc);
+          return;
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) {
+          resolve(normSrc);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        const imgData = ctx.getImageData(0, 0, w, h);
+        const data = imgData.data;
+
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const maxc = Math.max(r, g, b);
+          const minc = Math.min(r, g, b);
+          const chroma = maxc - minc;
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+
+          // Dark printed ink: keep
+          const isPrintBlack = lum < 100 && chroma < 45;
+          if (isPrintBlack) continue;
+
+          // Paper / near-white: leave alone
+          if (lum > 235 && chroma < 20) continue;
+
+          // Saturated color pens (red/blue/green/purple)
+          const chromaRatio = chroma / (maxc + 1);
+          const isColored =
+            removeColored &&
+            chroma >= 26 &&
+            chromaRatio >= 0.11 &&
+            // Avoid nuking slightly warm/cool paper casts that are still very light
+            lum < 230;
+
+          // Soft pencil: gray, mid-light, low chroma (darker print already kept above)
+          const isPencil =
+            removePencil &&
+            !isColored &&
+            chroma < 28 &&
+            lum >= 105 &&
+            lum <= 205;
+
+          if (isColored || isPencil) {
+            data[i] = 255;
+            data[i + 1] = 255;
+            data[i + 2] = 255;
+          }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      } catch (err) {
+        console.error("Color/pencil ink filter failed:", err);
+        resolve(normSrc);
+      }
+    };
+    img.onerror = () => resolve(normSrc);
+    img.src = normSrc;
+  });
+}
+
 export interface ShadowRemovalOptions {
   mode?: ShadowRemovalMode;
   contrast?: number; // 1.0 - 1.8 default 1.25
