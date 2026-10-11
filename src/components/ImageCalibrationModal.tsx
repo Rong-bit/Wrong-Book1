@@ -46,10 +46,9 @@ import {
   FALLBACK_PERSPECTIVE_CORNERS,
   FULL_FRAME_CORNERS,
   cropBoxFromCorners,
-  clusterPaintStrokesToRects,
   unionCropRects,
   applyMultiRegionCrop,
-  detectTextBlockAtPoint,
+  clusterTightStrokeRects,
   CropRect,
 } from "../utils/imageUtils";
 import { removeHandwritingWithAI } from "../services/aiService";
@@ -67,12 +66,12 @@ interface ImageCalibrationModalProps {
 }
 
 type CalibrationMode = "perspective" | "crop";
-/** paint = 點文字框選／拖曳拉框；frame = 矩形微調 */
+/** paint = 畫過文字／圖緊貼框選；frame = 矩形微調 */
 type CropTool = "paint" | "frame";
 type AspectRatioMode = "free" | "4:3" | "16:9" | "1:1" | "paper";
 
-/** Drag farther than this (normalized) → rubber-band box; else tap-to-box text. */
-const TAP_DRAG_THRESHOLD = 0.018;
+/** Thin stroke preview while painting (normalized width factor). */
+const PAINT_PREVIEW_WIDTH = 0.018;
 
 
 export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
@@ -100,15 +99,17 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const [isImageReady, setIsImageReady] = useState<boolean>(false);
   const [pendingCrops, setPendingCrops] = useState<string[]>([]);
   const [cropTool, setCropTool] = useState<CropTool>("paint");
+  const [selectPaintStrokes, setSelectPaintStrokes] = useState<Point[][]>([]);
   const [selectRegions, setSelectRegions] = useState<CropRect[]>([]);
-  /** Rubber-band box while dragging (like selecting text). */
-  const [dragSelectRect, setDragSelectRect] = useState<CropRect | null>(null);
+  const [activeSelectStroke, setActiveSelectStroke] = useState<Point[] | null>(null);
   const [isSelectPainting, setIsSelectPainting] = useState(false);
-  const selectDragStartRef = useRef<Point | null>(null);
+  const selectStrokeRef = useRef<Point[] | null>(null);
+  const selectPaintStrokesRef = useRef<Point[][]>([]);
   const selectRegionsRef = useRef<CropRect[]>([]);
   const cropDirtyAfterAddRef = useRef(false);
   const currentImageRef = useRef(currentImage);
   currentImageRef.current = currentImage;
+  selectPaintStrokesRef.current = selectPaintStrokes;
   selectRegionsRef.current = selectRegions;
 
   // Track container dimensions to dynamically scale image to fit viewport
@@ -219,10 +220,12 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setCropBox(cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS));
       setPendingCrops([]);
       setCropTool("paint");
+      setSelectPaintStrokes([]);
+      selectPaintStrokesRef.current = [];
       setSelectRegions([]);
       selectRegionsRef.current = [];
-      setDragSelectRect(null);
-      selectDragStartRef.current = null;
+      setActiveSelectStroke(null);
+      selectStrokeRef.current = null;
       setIsSelectPainting(false);
       cropDirtyAfterAddRef.current = false;
 
@@ -302,27 +305,27 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   };
 
   const clearSelectPaint = () => {
+    setSelectPaintStrokes([]);
+    selectPaintStrokesRef.current = [];
     setSelectRegions([]);
     selectRegionsRef.current = [];
-    setDragSelectRect(null);
-    selectDragStartRef.current = null;
+    setActiveSelectStroke(null);
+    selectStrokeRef.current = null;
     setIsSelectPainting(false);
   };
 
-  const syncSelectRegions = (regions: CropRect[]) => {
-    // Merge overlapping / nearby boxes so multi-line taps become one range
-    const merged = clusterPaintStrokesToRects(
-      regions.map((r) => [
-        { x: r.x, y: r.y },
-        { x: r.x + r.width, y: r.y + r.height },
-      ]),
-      0.01,
-      0.03
-    );
-    const finalRegions = merged.length ? merged : regions;
-    selectRegionsRef.current = finalRegions;
-    setSelectRegions(finalRegions);
-    const overall = unionCropRects(finalRegions);
+  const syncPaintRegionsFromStrokes = (strokes: Point[][]) => {
+    const img = imgRef.current;
+    if (!img || !(img.naturalWidth || img.width) || !strokes.length) {
+      selectRegionsRef.current = [];
+      setSelectRegions([]);
+      return;
+    }
+    // Nearby strokes (multi-line text) merge; distant (text vs diagram) stay 2+ rects
+    const regions = clusterTightStrokeRects(img, strokes, 0.02, 0.035);
+    selectRegionsRef.current = regions;
+    setSelectRegions(regions);
+    const overall = unionCropRects(regions);
     if (overall) {
       setCropBox({
         x: overall.x,
@@ -332,10 +335,6 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       });
       cropDirtyAfterAddRef.current = true;
     }
-  };
-
-  const addSelectRegion = (rect: CropRect) => {
-    syncSelectRegions([...selectRegionsRef.current, rect]);
   };
 
   const enterCropMode = () => {
@@ -449,7 +448,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const handleAddPendingCrop = async () => {
     if (isProcessing || isExistingQuestion || mode !== "crop") return;
     if (cropTool === "paint" && selectRegionsRef.current.length === 0) {
-      setProcessingText("請先點選文字（或拖曳拉框）選出錯題範圍");
+      setProcessingText("請先用手指畫過錯題文字／圖的範圍");
       setIsProcessing(true);
       setTimeout(() => setIsProcessing(false), 1400);
       return;
@@ -458,7 +457,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     const regionCount = selectRegionsRef.current.length;
     setProcessingText(
       regionCount > 1
-        ? `正在合成同一題的 ${regionCount} 個範圍...`
+        ? `正在拼接文字／圖共 ${regionCount} 個區塊...`
         : "正在加入錯題範圍..."
     );
     try {
@@ -531,7 +530,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     }
   };
 
-  /** Tap text → auto box; drag → rubber-band box (like selecting text). */
+  /** Finger-draw over text / diagram; box tightly follows painted content. */
   const handleSelectPaintDown = (e: React.MouseEvent | React.TouchEvent) => {
     if (cropTool !== "paint" || mode !== "crop" || isProcessing) return;
     e.preventDefault();
@@ -539,20 +538,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
     const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
     const pos = getNormalizedPos(clientX, clientY);
-    selectDragStartRef.current = pos;
-    setDragSelectRect(null);
+    selectStrokeRef.current = [pos];
+    setActiveSelectStroke([pos]);
     setIsSelectPainting(true);
-  };
-
-  const rectFromPoints = (a: Point, b: Point): CropRect => {
-    const x = Math.min(a.x, b.x);
-    const y = Math.min(a.y, b.y);
-    return {
-      x,
-      y,
-      width: Math.max(0.02, Math.abs(b.x - a.x)),
-      height: Math.max(0.02, Math.abs(b.y - a.y)),
-    };
   };
 
   // Remove shadows and binarize: pure white background and crisp black text
@@ -739,52 +727,31 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     setCropDragStart({ x: pos.x, y: pos.y, box: { ...cropBox } });
   };
 
-  // Tap-to-box / drag rubber-band select
+  // Paint stroke tracking → tight content boxes (text / diagram islands)
   useEffect(() => {
     if (!isSelectPainting) return;
 
     const handlePointerMove = (e: MouseEvent | TouchEvent) => {
-      const start = selectDragStartRef.current;
-      if (!start) return;
+      if (!selectStrokeRef.current) return;
       if ("touches" in e) e.preventDefault();
       const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
       const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
       const pos = getNormalizedPos(clientX, clientY);
-      const dist = Math.hypot(pos.x - start.x, pos.y - start.y);
-      if (dist >= TAP_DRAG_THRESHOLD) {
-        setDragSelectRect(rectFromPoints(start, pos));
-      }
+      const next = [...selectStrokeRef.current, pos];
+      selectStrokeRef.current = next;
+      setActiveSelectStroke(next);
     };
 
-    const handlePointerUp = (e: MouseEvent | TouchEvent) => {
-      const start = selectDragStartRef.current;
-      selectDragStartRef.current = null;
+    const handlePointerUp = () => {
+      const points = selectStrokeRef.current || [];
+      selectStrokeRef.current = null;
+      setActiveSelectStroke(null);
       setIsSelectPainting(false);
-      setDragSelectRect(null);
-      if (!start) return;
-
-      let end = start;
-      if ("changedTouches" in e && e.changedTouches.length) {
-        end = getNormalizedPos(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
-      } else if ("clientX" in e) {
-        end = getNormalizedPos(e.clientX, e.clientY);
-      }
-      const dist = Math.hypot(end.x - start.x, end.y - start.y);
-
-      if (dist >= TAP_DRAG_THRESHOLD) {
-        addSelectRegion(rectFromPoints(start, end));
-        return;
-      }
-
-      // Tap: auto-frame text / content under the point
-      const img = imgRef.current;
-      if (!img || !(img.naturalWidth || img.width)) return;
-      try {
-        const block = detectTextBlockAtPoint(img, start.x, start.y);
-        if (block) addSelectRegion(block);
-      } catch (err) {
-        console.error("detectTextBlockAtPoint failed:", err);
-      }
+      if (points.length < 2) return;
+      const nextStrokes = [...selectPaintStrokesRef.current, points];
+      selectPaintStrokesRef.current = nextStrokes;
+      setSelectPaintStrokes(nextStrokes);
+      syncPaintRegionsFromStrokes(nextStrokes);
     };
 
     window.addEventListener("mousemove", handlePointerMove);
@@ -1169,7 +1136,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 hidden md:block truncate">
-                透視一次後點選文字框出錯題（可多塊：題幹＋圖）
+                透視一次後畫過文字／圖框出錯題（文字一框、圖一框）
               </p>
             </div>
           </div>
@@ -1198,7 +1165,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               }`}
             >
               <Paintbrush className="w-3.5 h-3.5 text-emerald-600" />
-              <span>步驟 2：點選文字</span>
+              <span>步驟 2：畫選範圍</span>
             </button>
           </div>
 
@@ -1278,10 +1245,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                         ? "bg-emerald-600 text-white shadow-2xs"
                         : "text-slate-600 hover:bg-white"
                     }`}
-                    title="點一下文字自動框起來；拖曳則像選取文字一樣拉框。同一題可點多塊（題幹＋圖）"
+                    title="手指畫過文字或圖，框線緊貼所畫內容；文字一框、圖一框（可重疊）"
                   >
                     <Paintbrush className="w-3 h-3" />
-                    點選
+                    畫選
                   </button>
                   <button
                     type="button"
@@ -1303,7 +1270,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                       type="button"
                       onClick={clearSelectPaint}
                       className="px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 whitespace-nowrap"
-                      title="清除框選，重新點選"
+                      title="清除畫選，重新描繪"
                     >
                       清除
                     </button>
@@ -1558,10 +1525,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                   ? renderCropOverlay()
                   : null}
 
-                {/* Tap text to box / drag rubber-band (multi-rect OK) */}
+                {/* Paint-over text/diagram → tight multi-rect boxes */}
                 {mode === "crop" && cropTool === "paint" && (
                   <div
-                    className="absolute inset-0 z-30 cursor-text touch-none"
+                    className="absolute inset-0 z-30 cursor-crosshair touch-none"
                     onMouseDown={handleSelectPaintDown}
                     onTouchStart={handleSelectPaintDown}
                     style={{ touchAction: "none" }}
@@ -1569,7 +1536,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                     {selectRegions.map((r, idx) => (
                       <div
                         key={`reg-${idx}`}
-                        className="absolute border-2 border-emerald-500 bg-emerald-400/10 pointer-events-none rounded-sm shadow-[0_0_0_1px_rgba(16,185,129,0.35)]"
+                        className="absolute border-2 border-emerald-500 bg-emerald-400/15 pointer-events-none rounded-sm"
                         style={{
                           left: `${r.x * 100}%`,
                           top: `${r.y * 100}%`,
@@ -1578,27 +1545,39 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                         }}
                       >
                         <div className="absolute -top-5 left-0 px-1.5 py-0.5 rounded bg-emerald-700/90 text-white text-[9px] font-bold whitespace-nowrap">
-                          範圍 {idx + 1}
+                          {idx === 0 ? "文字區" : idx === 1 ? "圖區" : `範圍 ${idx + 1}`}
                         </div>
                       </div>
                     ))}
-                    {dragSelectRect && (
-                      <div
-                        className="absolute border-2 border-dashed border-emerald-400 bg-emerald-300/15 pointer-events-none rounded-sm"
-                        style={{
-                          left: `${dragSelectRect.x * 100}%`,
-                          top: `${dragSelectRect.y * 100}%`,
-                          width: `${dragSelectRect.width * 100}%`,
-                          height: `${dragSelectRect.height * 100}%`,
-                        }}
-                      />
-                    )}
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none">
+                      {[...selectPaintStrokes, ...(activeSelectStroke ? [activeSelectStroke] : [])].map(
+                        (stroke, idx) => (
+                          <polyline
+                            key={`sel-${idx}`}
+                            fill="none"
+                            stroke="rgba(16, 185, 129, 0.45)"
+                            strokeWidth={
+                              Math.min(displayDimensions.width, displayDimensions.height) *
+                              PAINT_PREVIEW_WIDTH
+                            }
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            points={stroke
+                              .map(
+                                (p) =>
+                                  `${p.x * displayDimensions.width},${p.y * displayDimensions.height}`
+                              )
+                              .join(" ")}
+                          />
+                        )
+                      )}
+                    </svg>
                     <div className="absolute top-2 left-1/2 -translate-x-1/2 px-2 py-1 rounded-full bg-emerald-600/90 text-white text-[10px] font-bold pointer-events-none max-w-[92%] text-center">
                       {selectRegions.length > 1
-                        ? `同一題 ${selectRegions.length} 個框（題幹／圖可分開點）→ 加入錯題`
-                        : selectRegions.length === 1
-                        ? "可再點另一塊（如圖），或按「加入錯題」"
-                        : "點文字自動框起來；拖曳像選取文字一樣拉框"}
+                        ? `同一題 ${selectRegions.length} 區塊（文字／圖分開拼接）→ 加入錯題`
+                        : selectPaintStrokes.length > 0
+                        ? "再畫圖區／另一塊文字，或按「加入錯題」"
+                        : "手指畫過文字＝文字框；再畫圖＝圖框（緊貼所畫範圍）"}
                     </div>
                   </div>
                 )}
@@ -1619,7 +1598,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         {/* Pending multi-crop queue */}
         {!isExistingQuestion && mode === "crop" && (
           <div className="px-2 sm:px-5 py-1 text-[10px] sm:text-[11px] text-slate-500 bg-slate-50 border-t border-slate-100 shrink-0">
-            「點選」：點文字自動框起來（像選取文字）；題幹／圖可分開點成多框（仍算同一題）。建議先「AI 去手寫」挖空選答；再按「加入此錯題」。
+            「畫選」：手指畫過文字／圖，框線緊貼所畫內容；文字一框、圖一框，加入後分成兩個區塊拼接。建議先「AI 去手寫」；再按「加入此錯題」。
           </div>
         )}
         {!isExistingQuestion && pendingCrops.length > 0 && (
@@ -1671,10 +1650,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                   type="button"
                   onClick={enterCropMode}
                   className="px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-semibold text-sky-800 bg-sky-50 hover:bg-sky-100 active:scale-95 transition border border-sky-200/80 flex items-center gap-1"
-                  title="切換至步驟 2：點選文字框出錯題"
+                  title="切換至步驟 2：畫選範圍框出錯題"
                 >
                   <Paintbrush className="w-3.5 h-3.5 text-sky-600" />
-                  點選文字
+                  畫選範圍
                   <ChevronRight className="w-3.5 h-3.5 hidden sm:block" />
                 </button>
               </>

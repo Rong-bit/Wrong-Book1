@@ -1131,12 +1131,199 @@ export function strokeToCropRect(
   };
 }
 
+/**
+ * Fit a tight crop rect to printed content along a finger stroke.
+ * Only ink / diagram pixels near the stroke are included — avoids oversized highlighter boxes.
+ */
+export function tightCropRectAlongStroke(
+  img: HTMLImageElement,
+  stroke: Point[],
+  corridorNorm = 0.02,
+  maxSide = 720
+): CropRect | null {
+  if (!stroke.length) return null;
+  const fallback = strokeToCropRect(stroke, corridorNorm * 0.45, 0.008);
+  const natW = img.naturalWidth || img.width;
+  const natH = img.naturalHeight || img.height;
+  if (natW < 8 || natH < 8) return fallback;
+
+  const scale = Math.min(1, maxSide / Math.max(natW, natH));
+  const w = Math.max(32, Math.round(natW * scale));
+  const h = Math.max(32, Math.round(natH * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return fallback;
+  ctx.drawImage(img, 0, 0, w, h);
+  const { data } = ctx.getImageData(0, 0, w, h);
+
+  const pts = stroke.map((p) => ({
+    x: Math.max(0, Math.min(w - 1, p.x * (w - 1))),
+    y: Math.max(0, Math.min(h - 1, p.y * (h - 1))),
+  }));
+
+  let lumSum = 0;
+  const lum = new Float32Array(w * h);
+  const chroma = new Uint8Array(w * h);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const v = 0.299 * r + 0.587 * g + 0.114 * b;
+    lum[p] = v;
+    lumSum += v;
+    const maxC = r > g ? (r > b ? r : b) : g > b ? g : b;
+    const minC = r < g ? (r < b ? r : b) : g < b ? g : b;
+    chroma[p] = maxC - minC;
+  }
+  const avgLum = lumSum / (w * h);
+  const inkCut = Math.min(172, Math.max(95, avgLum * 0.74));
+
+  const corridorR = Math.max(3, Math.round(Math.min(w, h) * corridorNorm));
+  const corridorR2 = corridorR * corridorR;
+
+  const distToStroke2 = (x: number, y: number): number => {
+    let best = Infinity;
+    for (let i = 0; i < pts.length; i++) {
+      const dx = x - pts[i].x;
+      const dy = y - pts[i].y;
+      const d = dx * dx + dy * dy;
+      if (d < best) best = d;
+      if (i + 1 < pts.length) {
+        const ax = pts[i].x;
+        const ay = pts[i].y;
+        const bx = pts[i + 1].x;
+        const by = pts[i + 1].y;
+        const vx = bx - ax;
+        const vy = by - ay;
+        const len2 = vx * vx + vy * vy || 1;
+        let t = ((x - ax) * vx + (y - ay) * vy) / len2;
+        t = Math.max(0, Math.min(1, t));
+        const px = ax + t * vx - x;
+        const py = ay + t * vy - y;
+        const seg = px * px + py * py;
+        if (seg < best) best = seg;
+      }
+    }
+    return best;
+  };
+
+  // Bounding box of stroke corridor first (limits scan)
+  let sx0 = w;
+  let sy0 = h;
+  let sx1 = 0;
+  let sy1 = 0;
+  for (const p of pts) {
+    sx0 = Math.min(sx0, Math.floor(p.x - corridorR));
+    sy0 = Math.min(sy0, Math.floor(p.y - corridorR));
+    sx1 = Math.max(sx1, Math.ceil(p.x + corridorR));
+    sy1 = Math.max(sy1, Math.ceil(p.y + corridorR));
+  }
+  sx0 = Math.max(0, sx0);
+  sy0 = Math.max(0, sy0);
+  sx1 = Math.min(w - 1, sx1);
+  sy1 = Math.min(h - 1, sy1);
+
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+  let hit = 0;
+
+  for (let y = sy0; y <= sy1; y++) {
+    for (let x = sx0; x <= sx1; x++) {
+      if (distToStroke2(x, y) > corridorR2) continue;
+      const idx = y * w + x;
+      const isInk = lum[idx] < inkCut;
+      const isDiagram = chroma[idx] >= 28 && lum[idx] < avgLum + 12;
+      if (!isInk && !isDiagram) continue;
+      hit++;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (hit < 8 || maxX < minX) {
+    return fallback;
+  }
+
+  // Slightly expand horizontally on content rows so full characters are included
+  const expandX = Math.max(2, Math.round(w * 0.006));
+  for (let y = minY; y <= maxY; y++) {
+    let rowMin = maxX;
+    let rowMax = minX;
+    for (let x = minX; x <= maxX; x++) {
+      const idx = y * w + x;
+      if (lum[idx] < inkCut || (chroma[idx] >= 28 && lum[idx] < avgLum + 12)) {
+        if (x < rowMin) rowMin = x;
+        if (x > rowMax) rowMax = x;
+      }
+    }
+    if (rowMax < rowMin) continue;
+    for (let x = rowMin - 1; x >= Math.max(0, rowMin - expandX); x--) {
+      if (lum[y * w + x] < inkCut) rowMin = x;
+      else break;
+    }
+    for (let x = rowMax + 1; x <= Math.min(w - 1, rowMax + expandX); x++) {
+      if (lum[y * w + x] < inkCut) rowMax = x;
+      else break;
+    }
+    minX = Math.min(minX, rowMin);
+    maxX = Math.max(maxX, rowMax);
+  }
+
+  const padX = Math.max(1, Math.round(w * 0.006));
+  const padY = Math.max(1, Math.round(h * 0.005));
+  const rx0 = Math.max(0, minX - padX);
+  const ry0 = Math.max(0, minY - padY);
+  const rx1 = Math.min(w - 1, maxX + padX);
+  const ry1 = Math.min(h - 1, maxY + padY);
+
+  return {
+    x: rx0 / w,
+    y: ry0 / h,
+    width: Math.max(0.02, (rx1 - rx0 + 1) / w),
+    height: Math.max(0.015, (ry1 - ry0 + 1) / h),
+  };
+}
+
 function rectsNearOrOverlap(a: CropRect, b: CropRect, gap: number): boolean {
   const ax2 = a.x + a.width;
   const ay2 = a.y + a.height;
   const bx2 = b.x + b.width;
   const by2 = b.y + b.height;
   return !(ax2 + gap < b.x || bx2 + gap < a.x || ay2 + gap < b.y || by2 + gap < a.y);
+}
+
+/**
+ * Merge multi-line text islands, but keep side-by-side text|diagram separate
+ * even when the horizontal gap is tiny (common on exam pages like geo Q11).
+ */
+function shouldMergePaintIslands(a: CropRect, b: CropRect, mergeGap: number): boolean {
+  const ax2 = a.x + a.width;
+  const ay2 = a.y + a.height;
+  const bx2 = b.x + b.width;
+  const by2 = b.y + b.height;
+
+  const overlapX = Math.max(0, Math.min(ax2, bx2) - Math.max(a.x, b.x));
+  const overlapY = Math.max(0, Math.min(ay2, by2) - Math.max(a.y, b.y));
+  const gapY = Math.max(0, Math.max(a.y, b.y) - Math.min(ay2, by2));
+  const minW = Math.min(a.width, b.width);
+  const minArea = Math.min(a.width * a.height, b.width * b.height);
+
+  // Substantial area overlap → same painted island
+  if (overlapX > 0 && overlapY > 0) {
+    return overlapX * overlapY >= minArea * 0.22;
+  }
+
+  // Vertically stacked with column alignment (multi-line stem text)
+  if (gapY <= mergeGap && overlapX >= minW * 0.4) return true;
+
+  // Side-by-side (text | map) stays as two rects
+  return false;
 }
 
 function unionRects(a: CropRect, b: CropRect): CropRect {
@@ -1147,22 +1334,10 @@ function unionRects(a: CropRect, b: CropRect): CropRect {
   return { x, y, width: x2 - x, height: y2 - y };
 }
 
-/**
- * Cluster paint strokes into one or more rectangles for a single question.
- * Nearby / overlapping strokes (e.g. multi-line text) merge; distant islands
- * (e.g. stem vs map at bottom-right) stay as separate rects.
- */
-export function clusterPaintStrokesToRects(
-  strokes: Point[][],
-  brushNorm: number,
-  mergeGap = 0.05
-): CropRect[] {
-  const seed = strokes
-    .map((s) => strokeToCropRect(s, brushNorm))
-    .filter((r): r is CropRect => Boolean(r));
-  if (!seed.length) return [];
-
-  let current = seed.map((r) => ({ ...r }));
+/** Merge nearby / overlapping crop rects (text lines); distant islands stay separate. */
+export function mergeNearbyCropRects(rects: CropRect[], mergeGap = 0.035): CropRect[] {
+  if (!rects.length) return [];
+  let current = rects.map((r) => ({ ...r }));
   let changed = true;
   while (changed) {
     changed = false;
@@ -1187,15 +1362,77 @@ export function clusterPaintStrokesToRects(
   return current;
 }
 
+/** Merge stacked text lines only — do not glue left text to right diagram. */
+export function mergePaintIslandRects(rects: CropRect[], mergeGap = 0.035): CropRect[] {
+  if (!rects.length) return [];
+  let current = rects.map((r) => ({ ...r }));
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const next: CropRect[] = [];
+    const used = new Set<number>();
+    for (let i = 0; i < current.length; i++) {
+      if (used.has(i)) continue;
+      let acc = { ...current[i] };
+      for (let j = i + 1; j < current.length; j++) {
+        if (used.has(j)) continue;
+        if (shouldMergePaintIslands(acc, current[j], mergeGap)) {
+          acc = unionRects(acc, current[j]);
+          used.add(j);
+          changed = true;
+        }
+      }
+      used.add(i);
+      next.push(acc);
+    }
+    current = next;
+  }
+  return current;
+}
+
+/**
+ * Cluster paint strokes into one or more rectangles for a single question.
+ * Nearby / overlapping strokes (e.g. multi-line text) merge; distant islands
+ * (e.g. stem vs map at bottom-right) stay as separate rects.
+ */
+export function clusterPaintStrokesToRects(
+  strokes: Point[][],
+  brushNorm: number,
+  mergeGap = 0.05
+): CropRect[] {
+  const seed = strokes
+    .map((s) => strokeToCropRect(s, brushNorm))
+    .filter((r): r is CropRect => Boolean(r));
+  return mergeNearbyCropRects(seed, mergeGap);
+}
+
+/**
+ * Build tight content-aware rects from paint strokes (text one island, diagram another).
+ * Side-by-side text|map (e.g. geo Q11) stay as two rects even when nearly touching.
+ */
+export function clusterTightStrokeRects(
+  img: HTMLImageElement,
+  strokes: Point[][],
+  corridorNorm = 0.02,
+  mergeGap = 0.035
+): CropRect[] {
+  const seed = strokes
+    .map((s) => tightCropRectAlongStroke(img, s, corridorNorm))
+    .filter((r): r is CropRect => Boolean(r));
+  return mergePaintIslandRects(seed, mergeGap);
+}
+
 export function unionCropRects(rects: CropRect[]): CropRect | null {
   if (!rects.length) return null;
   return rects.reduce((acc, r) => unionRects(acc, r));
 }
 
+type PixelPatch = { sx: number; sy: number; sw: number; sh: number; cx: number; cy: number };
+
 /**
- * Crop one question that may span multiple rectangular islands.
- * Keeps relative layout: overall bbox with non-selected gaps filled paper-white
- * so intervening unrelated content is not included.
+ * Crop one question that may span multiple rectangular islands (stem + map).
+ * Packs each island as its own tight panel (side-by-side or stacked) instead of
+ * one giant bbox that looks like a single long rectangle.
  */
 export async function applyMultiRegionCrop(
   imageSrc: string,
@@ -1222,38 +1459,81 @@ export async function applyMultiRegionCrop(
           return;
         }
 
-        const overall = unionCropRects(regions);
-        if (!overall) {
-          resolve(normSrc);
-          return;
-        }
+        const patches: PixelPatch[] = regions.map((r) => {
+          const sx = Math.max(0, Math.round(r.x * w));
+          const sy = Math.max(0, Math.round(r.y * h));
+          const sw = Math.max(1, Math.min(w - sx, Math.round(r.width * w)));
+          const sh = Math.max(1, Math.min(h - sy, Math.round(r.height * h)));
+          return {
+            sx,
+            sy,
+            sw,
+            sh,
+            cx: r.x + r.width / 2,
+            cy: r.y + r.height / 2,
+          };
+        });
 
-        const ox = Math.round(overall.x * w);
-        const oy = Math.round(overall.y * h);
-        const ow = Math.max(1, Math.round(overall.width * w));
-        const oh = Math.max(1, Math.round(overall.height * h));
+        // Stack vertically as two (or more) blocks — not one long strip.
+        // Same row (stem | map): left panel first; else top→bottom.
+        patches.sort((a, b) => (Math.abs(a.cy - b.cy) > 0.06 ? a.cy - b.cy : a.cx - b.cx));
+
+        const labelH = Math.max(18, Math.round(Math.min(w, h) * 0.014));
+        const gutter = Math.max(16, Math.round(Math.min(w, h) * 0.02));
+        const pad = Math.max(12, Math.round(Math.min(w, h) * 0.012));
+        const paper = "#e8e6de";
+        const border = "#64748b";
+        const labels =
+          patches.length === 2 ? ["文字區", "圖區"] : patches.map((_, i) => `範圍 ${i + 1}`);
+
+        const maxW = Math.max(...patches.map((p) => p.sw));
+        const canvasW = pad * 2 + maxW;
+        const canvasH =
+          pad * 2 +
+          patches.reduce((s, p) => s + labelH + p.sh, 0) +
+          gutter * (patches.length - 1);
 
         const canvas = document.createElement("canvas");
-        canvas.width = ow;
-        canvas.height = oh;
+        canvas.width = Math.max(1, canvasW);
+        canvas.height = Math.max(1, canvasH);
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           resolve(normSrc);
           return;
         }
 
-        // Paper fill for gaps between islands
-        ctx.fillStyle = "#f7f4ec";
-        ctx.fillRect(0, 0, ow, oh);
+        ctx.fillStyle = paper;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        for (const r of regions) {
-          const sx = Math.round(r.x * w);
-          const sy = Math.round(r.y * h);
-          const sw = Math.max(1, Math.round(r.width * w));
-          const sh = Math.max(1, Math.round(r.height * h));
-          const dx = sx - ox;
-          const dy = sy - oy;
-          ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+        let cursorY = pad;
+        for (let i = 0; i < patches.length; i++) {
+          const p = patches[i];
+          const panelW = maxW;
+          const dx = pad;
+          const dy = cursorY + labelH;
+
+          // Label chip
+          ctx.fillStyle = i === 0 ? "#0f766e" : "#0369a1";
+          const chipW = Math.min(panelW, Math.max(56, labels[i].length * 14 + 16));
+          ctx.beginPath();
+          ctx.roundRect(dx, cursorY, chipW, labelH - 2, 4);
+          ctx.fill();
+          ctx.fillStyle = "#ffffff";
+          ctx.font = `bold ${Math.max(11, Math.round(labelH * 0.62))}px sans-serif`;
+          ctx.textBaseline = "middle";
+          ctx.fillText(labels[i], dx + 8, cursorY + (labelH - 2) / 2);
+
+          // Panel
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(dx, dy, panelW, p.sh);
+          ctx.strokeStyle = border;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(dx + 0.5, dy + 0.5, panelW - 1, p.sh - 1);
+
+          const imgX = dx + Math.round((panelW - p.sw) / 2);
+          ctx.drawImage(img, p.sx, p.sy, p.sw, p.sh, imgX, dy, p.sw, p.sh);
+
+          cursorY += labelH + p.sh + gutter;
         }
 
         resolve(canvas.toDataURL("image/jpeg", quality));
