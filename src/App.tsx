@@ -405,8 +405,8 @@ export default function App() {
 
     const subjectHint = calibrationModal.subjectHint;
     setCalibrationModal({ isOpen: false, imageSrc: "" });
-    // Serial analysis to avoid API bursts. Reverse so the first framed region
-    // ends on top (processNewImage prepends each new card).
+    // Serial analysis to avoid API bursts.
+    // pending 縮圖左→右 = 題號由小到大：先處理右邊再 prepend，使左邊停在列表最上 = 第 1 題。
     for (const crop of [...items].reverse()) {
       await processNewImage(crop.imageBase64, subjectHint, crop.figureImageBase64);
     }
@@ -731,17 +731,17 @@ export default function App() {
     );
   }, [questions, selectedSubjectFilter]);
 
+  /**
+   * Badge / PDF 題號：依錯題本目前排列（上→下 = 1→n）。
+   * 校正「已選」縮圖左→右會被放在列表最上方，故左=第1題（最小）、右=最大。
+   */
   const captureNumberById = useMemo(() => {
-    const ordered = [...questions].sort(compareCaptureTime);
-    return new Map(ordered.map((q, i) => [q.id, i + 1]));
+    return new Map(questions.map((q, i) => [q.id, i + 1]));
   }, [questions]);
 
-  /** PDF 可匯出題庫（略過分析中）；實際科目範圍由匯出視窗依篩選決定 */
+  /** PDF 可匯出題庫（略過分析中）；順序與錯題本一致，勿再依 createdAt 重排打亂左右 */
   const printQuestions = useMemo(
-    () =>
-      [...questions]
-        .filter((q) => q.status !== "analyzing")
-        .sort(compareCaptureTime),
+    () => questions.filter((q) => q.status !== "analyzing"),
     [questions]
   );
 
