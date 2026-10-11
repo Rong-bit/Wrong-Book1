@@ -123,11 +123,11 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
   // Chunk questions for Cornell mode
   const isCornellCompact = settings.questionsPerPage === "compact";
-  // 背科精簡：B5 約 4 題／A4 約 5 題（每題僅留約二行空白）；其餘為固定 1 或 2 題
+  // 背科精簡：無手寫留白、題與題緊接；B5 約 5 題／A4 約 6 題；其餘為固定 1 或 2 題
   const cornellPageSize = isCornellCompact
     ? settings.paperSize === "B5"
-      ? 4
-      : 5
+      ? 5
+      : 6
     : settings.questionsPerPage === 1
     ? 1
     : 2;
@@ -371,17 +371,17 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                           ? "bg-amber-600 text-white border-amber-600 font-bold"
                           : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                       }`}
-                      title="地理、公民、歷史等背科：每題下僅留約二行空白再接下題，避免空白浪費"
+                      title="地理、公民、歷史等背科：題與題緊接、不留手寫空白，避免紙張浪費"
                     >
                       <div className="text-[11px] font-bold">背科精簡</div>
-                      <div className="text-[9px] opacity-80 mt-0.5">每題空二行 · 密排</div>
+                      <div className="text-[9px] opacity-80 mt-0.5">無留白 · 密排</div>
                     </button>
                   </div>
                   {settings.questionsPerPage === "compact" && (
                     <p className="mt-1.5 text-[10px] text-amber-800/90 leading-snug">
                       適合地理、公民、歷史等死背科目：
-                      {settings.paperSize === "B5" ? "B5 約 4 題／頁" : "A4 約 5 題／頁"}
-                      ，每題下方僅約兩行手寫訂正空白再接下題。
+                      {settings.paperSize === "B5" ? "B5 約 5 題／頁" : "A4 約 6 題／頁"}
+                      ，題與題緊接、不留手寫訂正空白。
                     </p>
                   )}
                 </div>
@@ -898,60 +898,53 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                 )}
                               </div>
 
-                              {/* Bottom Handwritten area: spacious flex-1 OR compact ~2 grid lines (10mm) */}
-                              <div
-                                className={`p-1.5 flex flex-col relative ${
-                                  isCornellCompact
-                                    ? "justify-end shrink-0"
-                                    : "flex-1 p-2 justify-between"
-                                } ${
-                                  settings.showGrid !== false ? "math-grid-bg" : "bg-white"
-                                }`}
-                                style={
-                                  isCornellCompact
-                                    ? { height: "10mm", minHeight: "10mm" } // ≈ 兩行 5mm 微網格
-                                    : undefined
-                                }
-                              >
-                                {!isCornellCompact && (
+                              {/* Bottom: compact = no handwriting blank (optional thin review strip); else spacious grid */}
+                              {isCornellCompact ? (
+                                settings.showReviewTrack !== false && (
+                                  <div className="px-1.5 py-0.5 border-t border-slate-100 flex justify-end shrink-0 bg-white">
+                                    <div className="bg-white rounded border border-slate-300/80 flex items-center gap-1 px-1.5 py-0.5 text-[8px] text-slate-700">
+                                      <span className="font-bold text-slate-800">複習：</span>
+                                      <div className="flex items-center gap-1">
+                                        {REVIEW_INTERVALS.map((label) => (
+                                          <div
+                                            key={label}
+                                            className="w-3 h-3 rounded-[2px] border border-slate-400 bg-white"
+                                            title={label}
+                                          />
+                                        ))}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )
+                              ) : (
+                                <div
+                                  className={`flex-1 p-2 flex flex-col justify-between relative ${
+                                    settings.showGrid !== false ? "math-grid-bg" : "bg-white"
+                                  }`}
+                                >
                                   <div className="text-[10px] text-slate-400 font-sans tracking-wider pointer-events-none select-none">
                                     【演算推導 · 思維訂正筆記區】
                                   </div>
-                                )}
 
-                                {/* Spaced Repetition Review Bar */}
-                                {settings.showReviewTrack !== false && (
-                                  <div
-                                    className={`self-end bg-white/95 rounded-md border border-slate-300/80 shadow-2xs flex items-center gap-1.5 text-slate-700 ${
-                                      isCornellCompact
-                                        ? "px-1.5 py-0.5 text-[8px]"
-                                        : "px-2.5 py-1 text-[10px] gap-2"
-                                    }`}
-                                  >
-                                    <span className="font-bold text-slate-800">
-                                      {isCornellCompact ? "複習：" : "艾賓浩斯複習打卡 (V/X)："}
-                                    </span>
-                                    <div className="flex items-center gap-1">
-                                      {REVIEW_INTERVALS.map((label) => (
-                                        <div key={label} className="flex flex-col items-center">
-                                          <div
-                                            className={`rounded-[2px] border border-slate-400 bg-white ${
-                                              isCornellCompact
-                                                ? "w-3 h-3 border"
-                                                : "w-4 h-4 border-2"
-                                            }`}
-                                          />
-                                          {!isCornellCompact && (
+                                  {settings.showReviewTrack !== false && (
+                                    <div className="self-end bg-white/95 px-2.5 py-1 rounded-md border border-slate-300/80 shadow-2xs flex items-center gap-2 text-[10px] text-slate-700">
+                                      <span className="font-bold text-slate-800">
+                                        艾賓浩斯複習打卡 (V/X)：
+                                      </span>
+                                      <div className="flex items-center gap-1">
+                                        {REVIEW_INTERVALS.map((label) => (
+                                          <div key={label} className="flex flex-col items-center">
+                                            <div className="w-4 h-4 rounded-[2px] border-2 border-slate-400 bg-white" />
                                             <span className="text-[8px] text-slate-400 mt-0.5">
                                               {label}
                                             </span>
-                                          )}
-                                        </div>
-                                      ))}
+                                          </div>
+                                        ))}
+                                      </div>
                                     </div>
-                                  </div>
-                                )}
-                              </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))}

@@ -60,7 +60,7 @@ export interface PaperSettings {
   /**
    * 康乃爾每頁密度：
    * 1 / 2 = 固定每頁題數（大演算／黃金比例）；
-   * "compact" = 背科精簡：每題下僅留約二行空白再接下題，自動較密排版。
+   * "compact" = 背科精簡：題與題緊接、無手寫留白，自動較密排版。
    */
   questionsPerPage: 1 | 2 | "compact";
   showGrid: boolean; // 是否顯示 5mm 數學微網格手寫背景
