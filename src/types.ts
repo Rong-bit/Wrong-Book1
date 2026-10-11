@@ -56,7 +56,7 @@ export interface PaperSettings {
   paperSize: PaperSize;
   orientation: "portrait" | "landscape";
   mode: "cornell" | "notebook" | "exam"; // "cornell" (康乃爾雙欄手寫訂正本) vs "notebook" (含解析筆記) vs "exam" (挖空作答卷)
-  questionDisplayMode: QuestionDisplayMode; // "both" (文字與截圖) | "imageOnly" (僅截圖照片沒文字) | "textOnly" (僅文字無截圖)
+  questionDisplayMode: QuestionDisplayMode; // "both" | "imageOnly" | "textOnly"（文字為主；需附圖／地圖的題仍附截圖）
   /**
    * 康乃爾每頁密度：
    * 1 / 2 = 固定每頁題數（大演算／黃金比例）；

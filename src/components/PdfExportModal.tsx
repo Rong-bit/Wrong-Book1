@@ -18,6 +18,7 @@ import {
 import { PaperSettings, QuestionItem, PaperSize } from "../types";
 import { MathRenderer } from "./MathRenderer";
 import { normalizeImageSrc } from "../utils/imageUtils";
+import { shouldShowFigureInTextOnlyMode } from "../utils/questionExport";
 
 interface PdfExportModalProps {
   isOpen: boolean;
@@ -149,6 +150,14 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   const displayMode =
     settings.questionDisplayMode ||
     (settings.includeImages ? "both" : "textOnly");
+
+  /** imageOnly / both: normal rules; textOnly: still attach map/figure crops when needed */
+  const shouldRenderQuestionImage = (q: QuestionItem): boolean => {
+    if (!q.imageBase64 || !q.imageSettings?.includeInExport) return false;
+    if (displayMode === "imageOnly" || displayMode === "both") return true;
+    if (displayMode === "textOnly") return shouldShowFigureInTextOnlyMode(q);
+    return false;
+  };
 
   return (
     <div className="app-screen-overlay bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
@@ -605,9 +614,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   <div className="flex items-center gap-2">
                     <AlignLeft className="w-4 h-4 text-indigo-600 shrink-0" />
                     <div>
-                      <span className="block text-xs">僅排版文字 (無截圖)</span>
+                      <span className="block text-xs">僅排版文字 (附圖仍保留)</span>
                       <span className="block text-[10px] text-slate-500 font-normal">
-                        純文字印刷排版，節省頁面空間與墨水
+                        純文字為主；題幹需地圖／附圖時自動附上截圖
                       </span>
                     </div>
                   </div>
@@ -826,7 +835,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
                                 {/* Question Content based on displayMode */}
                                 {displayMode === "imageOnly" ? (
-                                  q.imageBase64 && q.imageSettings?.includeInExport ? (
+                                  shouldRenderQuestionImage(q) ? (
                                     <div
                                       className={`my-1.5 flex ${
                                         q.imageSettings.align === "left"
@@ -861,9 +870,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                   )
                                 ) : (
                                   <>
-                                    {displayMode === "both" &&
-                                      q.imageBase64 &&
-                                      q.imageSettings?.includeInExport && (
+                                    {shouldRenderQuestionImage(q) && (
                                         <div
                                           className={`my-1.5 flex ${
                                             q.imageSettings.align === "left"
@@ -875,7 +882,11 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                         >
                                           <img
                                             src={normalizeImageSrc(q.imageBase64)}
-                                            alt="題目原圖"
+                                            alt={
+                                              displayMode === "textOnly"
+                                                ? "題目附圖（地圖／圖示）"
+                                                : "題目原圖"
+                                            }
                                             className={`object-contain border border-slate-200 rounded ${
                                               isCornellCompact ? "max-h-16" : "max-h-28"
                                             }`}
@@ -1032,7 +1043,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
                         {/* Question Content based on displayMode */}
                         {displayMode === "imageOnly" ? (
-                          q.imageBase64 && q.imageSettings?.includeInExport ? (
+                          shouldRenderQuestionImage(q) ? (
                             <div
                               className={`my-2 flex ${
                                 q.imageSettings.align === "left"
@@ -1064,9 +1075,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                           )
                         ) : (
                           <>
-                            {displayMode === "both" &&
-                              q.imageBase64 &&
-                              q.imageSettings?.includeInExport && (
+                            {shouldRenderQuestionImage(q) && (
                                 <div
                                   className={`my-2 flex ${
                                     q.imageSettings.align === "left"
@@ -1078,7 +1087,11 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                 >
                                   <img
                                     src={normalizeImageSrc(q.imageBase64)}
-                                    alt="題目原圖"
+                                    alt={
+                                      displayMode === "textOnly"
+                                        ? "題目附圖（地圖／圖示）"
+                                        : "題目原圖"
+                                    }
                                     className="max-h-52 object-contain border border-slate-200 rounded"
                                     style={{
                                       transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
@@ -1256,7 +1269,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 ? "僅截圖照片 (無文字)"
                 : displayMode === "both"
                 ? "文字與照片"
-                : "純文字"}
+                : "文字為主（附圖保留）"}
             </span>
           </div>
 
