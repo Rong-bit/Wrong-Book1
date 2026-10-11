@@ -349,14 +349,15 @@ app.post("/api/remove-handwriting", async (req, res) => {
     const { response, modelUsed, attempts, fallbackUsed } =
       await generateImageContentWithRetry(ai, IMAGE_EDIT_MODELS[0], {
         contents: {
+          // Instruction first so the model prioritizes「挖空選答」over copying the photo.
           parts: [
+            { text: buildRemoveHandwritingPrompt() },
             {
               inlineData: {
                 mimeType: resolvedMime,
                 data: cleanBase64,
               },
             },
-            { text: buildRemoveHandwritingPrompt() },
           ],
         },
         config: {

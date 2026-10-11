@@ -43,7 +43,6 @@ import {
   FULL_FRAME_CORNERS,
   cropBoxFromCorners,
   paintWhiteBrushOnImage,
-  filterColoredAndPencilInk,
 } from "../utils/imageUtils";
 import { removeHandwritingWithAI } from "../services/aiService";
 
@@ -527,34 +526,14 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     }
   };
 
-  /** One-tap local filter: bleach red pen marks only (not AI). Keeps maps/print; pencil/black →「去手寫」. */
-  const handleFilterColoredInk = async () => {
-    if (isProcessing || isErasingBusy) return;
-    setIsProcessing(true);
-    setProcessingText("正在過濾紅筆筆跡...");
-    try {
-      const filtered = await filterColoredAndPencilInk(currentImage, {
-        removeColored: true,
-        // Blue/green map fills must stay; graphite / black pen →「去手寫」.
-        removePencil: false,
-        removeBluePen: false,
-      });
-      pushHistory(filtered);
-    } catch (err) {
-      console.error("Filter colored/pencil ink failed:", err);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  /** AI inpainting: remove all handwriting while keeping print & colored maps. */
+  /** AI inpainting: blank student answer marks / handwriting; keep print & maps. */
   const handleAiRemoveHandwriting = async () => {
     if (isProcessing || isErasingBusy) return;
     setIsProcessing(true);
-    setProcessingText("AI 正在去除手寫（約需數秒）...");
+    setProcessingText("AI 正在挖空選答與手寫（約需數秒）...");
     try {
-      // Cap size for faster / cheaper image-edit calls
-      const prepared = await compressImage(currentImage, 1600, 1600, 0.9);
+      // Higher res helps thin pencil circles / ticks survive until the model sees them
+      const prepared = await compressImage(currentImage, 2048, 2048, 0.92);
       const cleaned = await removeHandwritingWithAI(prepared);
       if (cleaned) {
         pushHistory(cleaned);
@@ -1243,24 +1222,11 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               onClick={() => void handleAiRemoveHandwriting()}
               disabled={isProcessing || isErasingBusy}
               className="px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-bold text-violet-950 bg-violet-100 hover:bg-violet-200 active:scale-95 transition flex items-center gap-1 sm:gap-1.5 cursor-pointer whitespace-nowrap border border-violet-200 disabled:opacity-50"
-              title="AI 去除手寫（紅／藍／鉛筆／黑手寫），保留印刷字與彩色地圖。需 Gemini API Key"
+              title="AI 挖空學生選答與手寫（圈選、打勾、填塗、紅藍鉛筆跡），保留印刷字與彩色地圖。需 Gemini API Key"
             >
               <Sparkles className="w-3.5 h-3.5 text-violet-700" />
-              <span className="sm:hidden">AI去手寫</span>
+              <span className="sm:hidden">AI挖空</span>
               <span className="hidden sm:inline">AI 去手寫</span>
-            </button>
-
-            {/* Color/pencil ink filter (local, non-AI) */}
-            <button
-              type="button"
-              onClick={() => void handleFilterColoredInk()}
-              disabled={isProcessing || isErasingBusy}
-              className="px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-bold text-rose-900 bg-rose-100 hover:bg-rose-200 active:scale-95 transition flex items-center gap-1 sm:gap-1.5 cursor-pointer whitespace-nowrap border border-rose-200 disabled:opacity-50"
-              title="本機過濾：去掉紅筆手寫，保留印刷字與彩色地圖。藍筆／鉛筆／黑手寫請改用「去手寫」塗白或「AI 去手寫」"
-            >
-              <Eraser className="w-3.5 h-3.5 text-rose-700" />
-              <span className="sm:hidden">濾紅筆</span>
-              <span className="hidden sm:inline">過濾紅筆</span>
             </button>
 
             {/* Shadow Removal / Paper Whitening Quick Actions */}
@@ -1529,7 +1495,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         {/* Pending multi-crop queue */}
         {!isExistingQuestion && mode === "crop" && (
           <div className="px-2 sm:px-5 py-1 text-[10px] sm:text-[11px] text-slate-500 bg-slate-50 border-t border-slate-100 shrink-0">
-            框好一題後按「加入此錯題」，可再框下一題。建議用「AI 去手寫」清筆跡；也可用「過濾紅筆」或手動「去手寫」塗白。
+            框好一題後按「加入此錯題」，可再框下一題。建議先按「AI 去手寫」挖空圈選／勾選答案與筆跡；也可用手動「去手寫」塗白。
           </div>
         )}
         {!isExistingQuestion && pendingCrops.length > 0 && (
