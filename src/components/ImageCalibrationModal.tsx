@@ -722,11 +722,16 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   );
 
   const buildLoupeInfo = useCallback((aimX: number, aimY: number, pos: Point) => {
+    // Prefer above the aim; flip below when near the top edge so the loupe stays on-screen
+    const half = LOUPE_SIZE_PX / 2;
+    let loupeY = aimY - LOUPE_ABOVE_AIM_PX;
+    if (loupeY < half + 8) {
+      loupeY = aimY + LOUPE_ABOVE_AIM_PX;
+    }
     return {
       visible: true,
-      // Loupe floats above the aim so it never covers the paper corner being aligned
       loupeX: aimX,
-      loupeY: aimY - LOUPE_ABOVE_AIM_PX,
+      loupeY,
       aimX,
       aimY,
       srcX: pos.x,
