@@ -1502,22 +1502,144 @@ export function clusterPaintStrokesToRects(
 }
 
 /**
+ * Shrink `subject` so it no longer overlaps `obstacle`, keeping the largest remnant.
+ * Used so 文字區 / 圖區 never share the same pixels after dual paint-select.
+ */
+export function carveRectAwayFrom(subject: CropRect, obstacle: CropRect): CropRect {
+  const ox1 = Math.max(subject.x, obstacle.x);
+  const oy1 = Math.max(subject.y, obstacle.y);
+  const ox2 = Math.min(subject.x + subject.width, obstacle.x + obstacle.width);
+  const oy2 = Math.min(subject.y + subject.height, obstacle.y + obstacle.height);
+  const ow = ox2 - ox1;
+  const oh = oy2 - oy1;
+  if (ow <= 1e-6 || oh <= 1e-6) return { ...subject };
+
+  const candidates: CropRect[] = [];
+  // Keep strip below overlap
+  if (subject.y + subject.height > oy2 + 1e-6) {
+    candidates.push({
+      x: subject.x,
+      y: oy2,
+      width: subject.width,
+      height: subject.y + subject.height - oy2,
+    });
+  }
+  // Keep strip above overlap
+  if (oy1 > subject.y + 1e-6) {
+    candidates.push({
+      x: subject.x,
+      y: subject.y,
+      width: subject.width,
+      height: oy1 - subject.y,
+    });
+  }
+  // Keep strip to the right of overlap
+  if (subject.x + subject.width > ox2 + 1e-6) {
+    candidates.push({
+      x: ox2,
+      y: subject.y,
+      width: subject.x + subject.width - ox2,
+      height: subject.height,
+    });
+  }
+  // Keep strip to the left of overlap
+  if (ox1 > subject.x + 1e-6) {
+    candidates.push({
+      x: subject.x,
+      y: subject.y,
+      width: ox1 - subject.x,
+      height: subject.height,
+    });
+  }
+
+  if (!candidates.length) {
+    return { x: subject.x, y: subject.y, width: 0, height: 0 };
+  }
+  candidates.sort((a, b) => b.width * b.height - a.width * a.height);
+  return candidates[0];
+}
+
+const MIN_SEPARATED_SIDE = 0.012;
+
+/** Ensure text / diagram islands never overlap. Prefer carving diagram; if that
+ *  would destroy the diagram (e.g. fully inside text), carve text instead. */
+export function separateDifferentKindRects(rects: LabeledCropRect[]): LabeledCropRect[] {
+  if (rects.length < 2) return rects.map((r) => ({ ...r }));
+  const result = rects.map((r) => ({ ...r }));
+
+  for (let i = 0; i < result.length; i++) {
+    for (let j = i + 1; j < result.length; j++) {
+      if (result[i].kind === result[j].kind) continue;
+      const textIdx = result[i].kind === "text" ? i : result[j].kind === "text" ? j : -1;
+      const diagramIdx =
+        result[i].kind === "diagram" ? i : result[j].kind === "diagram" ? j : -1;
+      if (textIdx < 0 || diagramIdx < 0) continue;
+
+      const text = result[textIdx];
+      const diagram = result[diagramIdx];
+      const carvedDiagram = carveRectAwayFrom(diagram, text);
+      const diagramSurvives =
+        carvedDiagram.width >= MIN_SEPARATED_SIDE &&
+        carvedDiagram.height >= MIN_SEPARATED_SIDE;
+
+      if (diagramSurvives) {
+        result[diagramIdx] = { ...carvedDiagram, kind: "diagram" };
+        continue;
+      }
+
+      // Diagram fully covered by text — shrink text so the painted map remains
+      const carvedText = carveRectAwayFrom(text, diagram);
+      const textSurvives =
+        carvedText.width >= MIN_SEPARATED_SIDE &&
+        carvedText.height >= MIN_SEPARATED_SIDE;
+      if (textSurvives) {
+        result[textIdx] = { ...carvedText, kind: "text" };
+      } else {
+        // Nested both ways / tiny remnants — keep the larger island only
+        const textArea = text.width * text.height;
+        const diagramArea = diagram.width * diagram.height;
+        if (diagramArea >= textArea) {
+          result[textIdx] = { ...text, width: 0, height: 0 };
+        } else {
+          result[diagramIdx] = { ...diagram, width: 0, height: 0 };
+        }
+      }
+    }
+  }
+
+  return result.filter(
+    (r) => r.width >= MIN_SEPARATED_SIDE && r.height >= MIN_SEPARATED_SIDE
+  );
+}
+
+/**
  * Build tight content-aware rects from paint strokes (text one island, diagram another).
- * Each island is classified as text | diagram; different kinds never merge.
+ * Prefer explicit per-stroke kinds (UI 選文字／選圖形); otherwise auto-classify.
+ * Different kinds never merge, and final rects are separated so they do not overlap.
  */
 export function clusterTightStrokeRects(
   img: HTMLImageElement,
   strokes: Point[][],
   corridorNorm = 0.02,
-  mergeGap = 0.035
+  mergeGap = 0.035,
+  strokeKinds?: Array<RegionKind | undefined>
 ): LabeledCropRect[] {
   const seed = strokes
-    .map((s) => tightCropRectAlongStroke(img, s, corridorNorm))
-    .filter((r): r is CropRect => Boolean(r))
-    .map((r) => ({ ...r, kind: classifyCropRegion(img, r) }));
+    .map((s, i) => {
+      const r = tightCropRectAlongStroke(img, s, corridorNorm);
+      if (!r) return null;
+      const forced = strokeKinds?.[i];
+      const kind: RegionKind =
+        forced === "text" || forced === "diagram"
+          ? forced
+          : classifyCropRegion(img, r);
+      return { ...r, kind };
+    })
+    .filter((r): r is LabeledCropRect => Boolean(r));
   const merged = mergePaintIslandRects(seed, mergeGap);
+  const separated = separateDifferentKindRects(merged);
   // Text blocks first (reading order), then diagrams
-  return merged.sort((a, b) => {
+  return separated.sort((a, b) => {
     if (a.kind !== b.kind) return a.kind === "text" ? -1 : 1;
     return Math.abs(a.y - b.y) > 0.04 ? a.y - b.y : a.x - b.x;
   });
