@@ -457,7 +457,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     const regionCount = selectRegionsRef.current.length;
     setProcessingText(
       regionCount > 1
-        ? `正在合成同一題的 ${regionCount} 個範圍...`
+        ? `正在拼接文字／圖共 ${regionCount} 個區塊...`
         : "正在加入錯題範圍..."
     );
     try {
@@ -1574,7 +1574,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                     </svg>
                     <div className="absolute top-2 left-1/2 -translate-x-1/2 px-2 py-1 rounded-full bg-emerald-600/90 text-white text-[10px] font-bold pointer-events-none max-w-[92%] text-center">
                       {selectRegions.length > 1
-                        ? `同一題 ${selectRegions.length} 個矩形（可重疊）→ 加入錯題`
+                        ? `同一題 ${selectRegions.length} 區塊（文字／圖分開拼接）→ 加入錯題`
                         : selectPaintStrokes.length > 0
                         ? "再畫圖區／另一塊文字，或按「加入錯題」"
                         : "手指畫過文字＝文字框；再畫圖＝圖框（緊貼所畫範圍）"}
@@ -1598,7 +1598,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         {/* Pending multi-crop queue */}
         {!isExistingQuestion && mode === "crop" && (
           <div className="px-2 sm:px-5 py-1 text-[10px] sm:text-[11px] text-slate-500 bg-slate-50 border-t border-slate-100 shrink-0">
-            「畫選」：手指畫過文字／圖，框線緊貼所畫內容；文字一框、圖一框（可重疊合成）。建議先「AI 去手寫」；再按「加入此錯題」。
+            「畫選」：手指畫過文字／圖，框線緊貼所畫內容；文字一框、圖一框，加入後分成兩個區塊拼接。建議先「AI 去手寫」；再按「加入此錯題」。
           </div>
         )}
         {!isExistingQuestion && pendingCrops.length > 0 && (

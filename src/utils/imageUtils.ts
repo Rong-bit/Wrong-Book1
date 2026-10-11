@@ -1427,10 +1427,12 @@ export function unionCropRects(rects: CropRect[]): CropRect | null {
   return rects.reduce((acc, r) => unionRects(acc, r));
 }
 
+type PixelPatch = { sx: number; sy: number; sw: number; sh: number; cx: number; cy: number };
+
 /**
- * Crop one question that may span multiple rectangular islands.
- * Keeps relative layout: overall bbox with non-selected gaps filled paper-white
- * so intervening unrelated content is not included.
+ * Crop one question that may span multiple rectangular islands (stem + map).
+ * Packs each island as its own tight panel (side-by-side or stacked) instead of
+ * one giant bbox that looks like a single long rectangle.
  */
 export async function applyMultiRegionCrop(
   imageSrc: string,
@@ -1457,38 +1459,82 @@ export async function applyMultiRegionCrop(
           return;
         }
 
-        const overall = unionCropRects(regions);
-        if (!overall) {
-          resolve(normSrc);
-          return;
+        const patches: PixelPatch[] = regions.map((r) => {
+          const sx = Math.max(0, Math.round(r.x * w));
+          const sy = Math.max(0, Math.round(r.y * h));
+          const sw = Math.max(1, Math.min(w - sx, Math.round(r.width * w)));
+          const sh = Math.max(1, Math.min(h - sy, Math.round(r.height * h)));
+          return {
+            sx,
+            sy,
+            sw,
+            sh,
+            cx: r.x + r.width / 2,
+            cy: r.y + r.height / 2,
+          };
+        });
+
+        // Reading order: top→bottom, then left→right
+        patches.sort((a, b) => (Math.abs(a.cy - b.cy) > 0.04 ? a.cy - b.cy : a.cx - b.cx));
+
+        const gutter = Math.max(8, Math.round(Math.min(w, h) * 0.012));
+        const pad = Math.max(6, Math.round(Math.min(w, h) * 0.008));
+        const paper = "#f7f4ec";
+        const border = "#d6d3c9";
+
+        // Side-by-side on the page → pack as two horizontal panels; else stack
+        let packHorizontal = false;
+        if (patches.length === 2) {
+          const [a, b] = patches;
+          const overlapY =
+            Math.max(0, Math.min(a.sy + a.sh, b.sy + b.sh) - Math.max(a.sy, b.sy)) /
+            Math.max(1, Math.min(a.sh, b.sh));
+          packHorizontal = overlapY >= 0.35 && Math.abs(a.cx - b.cx) > Math.abs(a.cy - b.cy);
         }
 
-        const ox = Math.round(overall.x * w);
-        const oy = Math.round(overall.y * h);
-        const ow = Math.max(1, Math.round(overall.width * w));
-        const oh = Math.max(1, Math.round(overall.height * h));
+        let canvasW: number;
+        let canvasH: number;
+        if (packHorizontal) {
+          const maxH = Math.max(...patches.map((p) => p.sh));
+          canvasW = pad * 2 + patches.reduce((s, p) => s + p.sw, 0) + gutter * (patches.length - 1);
+          canvasH = pad * 2 + maxH;
+        } else {
+          const maxW = Math.max(...patches.map((p) => p.sw));
+          canvasW = pad * 2 + maxW;
+          canvasH = pad * 2 + patches.reduce((s, p) => s + p.sh, 0) + gutter * (patches.length - 1);
+        }
 
         const canvas = document.createElement("canvas");
-        canvas.width = ow;
-        canvas.height = oh;
+        canvas.width = Math.max(1, canvasW);
+        canvas.height = Math.max(1, canvasH);
         const ctx = canvas.getContext("2d");
         if (!ctx) {
           resolve(normSrc);
           return;
         }
 
-        // Paper fill for gaps between islands
-        ctx.fillStyle = "#f7f4ec";
-        ctx.fillRect(0, 0, ow, oh);
+        ctx.fillStyle = paper;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-        for (const r of regions) {
-          const sx = Math.round(r.x * w);
-          const sy = Math.round(r.y * h);
-          const sw = Math.max(1, Math.round(r.width * w));
-          const sh = Math.max(1, Math.round(r.height * h));
-          const dx = sx - ox;
-          const dy = sy - oy;
-          ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+        let cursorX = pad;
+        let cursorY = pad;
+        for (const p of patches) {
+          const dx = packHorizontal ? cursorX : pad + Math.round((canvas.width - pad * 2 - p.sw) / 2);
+          const dy = packHorizontal
+            ? pad + Math.round((canvas.height - pad * 2 - p.sh) / 2)
+            : cursorY;
+
+          // Panel background + border so text / map read as two blocks
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(dx - 2, dy - 2, p.sw + 4, p.sh + 4);
+          ctx.strokeStyle = border;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(dx - 2.5, dy - 2.5, p.sw + 5, p.sh + 5);
+
+          ctx.drawImage(img, p.sx, p.sy, p.sw, p.sh, dx, dy, p.sw, p.sh);
+
+          if (packHorizontal) cursorX += p.sw + gutter;
+          else cursorY += p.sh + gutter;
         }
 
         resolve(canvas.toDataURL("image/jpeg", quality));
