@@ -217,6 +217,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
+  /** Which finger owns the active corner drag (multi-touch safe). */
+  const activeTouchIdRef = useRef<number | null>(null);
+  /** Last valid aim during corner drag — used if release event has no usable coords. */
+  const lastCornerAimRef = useRef<{ aimX: number; aimY: number; x: number; y: number } | null>(null);
 
   // Initialize or reset when imageSrc or modal opens
   useEffect(() => {
@@ -684,53 +688,90 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     return { x, y };
   }, []);
 
+  const findTouchById = useCallback((list: TouchList | undefined, id: number | null) => {
+    if (!list || list.length === 0) return null;
+    if (id == null) return list[0];
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].identifier === id) return list[i];
+    }
+    return null;
+  }, []);
+
   /**
-   * Resolve pointer client coords. On touchend/touchcancel, touches[] is empty —
-   * must read changedTouches so the final drop point is not lost.
+   * Resolve pointer client coords.
+   * - During move: follow the tracked finger in touches[]
+   * - On touchend/touchcancel: the ended finger is ONLY in changedTouches
+   *   (prefer that over remaining touches[0], which may be another finger)
    */
   const getPointerClient = useCallback(
-    (e: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent) => {
+    (
+      e: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent,
+      preferredTouchId: number | null = activeTouchIdRef.current
+    ) => {
       if ("touches" in e) {
-        const t =
-          (e.touches && e.touches.length > 0 && e.touches[0]) ||
-          ("changedTouches" in e &&
-            e.changedTouches &&
-            e.changedTouches.length > 0 &&
-            e.changedTouches[0]) ||
-          null;
+        const type = "type" in e ? String(e.type) : "";
+        const isEndOrCancel = type === "touchend" || type === "touchcancel";
+        const changed =
+          "changedTouches" in e
+            ? findTouchById(e.changedTouches, preferredTouchId) ||
+              (e.changedTouches && e.changedTouches.length > 0 ? e.changedTouches[0] : null)
+            : null;
+        const active = findTouchById(e.touches, preferredTouchId);
+
+        const t = isEndOrCancel ? changed || active : active || changed;
         if (t) {
-          return { clientX: t.clientX, clientY: t.clientY, isTouch: true as const };
+          return {
+            clientX: t.clientX,
+            clientY: t.clientY,
+            isTouch: true as const,
+            ok: true as const,
+            touchId: t.identifier,
+          };
         }
+        return { clientX: 0, clientY: 0, isTouch: true as const, ok: false as const, touchId: null };
       }
       if ("clientX" in e && typeof e.clientX === "number") {
-        return { clientX: e.clientX, clientY: e.clientY, isTouch: false as const };
+        return {
+          clientX: e.clientX,
+          clientY: e.clientY,
+          isTouch: false as const,
+          ok: true as const,
+          touchId: null,
+        };
       }
-      return { clientX: 0, clientY: 0, isTouch: false as const };
+      return { clientX: 0, clientY: 0, isTouch: false as const, ok: false as const, touchId: null };
     },
-    []
+    [findTouchById]
   );
 
   /** Mouse: tip = aim. Touch: aim above finger (same point the on-image red crosshair shows). */
   const getAimFromEvent = useCallback(
     (e: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent) => {
-      const { clientX, clientY, isTouch } = getPointerClient(e);
+      const { clientX, clientY, isTouch, ok } = getPointerClient(e);
       const aimX = clientX;
       const aimY = isTouch ? clientY - TOUCH_AIM_OFFSET_Y : clientY;
-      return { clientX, clientY, aimX, aimY, isTouch };
+      return { clientX, clientY, aimX, aimY, isTouch, ok };
     },
     [getPointerClient]
   );
 
   const buildLoupeInfo = useCallback((aimX: number, aimY: number, pos: Point) => {
-    // Prefer above the aim; flip below when near the top edge so the loupe stays on-screen
     const half = LOUPE_SIZE_PX / 2;
+    const margin = 8;
+    const vw = typeof window !== "undefined" ? window.innerWidth : 400;
+    const vh = typeof window !== "undefined" ? window.innerHeight : 800;
+
+    // Prefer above the aim; flip below when near the top edge
     let loupeY = aimY - LOUPE_ABOVE_AIM_PX;
-    if (loupeY < half + 8) {
+    if (loupeY < half + margin) {
       loupeY = aimY + LOUPE_ABOVE_AIM_PX;
     }
+    loupeY = Math.max(half + margin, Math.min(vh - half - margin, loupeY));
+    const loupeX = Math.max(half + margin, Math.min(vw - half - margin, aimX));
+
     return {
       visible: true,
-      loupeX: aimX,
+      loupeX,
       loupeY,
       aimX,
       aimY,
@@ -743,9 +784,19 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const handleCornerDown = (index: number, e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setActiveDragCorner(index);
-    const { aimX, aimY } = getAimFromEvent(e);
+    if ("touches" in e && e.touches.length > 0) {
+      activeTouchIdRef.current = e.touches[0].identifier;
+    } else {
+      activeTouchIdRef.current = null;
+    }
+    const { aimX, aimY, ok } = getAimFromEvent(e);
+    if (!ok) {
+      activeTouchIdRef.current = null;
+      return;
+    }
     const pos = getNormalizedPos(aimX, aimY);
+    lastCornerAimRef.current = { aimX, aimY, x: pos.x, y: pos.y };
+    setActiveDragCorner(index);
 
     // Snap pin to aim immediately so pin / crosshair / loupe stay in sync
     setCorners((prev) => {
@@ -816,25 +867,34 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     if (activeDragCorner === null && activeCropHandle === null) return;
 
     const handlePointerMove = (e: MouseEvent | TouchEvent) => {
-      if ("touches" in e) e.preventDefault();
-      const { aimX, aimY } = getAimFromEvent(e);
-      const pos = getNormalizedPos(aimX, aimY);
+      if ("touches" in e) {
+        // Ignore moves from other fingers while a corner drag is owned by one touch id
+        if (
+          activeDragCorner !== null &&
+          activeTouchIdRef.current != null &&
+          !findTouchById(e.touches, activeTouchIdRef.current)
+        ) {
+          return;
+        }
+        e.preventDefault();
+      }
 
       if (activeDragCorner !== null) {
+        const { aimX, aimY, ok } = getAimFromEvent(e);
+        if (!ok) return;
+        const pos = getNormalizedPos(aimX, aimY);
+        lastCornerAimRef.current = { aimX, aimY, x: pos.x, y: pos.y };
         setCorners((prev) => {
           const next = [...prev] as [Point, Point, Point, Point];
           next[activeDragCorner] = { x: pos.x, y: pos.y };
           return next;
         });
-
-        // Loupe samples aim; on-image crosshair sits exactly on the drop point
         setLoupeInfo(buildLoupeInfo(aimX, aimY, pos));
       } else if (activeCropHandle !== null && cropDragStart) {
-        // Crop handles use finger tip (no aim offset) — read raw client for consistency
-        const { clientX, clientY, isTouch } = getPointerClient(e);
-        const cropPos = isTouch
-          ? getNormalizedPos(clientX, clientY)
-          : pos;
+        // Crop handles use finger tip (no aim offset) — match handleCropHandleDown
+        const { clientX, clientY, ok } = getPointerClient(e, null);
+        if (!ok) return;
+        const cropPos = getNormalizedPos(clientX, clientY);
         const dx = cropPos.x - cropDragStart.x;
         const dy = cropPos.y - cropDragStart.y;
         const orig = cropDragStart.box;
@@ -890,14 +950,32 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     /** Commit final corner from the release event (changedTouches on touchend). */
     const handlePointerUp = (e: MouseEvent | TouchEvent) => {
       if (activeDragCorner !== null) {
-        const { aimX, aimY } = getAimFromEvent(e);
-        const pos = getNormalizedPos(aimX, aimY);
-        setCorners((prev) => {
-          const next = [...prev] as [Point, Point, Point, Point];
-          next[activeDragCorner] = { x: pos.x, y: pos.y };
-          return next;
-        });
+        // Only end the drag when the owning finger lifts (or mouseup / cancel)
+        if ("changedTouches" in e && activeTouchIdRef.current != null) {
+          const ended = findTouchById(e.changedTouches, activeTouchIdRef.current);
+          if (!ended && e.type === "touchend") {
+            return;
+          }
+        }
+
+        const { aimX, aimY, ok } = getAimFromEvent(e);
+        const fallback = lastCornerAimRef.current;
+        const drop = ok
+          ? { x: getNormalizedPos(aimX, aimY).x, y: getNormalizedPos(aimX, aimY).y }
+          : fallback
+          ? { x: fallback.x, y: fallback.y }
+          : null;
+
+        if (drop) {
+          setCorners((prev) => {
+            const next = [...prev] as [Point, Point, Point, Point];
+            next[activeDragCorner] = drop;
+            return next;
+          });
+        }
       }
+      activeTouchIdRef.current = null;
+      lastCornerAimRef.current = null;
       setActiveDragCorner(null);
       setActiveCropHandle(null);
       setCropDragStart(null);
@@ -924,6 +1002,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     getNormalizedPos,
     getAimFromEvent,
     getPointerClient,
+    findTouchById,
     buildLoupeInfo,
     aspectRatioMode,
     naturalDimensions,
