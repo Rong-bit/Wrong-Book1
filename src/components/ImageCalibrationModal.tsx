@@ -45,6 +45,10 @@ import {
   cropBoxFromCorners,
   paintWhiteBrushOnImage,
   filterColoredAndPencilInk,
+  clusterPaintStrokesToRects,
+  unionCropRects,
+  applyMultiRegionCrop,
+  CropRect,
 } from "../utils/imageUtils";
 import { removeHandwritingWithAI } from "../services/aiService";
 
@@ -79,35 +83,6 @@ const SELECT_BRUSH_RADIUS_NORM: Record<BrushSizeKey, number> = {
   l: 0.055,
 };
 
-function bboxFromPaintStrokes(
-  strokes: Point[][],
-  brushNorm: number,
-  padExtra = 0.018
-): { x: number; y: number; w: number; h: number } | null {
-  const all = strokes.flat();
-  if (!all.length) return null;
-  const pad = brushNorm + padExtra;
-  let minX = 1;
-  let minY = 1;
-  let maxX = 0;
-  let maxY = 0;
-  for (const p of all) {
-    minX = Math.min(minX, p.x);
-    minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x);
-    maxY = Math.max(maxY, p.y);
-  }
-  const x = Math.max(0, minX - pad);
-  const y = Math.max(0, minY - pad);
-  const x2 = Math.min(1, maxX + pad);
-  const y2 = Math.min(1, maxY + pad);
-  return {
-    x,
-    y,
-    w: Math.max(0.05, x2 - x),
-    h: Math.max(0.05, y2 - y),
-  };
-}
 
 export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   isOpen,
@@ -139,17 +114,20 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const [isErasing, setIsErasing] = useState(false);
   const [isErasingBusy, setIsErasingBusy] = useState(false);
   const [selectPaintStrokes, setSelectPaintStrokes] = useState<Point[][]>([]);
+  const [selectRegions, setSelectRegions] = useState<CropRect[]>([]);
   const [activeSelectStroke, setActiveSelectStroke] = useState<Point[] | null>(null);
   const [isSelectPainting, setIsSelectPainting] = useState(false);
   const eraseStrokeRef = useRef<Point[] | null>(null);
   const selectStrokeRef = useRef<Point[] | null>(null);
   const selectPaintStrokesRef = useRef<Point[][]>([]);
+  const selectRegionsRef = useRef<CropRect[]>([]);
   const cropDirtyAfterAddRef = useRef(false);
   const currentImageRef = useRef(currentImage);
   const brushSizeRef = useRef(brushSize);
   currentImageRef.current = currentImage;
   brushSizeRef.current = brushSize;
   selectPaintStrokesRef.current = selectPaintStrokes;
+  selectRegionsRef.current = selectRegions;
 
   // Track container dimensions to dynamically scale image to fit viewport
   useEffect(() => {
@@ -266,6 +244,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       eraseStrokeRef.current = null;
       setSelectPaintStrokes([]);
       selectPaintStrokesRef.current = [];
+      setSelectRegions([]);
+      selectRegionsRef.current = [];
       setActiveSelectStroke(null);
       selectStrokeRef.current = null;
       setIsSelectPainting(false);
@@ -349,9 +329,28 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const clearSelectPaint = () => {
     setSelectPaintStrokes([]);
     selectPaintStrokesRef.current = [];
+    setSelectRegions([]);
+    selectRegionsRef.current = [];
     setActiveSelectStroke(null);
     selectStrokeRef.current = null;
     setIsSelectPainting(false);
+  };
+
+  const syncPaintRegions = (strokes: Point[][]) => {
+    const brush = SELECT_BRUSH_RADIUS_NORM[brushSizeRef.current];
+    const regions = clusterPaintStrokesToRects(strokes, brush, 0.05);
+    selectRegionsRef.current = regions;
+    setSelectRegions(regions);
+    const overall = unionCropRects(regions);
+    if (overall) {
+      setCropBox({
+        x: overall.x,
+        y: overall.y,
+        w: overall.width,
+        h: overall.height,
+      });
+      cropDirtyAfterAddRef.current = true;
+    }
   };
 
   const enterCropMode = () => {
@@ -441,6 +440,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     if (mode === "perspective") {
       return applyPendingTransforms();
     }
+    // Same question may be multiple paint islands (stem + map) → multi-rect composite
+    if (selectRegionsRef.current.length > 0) {
+      return applyMultiRegionCrop(currentImage, selectRegionsRef.current, 0.92);
+    }
     return applyCrop(
       currentImage,
       {
@@ -467,7 +470,12 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       return;
     }
     setIsProcessing(true);
-    setProcessingText("正在加入錯題範圍...");
+    const regionCount = selectRegionsRef.current.length;
+    setProcessingText(
+      regionCount > 1
+        ? `正在合成同一題的 ${regionCount} 個範圍...`
+        : "正在加入錯題範圍..."
+    );
     try {
       const cropped = await cropCurrentBox();
       if (cropped) {
@@ -573,12 +581,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     const nextStrokes = [...selectPaintStrokesRef.current, stroke];
     selectPaintStrokesRef.current = nextStrokes;
     setSelectPaintStrokes(nextStrokes);
-    const brush = SELECT_BRUSH_RADIUS_NORM[brushSizeRef.current];
-    const box = bboxFromPaintStrokes(nextStrokes, brush);
-    if (box) {
-      setCropBox(box);
-      cropDirtyAfterAddRef.current = true;
-    }
+    syncPaintRegions(nextStrokes);
   };
 
   /** Finger-drag like highlighter: paint over text/diagram to define crop region. */
@@ -1608,11 +1611,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                   ? renderPerspectiveSvgOverlay()
                   : cropTool === "frame"
                   ? renderCropOverlay()
-                  : cropTool === "paint" && selectPaintStrokes.length > 0
-                  ? renderCropOverlay()
                   : null}
 
-                {/* Paint-to-select: finger-drag text / color-in diagrams */}
+                {/* Paint-to-select: finger-drag text / color-in diagrams (multi-rect OK) */}
                 {mode === "crop" && cropTool === "paint" && (
                   <div
                     className="absolute inset-0 z-30 cursor-crosshair touch-none"
@@ -1620,6 +1621,23 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                     onTouchStart={handleSelectPaintDown}
                     style={{ touchAction: "none" }}
                   >
+                    {/* Multi-rect islands for one question */}
+                    {selectRegions.map((r, idx) => (
+                      <div
+                        key={`reg-${idx}`}
+                        className="absolute border-2 border-emerald-400 bg-emerald-400/10 pointer-events-none rounded-sm"
+                        style={{
+                          left: `${r.x * 100}%`,
+                          top: `${r.y * 100}%`,
+                          width: `${r.width * 100}%`,
+                          height: `${r.height * 100}%`,
+                        }}
+                      >
+                        <div className="absolute -top-5 left-0 px-1.5 py-0.5 rounded bg-emerald-700/90 text-white text-[9px] font-bold whitespace-nowrap">
+                          範圍 {idx + 1}
+                        </div>
+                      </div>
+                    ))}
                     <svg className="absolute inset-0 w-full h-full pointer-events-none">
                       {[...selectPaintStrokes, ...(activeSelectStroke ? [activeSelectStroke] : [])].map(
                         (stroke, idx) => (
@@ -1645,9 +1663,11 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                       )}
                     </svg>
                     <div className="absolute top-2 left-1/2 -translate-x-1/2 px-2 py-1 rounded-full bg-emerald-600/90 text-white text-[10px] font-bold pointer-events-none max-w-[90%] text-center">
-                      {selectPaintStrokes.length > 0
-                        ? "可繼續塗、或按「加入錯題」；切「框選」可微調"
-                        : "手指拖過文字／像著色塗過圖區，選出錯題範圍"}
+                      {selectRegions.length > 1
+                        ? `同一題 ${selectRegions.length} 個範圍（題幹／圖可分開塗）→ 加入錯題`
+                        : selectPaintStrokes.length > 0
+                        ? "可再塗另一塊（如右下角圖），或按「加入錯題」"
+                        : "手指拖過文字／像著色塗過圖區；同一題可塗多塊"}
                     </div>
                   </div>
                 )}
@@ -1728,11 +1748,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         {/* Pending multi-crop queue */}
         {!isExistingQuestion && mode === "crop" && (
           <div className="px-2 sm:px-5 py-1 text-[10px] sm:text-[11px] text-slate-500 bg-slate-50 border-t border-slate-100 shrink-0">
-<<<<<<< HEAD
-            用「著色選」：手指拖過文字或塗過圖區選範圍，再按「加入此錯題」。可切「框選」微調，或「去手寫／過濾紅筆」清筆跡。
-=======
-            框好一題後按「加入此錯題」，可再框下一題。建議用「AI 去手寫」清筆跡；也可用「過濾紅筆」或手動「去手寫」塗白。
->>>>>>> origin/main
+            「著色選」：題幹一塊、圖一塊可分開塗成多個矩形（仍算同一題，中間不會一起裁進）。再按「加入此錯題」。
           </div>
         )}
         {!isExistingQuestion && pendingCrops.length > 0 && (
