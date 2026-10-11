@@ -1660,16 +1660,22 @@ type PixelPatch = {
   kind: RegionKind;
 };
 
+export type MultiRegionCropOptions = {
+  /** Show 文字區／圖區 chips above each panel (default true). */
+  showLabels?: boolean;
+};
+
 /**
  * Crop one question that may span multiple rectangular islands (stem + map).
- * Packs each island as its own tight panel (side-by-side or stacked) instead of
- * one giant bbox that looks like a single long rectangle.
+ * Packs each island as its own tight panel (stacked) instead of one giant bbox.
  */
 export async function applyMultiRegionCrop(
   imageSrc: string,
   regions: Array<CropRect | LabeledCropRect>,
-  quality = 0.92
+  quality = 0.92,
+  options: MultiRegionCropOptions = {}
 ): Promise<string> {
+  const showLabels = options.showLabels !== false;
   const normSrc = normalizeImageSrc(imageSrc);
   if (!normSrc || !regions.length) return "";
   if (regions.length === 1) {
@@ -1716,7 +1722,9 @@ export async function applyMultiRegionCrop(
           return Math.abs(a.cy - b.cy) > 0.06 ? a.cy - b.cy : a.cx - b.cx;
         });
 
-        const labelH = Math.max(18, Math.round(Math.min(w, h) * 0.014));
+        const labelH = showLabels
+          ? Math.max(18, Math.round(Math.min(w, h) * 0.014))
+          : 0;
         const gutter = Math.max(16, Math.round(Math.min(w, h) * 0.02));
         const pad = Math.max(12, Math.round(Math.min(w, h) * 0.012));
         const paper = "#e8e6de";
@@ -1751,16 +1759,17 @@ export async function applyMultiRegionCrop(
           const dx = pad;
           const dy = cursorY + labelH;
 
-          // Label chip
-          ctx.fillStyle = p.kind === "diagram" ? "#0369a1" : "#0f766e";
-          const chipW = Math.min(panelW, Math.max(56, labels[i].length * 14 + 16));
-          ctx.beginPath();
-          ctx.roundRect(dx, cursorY, chipW, labelH - 2, 4);
-          ctx.fill();
-          ctx.fillStyle = "#ffffff";
-          ctx.font = `bold ${Math.max(11, Math.round(labelH * 0.62))}px sans-serif`;
-          ctx.textBaseline = "middle";
-          ctx.fillText(labels[i], dx + 8, cursorY + (labelH - 2) / 2);
+          if (showLabels) {
+            ctx.fillStyle = p.kind === "diagram" ? "#0369a1" : "#0f766e";
+            const chipW = Math.min(panelW, Math.max(56, labels[i].length * 14 + 16));
+            ctx.beginPath();
+            ctx.roundRect(dx, cursorY, chipW, labelH - 2, 4);
+            ctx.fill();
+            ctx.fillStyle = "#ffffff";
+            ctx.font = `bold ${Math.max(11, Math.round(labelH * 0.62))}px sans-serif`;
+            ctx.textBaseline = "middle";
+            ctx.fillText(labels[i], dx + 8, cursorY + (labelH - 2) / 2);
+          }
 
           // Panel
           ctx.fillStyle = "#ffffff";
@@ -1784,6 +1793,26 @@ export async function applyMultiRegionCrop(
     img.onerror = () => resolve(normSrc);
     img.src = normSrc;
   });
+}
+
+/**
+ * Crop only diagram / map islands (no text panels) for PDF「僅排版文字」附圖.
+ */
+export async function cropFigureRegionsOnly(
+  imageSrc: string,
+  regions: LabeledCropRect[],
+  quality = 0.92
+): Promise<string | undefined> {
+  const diagrams = regions.filter((r) => r.kind === "diagram");
+  if (!diagrams.length) return undefined;
+  if (diagrams.length === 1) {
+    const one = await applyCrop(imageSrc, diagrams[0], quality);
+    return one || undefined;
+  }
+  const packed = await applyMultiRegionCrop(imageSrc, diagrams, quality, {
+    showLabels: false,
+  });
+  return packed || undefined;
 }
 
 export interface BrushStroke {

@@ -47,17 +47,19 @@ import {
   unionCropRects,
   applyMultiRegionCrop,
   clusterTightStrokeRects,
+  cropFigureRegionsOnly,
   CropRect,
   LabeledCropRect,
   RegionKind,
 } from "../utils/imageUtils";
 import { removeHandwritingWithAI } from "../services/aiService";
+import { CalibratedCrop } from "../types";
 
 interface ImageCalibrationModalProps {
   isOpen: boolean;
   imageSrc: string;
   onClose: () => void;
-  onConfirm: (processedImages: string[]) => void;
+  onConfirm: (crops: CalibratedCrop[]) => void;
   onSkip?: (originalBase64: string) => void;
   title?: string;
   isExistingQuestion?: boolean;
@@ -104,7 +106,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const [zoomScale, setZoomScale] = useState<number>(1); // 1 = Fit Viewport
   const [imageLoadError, setImageLoadError] = useState<boolean>(false);
   const [isImageReady, setIsImageReady] = useState<boolean>(false);
-  const [pendingCrops, setPendingCrops] = useState<string[]>([]);
+  const [pendingCrops, setPendingCrops] = useState<CalibratedCrop[]>([]);
   const [cropTool, setCropTool] = useState<CropTool>("paint");
   /** Default 選文字；切到 選圖形 後筆畫強制標成圖區。 */
   const [paintKind, setPaintKind] = useState<PaintKind>("text");
@@ -459,15 +461,21 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     );
   };
 
-  const cropCurrentBox = async (): Promise<string> => {
+  const cropCurrentBox = async (): Promise<CalibratedCrop> => {
     if (mode === "perspective") {
-      return applyPendingTransforms();
+      const imageBase64 = await applyPendingTransforms();
+      return { imageBase64 };
     }
     // Same question may be multiple paint islands (stem + map) → multi-rect composite
+    // plus a figure-only crop for PDF「僅排版文字」
     if (selectRegionsRef.current.length > 0) {
-      return applyMultiRegionCrop(currentImage, selectRegionsRef.current, 0.92);
+      const regions = selectRegionsRef.current;
+      const imageBase64 = await applyMultiRegionCrop(currentImage, regions, 0.92);
+      const figureOnly = await cropFigureRegionsOnly(currentImage, regions, 0.92);
+      // "" = explicit none so PDF textOnly won't fall back to the stem screenshot
+      return { imageBase64, figureImageBase64: figureOnly || "" };
     }
-    return applyCrop(
+    const imageBase64 = await applyCrop(
       currentImage,
       {
         x: cropBox.x,
@@ -478,6 +486,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       0.92,
       imgRef.current
     );
+    return { imageBase64 };
   };
 
   const markCropDirty = () => {
@@ -505,7 +514,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     );
     try {
       const cropped = await cropCurrentBox();
-      if (cropped) {
+      if (cropped?.imageBase64) {
         setPendingCrops((prev) => [...prev, cropped]);
         // Keep base image; reset for the next wrong region (paint again)
         setCropBox({ x: 0.08, y: 0.08, w: 0.84, h: 0.35 });
@@ -529,22 +538,22 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       pendingCrops.length > 0 ? `正在準備錯題...` : "正在套用校正..."
     );
     try {
-      let results: string[] = [];
+      let results: CalibratedCrop[] = [];
       if (pendingCrops.length === 0) {
         const output = await cropCurrentBox();
-        results = [output || currentImage];
+        results = [output?.imageBase64 ? output : { imageBase64: currentImage }];
       } else {
         results = [...pendingCrops];
         // If user reframed after the last「加入」but forgot to add again, include it
         if (cropDirtyAfterAddRef.current && mode === "crop") {
           const current = await cropCurrentBox();
-          if (current) results.push(current);
+          if (current?.imageBase64) results.push(current);
         }
       }
-      onConfirm(results.filter(Boolean));
+      onConfirm(results.filter((r) => Boolean(r.imageBase64)));
     } catch (err) {
       console.error("Finish calibration failed:", err);
-      onConfirm([currentImage]);
+      onConfirm([{ imageBase64: currentImage }]);
     } finally {
       setIsProcessing(false);
     }
@@ -1868,12 +1877,16 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               已選 {pendingCrops.length} 題
             </span>
             <div className="flex items-center gap-1.5">
-              {pendingCrops.map((src, idx) => (
+              {pendingCrops.map((crop, idx) => (
                 <div
                   key={`pending-${idx}`}
                   className="relative w-12 h-12 rounded-lg overflow-hidden border border-emerald-300 bg-white shrink-0"
                 >
-                  <img src={src} alt={`錯題 ${idx + 1}`} className="w-full h-full object-cover" />
+                  <img
+                    src={crop.imageBase64}
+                    alt={`錯題 ${idx + 1}`}
+                    className="w-full h-full object-cover"
+                  />
                   <button
                     type="button"
                     onClick={() =>

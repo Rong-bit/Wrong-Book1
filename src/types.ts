@@ -20,6 +20,14 @@ export interface SimilarQuestionVariant {
 export interface QuestionItem {
   id: string;
   imageBase64: string;
+  /**
+   * Diagram / map crop only (from 選圖形). Used by PDF「僅排版文字」so the stem
+   * screenshot is not repeated next to OCR text.
+   * - string: attach this figure
+   * - "" : explicitly no figure (text-only paint crop)
+   * - undefined: legacy question; may fall back to imageBase64
+   */
+  figureImageBase64?: string;
   imageSettings: ImageSettings;
   subject: string;
   gradeLevel?: string; // 年級與冊別，例如：國二上 (第3冊)、高一 (第1冊)
@@ -41,6 +49,13 @@ export interface QuestionItem {
   isSimilarVariant?: boolean;
   parentQuestionId?: string;
   variationPoint?: string;
+}
+
+/** One calibrated wrong-question crop from ImageCalibrationModal. */
+export interface CalibratedCrop {
+  imageBase64: string;
+  /** Diagram-only attach; "" when paint had no 選圖形 island. */
+  figureImageBase64?: string;
 }
 
 export type PaperSize = "B5" | "A4";
