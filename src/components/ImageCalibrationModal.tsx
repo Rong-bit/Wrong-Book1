@@ -1246,7 +1246,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                         ? "bg-emerald-600 text-white shadow-2xs"
                         : "text-slate-600 hover:bg-white"
                     }`}
-                    title="手指畫過文字或圖，框線緊貼所畫內容；文字一框、圖一框（可重疊）"
+                    title="持續畫選即可：先畫文字→文字區，再直接畫地圖→圖區（不必再按畫選）"
                   >
                     <Paintbrush className="w-3 h-3" />
                     畫選
@@ -1616,9 +1616,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 ? `同一題 ${selectRegions.length} 區塊（文字／圖分開拼接）→ 按下方「加入此錯題」`
                 : selectPaintStrokes.length > 0
                 ? selectRegions[0]?.kind === "diagram"
-                  ? "已圈圖區；再畫文字區，或按下方「加入此錯題」"
-                  : "已圈文字區；再畫地圖／圖區，或按下方「加入此錯題」"
-                : "手指畫過文字＝文字區；畫過地圖／圖＝圖區。建議先「AI 去手寫」。"
+                  ? "已圈圖區；直接再畫文字即可（不必再按畫選），或按下方「加入此錯題」"
+                  : "已圈文字區；直接再畫地圖即可出現圖區（不必再按畫選）"
+                : "先畫文字→文字區，接著直接畫地圖→圖區（同一模式連續畫，不必重按畫選）"
               : "「框選」可微調範圍；建議先「AI 去手寫」，再按「加入此錯題」。"}
           </div>
         )}
