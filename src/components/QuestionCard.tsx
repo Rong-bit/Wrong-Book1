@@ -31,7 +31,7 @@ import {
   Maximize2,
 } from "lucide-react";
 import { QuestionItem, ViewLayout, SimilarQuestionVariant } from "../types";
-import { generateSimilarQuestion } from "../services/aiService";
+import { generateSimilarQuestion, rewriteExplanationFromAnswer } from "../services/aiService";
 import { MathRenderer } from "./MathRenderer";
 import { MathToolbar } from "./MathToolbar";
 import { normalizeImageSrc, compressImage } from "../utils/imageUtils";
@@ -75,9 +75,15 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   const [editedChapter, setEditedChapter] = useState(question.chapter || "");
   const [editedUnit, setEditedUnit] = useState(question.unit || "");
   const [editedText, setEditedText] = useState(question.questionText);
+  const [editedAnswer, setEditedAnswer] = useState(question.answer || "");
   const [editedExplanation, setEditedExplanation] = useState(question.explanation);
+  const [editedCoreConcepts, setEditedCoreConcepts] = useState(question.coreConcepts || "");
+  const [editedCommonPitfalls, setEditedCommonPitfalls] = useState(question.commonPitfalls || "");
+  const [editedTips, setEditedTips] = useState(question.tips || "");
   const [editedNotes, setEditedNotes] = useState(question.myNotes || "");
   const [showAnswerInPaper, setShowAnswerInPaper] = useState(false);
+  const [isRewritingExplanation, setIsRewritingExplanation] = useState(false);
+  const [rewriteError, setRewriteError] = useState<string | null>(null);
 
   const fillEditFromQuestion = () => {
     setEditedSubject(question.subject || "");
@@ -85,8 +91,13 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     setEditedChapter(question.chapter || "");
     setEditedUnit(question.unit || "");
     setEditedText(question.questionText);
+    setEditedAnswer(question.answer || "");
     setEditedExplanation(question.explanation);
+    setEditedCoreConcepts(question.coreConcepts || "");
+    setEditedCommonPitfalls(question.commonPitfalls || "");
+    setEditedTips(question.tips || "");
     setEditedNotes(question.myNotes || "");
+    setRewriteError(null);
   };
 
   useEffect(() => {
@@ -99,7 +110,11 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
     question.chapter,
     question.unit,
     question.questionText,
+    question.answer,
     question.explanation,
+    question.coreConcepts,
+    question.commonPitfalls,
+    question.tips,
     question.myNotes,
   ]);
 
@@ -120,8 +135,10 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
   const [imageLoadError, setImageLoadError] = useState(false);
   const replaceImageInputRef = useRef<HTMLInputElement>(null);
   const questionTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const answerTextareaRef = useRef<HTMLTextAreaElement>(null);
   const explanationTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [showQuestionMathToolbar, setShowQuestionMathToolbar] = useState(false);
+  const [showAnswerMathToolbar, setShowAnswerMathToolbar] = useState(false);
   const [showExplanationMathToolbar, setShowExplanationMathToolbar] = useState(false);
   const [showStudyDetails, setShowStudyDetails] = useState(false);
 
@@ -153,10 +170,56 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
       chapter: editedChapter,
       unit: editedUnit,
       questionText: editedText,
+      answer: editedAnswer,
       explanation: editedExplanation,
+      coreConcepts: editedCoreConcepts,
+      commonPitfalls: editedCommonPitfalls,
+      tips: editedTips,
       myNotes: editedNotes,
     });
+    setRewriteError(null);
     setIsEditing(false);
+  };
+
+  const handleRewriteExplanation = async () => {
+    const answerTrimmed = editedAnswer.trim();
+    const textTrimmed = editedText.trim();
+    if (!answerTrimmed) {
+      setRewriteError("請先填寫正確的標準答案，再重寫詳解。");
+      return;
+    }
+    if (!textTrimmed) {
+      setRewriteError("請先填寫題目文字內容，再重寫詳解。");
+      return;
+    }
+
+    setIsRewritingExplanation(true);
+    setRewriteError(null);
+    try {
+      const res = await rewriteExplanationFromAnswer({
+        questionText: textTrimmed,
+        answer: answerTrimmed,
+        subject: editedSubject,
+        gradeLevel: editedGradeLevel,
+        chapter: editedChapter,
+        unit: editedUnit,
+        previousExplanation: editedExplanation,
+      });
+
+      setEditedExplanation(res.詳解步驟 || "");
+      if (res.核心考點) setEditedCoreConcepts(res.核心考點);
+      if (res.易錯陷阱) setEditedCommonPitfalls(res.易錯陷阱);
+      if (res.關鍵技巧) setEditedTips(res.關鍵技巧);
+    } catch (err: any) {
+      console.error("Failed to rewrite explanation:", err);
+      const msg = err?.message || "依答案重寫詳解失敗";
+      setRewriteError(msg);
+      if (err?.needKey && onOpenByokModal) {
+        onOpenByokModal();
+      }
+    } finally {
+      setIsRewritingExplanation(false);
+    }
   };
 
   const handleGenerateSimilar = async () => {
@@ -715,6 +778,83 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
           </div>
 
           <div>
+            <div className="flex items-center justify-between mb-1.5 gap-2 flex-wrap">
+              <label className="text-[11px] font-bold text-slate-700">
+                標準答案
+              </label>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setShowAnswerMathToolbar(!showAnswerMathToolbar)}
+                  className={`text-[11px] font-semibold px-2 py-0.5 rounded-lg border transition flex items-center gap-1 ${
+                    showAnswerMathToolbar
+                      ? "bg-sky-600 text-white border-sky-600 shadow-2xs"
+                      : "bg-white text-sky-700 border-sky-200 hover:bg-sky-50"
+                  }`}
+                >
+                  <Calculator className="w-3 h-3" />
+                  {showAnswerMathToolbar ? "隱藏公式工具列" : "📐 數學公式工具列"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRewriteExplanation}
+                  disabled={isRewritingExplanation}
+                  className="text-[11px] font-semibold px-2 py-0.5 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isRewritingExplanation ? (
+                    <>
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      重寫中…
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3 h-3" />
+                      依此答案重寫詳解
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {showAnswerMathToolbar && (
+              <div className="mb-2">
+                <MathToolbar
+                  textareaRef={answerTextareaRef}
+                  value={editedAnswer}
+                  onChange={setEditedAnswer}
+                />
+              </div>
+            )}
+
+            <textarea
+              ref={answerTextareaRef}
+              rows={2}
+              value={editedAnswer}
+              onChange={(e) => setEditedAnswer(e.target.value)}
+              className="w-full text-xs p-2.5 rounded-lg border border-emerald-300 bg-white leading-relaxed font-sans"
+              placeholder="例如：(C) 或 $x = 3$；改正後可點「依此答案重寫詳解」"
+            />
+
+            {editedAnswer && (
+              <div className="mt-1.5 p-2.5 bg-emerald-50/50 rounded-lg border border-emerald-200/80 text-xs">
+                <div className="text-[10px] text-emerald-800 font-bold mb-1">
+                  答案預覽
+                </div>
+                <div className="text-emerald-900 font-sans leading-relaxed">
+                  <MathRenderer content={editedAnswer} />
+                </div>
+              </div>
+            )}
+
+            {rewriteError && (
+              <div className="mt-1.5 p-2 rounded-lg bg-rose-50 border border-rose-200 text-[11px] text-rose-700 flex items-start gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>{rewriteError}</span>
+              </div>
+            )}
+          </div>
+
+          <div>
             <div className="flex items-center justify-between mb-1.5">
               <label className="text-[11px] font-bold text-slate-700">
                 詳細推導步驟
@@ -782,15 +922,20 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
-              onClick={() => setIsEditing(false)}
-              className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200 rounded-lg transition"
+              onClick={() => {
+                setRewriteError(null);
+                setIsEditing(false);
+              }}
+              disabled={isRewritingExplanation}
+              className="px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-200 rounded-lg transition disabled:opacity-50"
             >
               取消
             </button>
             <button
               type="button"
               onClick={handleSaveEdit}
-              className="px-4 py-1.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition flex items-center gap-1 shadow-xs"
+              disabled={isRewritingExplanation}
+              className="px-4 py-1.5 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg transition flex items-center gap-1 shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Check className="w-3.5 h-3.5" /> 儲存變更
             </button>

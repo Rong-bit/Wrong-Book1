@@ -1,13 +1,16 @@
 import {
   buildAnalyzePrompt,
+  buildRewriteExplanationPrompt,
   buildSimilarPrompt,
   createGeminiClient,
   formatErrorMessage,
   generateContentWithRetry,
   getAnalyzeResponseSchema,
+  getRewriteExplanationResponseSchema,
   getSimilarResponseSchema,
   parseJsonResponse,
   resolveModel,
+  type RewriteExplanationParams,
 } from "./geminiCore";
 import { alignAnalysisLabels, CurriculumLabel } from "../utils/curriculumLabels";
 
@@ -414,5 +417,84 @@ export async function generateSimilarQuestion(
       throw error;
     }
     return generateSimilarQuestionOnClient(params);
+  }
+}
+
+export interface AIRewriteExplanationResult {
+  詳解步驟: string;
+  核心考點?: string;
+  易錯陷阱?: string;
+  關鍵技巧?: string;
+}
+
+export type RewriteExplanationFromAnswerParams = RewriteExplanationParams;
+
+async function rewriteExplanationFromAnswerOnClient(
+  params: RewriteExplanationFromAnswerParams
+): Promise<AIRewriteExplanationResult> {
+  const customApiKey = getStoredApiKey();
+  if (!customApiKey) {
+    throwNeedKey("未配置 Gemini API Key。請點擊右上角「自備金鑰 BYOK」設定您的 API Key。");
+  }
+
+  try {
+    const ai = createGeminiClient(customApiKey);
+    const { response } = await generateContentWithRetry(ai, resolveModel(getStoredModel()), {
+      contents: buildRewriteExplanationPrompt(params),
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: getRewriteExplanationResponseSchema(),
+      },
+    });
+
+    return parseJsonResponse(response.text || "{}") as AIRewriteExplanationResult;
+  } catch (error: any) {
+    if (error?.needKey) throw error;
+    throwFormatted(error);
+  }
+}
+
+export async function rewriteExplanationFromAnswer(
+  params: RewriteExplanationFromAnswerParams
+): Promise<AIRewriteExplanationResult> {
+  const customApiKey = getStoredApiKey();
+  const selectedModel = getStoredModel();
+
+  try {
+    const response = await fetch("/api/rewrite-explanation", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ...params,
+        customApiKey,
+        selectedModel,
+      }),
+    });
+
+    if (isBackendUnavailable(response)) {
+      return rewriteExplanationFromAnswerOnClient(params);
+    }
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw parseServerError(errData, `重寫詳解失敗 (${response.status})`, response.status);
+    }
+
+    const result = await response.json();
+    if (!result.success || !result.data) {
+      throw new Error("AI 重寫詳解格式異常，請重試。");
+    }
+
+    return result.data as AIRewriteExplanationResult;
+  } catch (error: any) {
+    if (error?.needKey || error?.isKeyProblem || error?.isTransient) {
+      throw error;
+    }
+    if (error instanceof Error && error.message.includes("AI 重寫詳解格式異常")) {
+      throw error;
+    }
+    return rewriteExplanationFromAnswerOnClient(params);
   }
 }
