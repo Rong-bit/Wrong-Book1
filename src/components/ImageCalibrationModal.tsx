@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   Check,
@@ -30,6 +31,9 @@ import {
   Trash2,
   Paintbrush,
 } from "lucide-react";
+
+/** Mobile: aim above the finger so the red loupe crosshair is the true drop point. */
+const TOUCH_AIM_OFFSET_Y = 72;
 import {
   Point,
   applyPerspectiveCorrection,
@@ -662,13 +666,17 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     ctx.arc(radius, radius, radius - 2, 0, Math.PI * 2);
     ctx.clip();
 
-    // Source image draw zoomed
+    // Source image draw zoomed — use live natural/client sizes (state can lag on mobile)
     const img = imgRef.current;
-    const srcX = loupeInfo.srcX * naturalDimensions.width;
-    const srcY = loupeInfo.srcY * naturalDimensions.height;
+    const natW = img.naturalWidth || naturalDimensions.width || 1;
+    const natH = img.naturalHeight || naturalDimensions.height || 1;
+    const dispW = Math.max(1, img.clientWidth || displayDimensions.width || 1);
+    const dispH = Math.max(1, img.clientHeight || displayDimensions.height || 1);
+    const srcX = loupeInfo.srcX * natW;
+    const srcY = loupeInfo.srcY * natH;
 
-    const sWidth = (size / zoom) * (naturalDimensions.width / img.clientWidth);
-    const sHeight = (size / zoom) * (naturalDimensions.height / img.clientHeight);
+    const sWidth = (size / zoom) * (natW / dispW);
+    const sHeight = (size / zoom) * (natH / dispH);
 
     ctx.drawImage(
       img,
@@ -706,30 +714,59 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     ctx.beginPath();
     ctx.arc(radius, radius, radius - 2, 0, Math.PI * 2);
     ctx.stroke();
-  }, [loupeInfo, naturalDimensions]);
+  }, [loupeInfo, naturalDimensions, displayDimensions]);
 
-  // Pointer position relative to displayed image
+  // Pointer position relative to displayed image (object-fill box = full img rect)
   const getNormalizedPos = useCallback((clientX: number, clientY: number) => {
     if (!imgRef.current) return { x: 0.5, y: 0.5 };
     const rect = imgRef.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-    const y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
+    const w = rect.width || 1;
+    const h = rect.height || 1;
+    const x = Math.max(0, Math.min(1, (clientX - rect.left) / w));
+    const y = Math.max(0, Math.min(1, (clientY - rect.top) / h));
     return { x, y };
   }, []);
+
+  /** Mouse: tip = aim. Touch: aim above finger (same point the loupe crosshair shows). */
+  const getAimFromEvent = useCallback(
+    (e: MouseEvent | TouchEvent | React.MouseEvent | React.TouchEvent) => {
+      const isTouch = "touches" in e && e.touches.length > 0;
+      const clientX = isTouch
+        ? e.touches[0].clientX
+        : "clientX" in e
+        ? e.clientX
+        : 0;
+      const clientY = isTouch
+        ? e.touches[0].clientY
+        : "clientY" in e
+        ? e.clientY
+        : 0;
+      const aimX = clientX;
+      const aimY = isTouch ? clientY - TOUCH_AIM_OFFSET_Y : clientY;
+      return { clientX, clientY, aimX, aimY, isTouch };
+    },
+    []
+  );
 
   // Corner pointer events for 4-point perspective
   const handleCornerDown = (index: number, e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setActiveDragCorner(index);
-    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    const pos = getNormalizedPos(clientX, clientY);
+    const { aimX, aimY } = getAimFromEvent(e);
+    const pos = getNormalizedPos(aimX, aimY);
+
+    // Touch: snap pin to aim point immediately so it matches the loupe crosshair
+    setCorners((prev) => {
+      const next = [...prev] as [Point, Point, Point, Point];
+      next[index] = { x: pos.x, y: pos.y };
+      return next;
+    });
 
     setLoupeInfo({
       visible: true,
-      x: clientX,
-      y: clientY - 80,
+      x: aimX,
+      y: aimY,
       srcX: pos.x,
       srcY: pos.y,
     });
@@ -830,9 +867,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     if (activeDragCorner === null && activeCropHandle === null) return;
 
     const handlePointerMove = (e: MouseEvent | TouchEvent) => {
-      const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-      const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-      const pos = getNormalizedPos(clientX, clientY);
+      if ("touches" in e) e.preventDefault();
+      const { aimX, aimY } = getAimFromEvent(e);
+      const pos = getNormalizedPos(aimX, aimY);
 
       if (activeDragCorner !== null) {
         setCorners((prev) => {
@@ -841,10 +878,11 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           return next;
         });
 
+        // Loupe is centered on the aim point (= red crosshair = pin drop point)
         setLoupeInfo({
           visible: true,
-          x: clientX,
-          y: clientY - 80,
+          x: aimX,
+          y: aimY,
           srcX: pos.x,
           srcY: pos.y,
         });
@@ -919,7 +957,15 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       window.removeEventListener("touchmove", handlePointerMove);
       window.removeEventListener("touchend", handlePointerUp);
     };
-  }, [activeDragCorner, activeCropHandle, cropDragStart, getNormalizedPos, aspectRatioMode, naturalDimensions]);
+  }, [
+    activeDragCorner,
+    activeCropHandle,
+    cropDragStart,
+    getNormalizedPos,
+    getAimFromEvent,
+    aspectRatioMode,
+    naturalDimensions,
+  ]);
 
   // Global keyboard shortcuts: Enter for Next Step, Escape to close
   useEffect(() => {
@@ -940,6 +986,31 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   }, [isOpen, onClose, handleFinish, isProcessing]);
 
   if (!isOpen) return null;
+
+  const loupePortal =
+    loupeInfo &&
+    loupeInfo.visible &&
+    typeof document !== "undefined" &&
+    createPortal(
+      <div
+        style={{
+          left: `${loupeInfo.x}px`,
+          top: `${loupeInfo.y}px`,
+        }}
+        className="fixed -translate-x-1/2 -translate-y-1/2 pointer-events-none z-[200] rounded-full shadow-2xl overflow-hidden ring-3 ring-sky-500 bg-slate-950"
+      >
+        <canvas
+          ref={loupeCanvasRef}
+          width={120}
+          height={120}
+          className="rounded-full block"
+        />
+        <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] font-mono font-bold text-white bg-black/60 px-1.5 py-0.2 rounded-full">
+          對準角 · 2.5×
+        </div>
+      </div>,
+      document.body
+    );
 
   // Render SVG polygon and perspective grid
   const renderPerspectiveSvgOverlay = () => {
@@ -1244,6 +1315,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 <span className="hidden sm:inline-flex items-center gap-1 text-sky-700 bg-sky-50 px-2 py-1 rounded-md font-medium text-[11px]">
                   <Info className="w-3.5 h-3.5" />
                   拖曳四角圓點對齊考卷近白色紙角（開啟時會自動偵測），即可將歪斜拍照展平
+                </span>
+                <span className="sm:hidden inline-flex items-center gap-1 text-sky-700 bg-sky-50 px-2 py-1 rounded-md font-medium text-[10px] max-w-[11rem] leading-snug">
+                  拖角點：以紅色十字線對準紙角（在指尖上方）
                 </span>
                 <button
                   type="button"
@@ -1676,27 +1750,6 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             )}
           </div>
 
-          {/* Floating Magnifier Loupe during handle drag */}
-          {loupeInfo && loupeInfo.visible && (
-            <div
-              style={{
-                left: `${loupeInfo.x}px`,
-                top: `${loupeInfo.y}px`,
-              }}
-              className="fixed -translate-x-1/2 -translate-y-1/2 pointer-events-none z-50 rounded-full shadow-2xl overflow-hidden ring-3 ring-sky-500 bg-slate-950"
-            >
-              <canvas
-                ref={loupeCanvasRef}
-                width={120}
-                height={120}
-                className="rounded-full block"
-              />
-              <div className="absolute bottom-1 left-1/2 -translate-x-1/2 text-[9px] font-mono font-bold text-white bg-black/60 px-1.5 py-0.2 rounded-full">
-                2.5×
-              </div>
-            </div>
-          )}
-
           {/* Processing Spinner Overlay (erase brush uses quiet busy flag instead) */}
           {isProcessing && (
             <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-xs flex flex-col items-center justify-center text-white z-40">
@@ -1854,6 +1907,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           </div>
         </div>
       </div>
+      {loupePortal}
     </div>
   );
 };

@@ -506,8 +506,18 @@ export function detectNearWhitePaperCorners(
   }
 
   const cover = paperCount / rawMask.length;
-  // No distinct paper-vs-background corners: keep the 6% inset.
-  if (cover < 0.08 || cover > 0.97) return FALLBACK_PERSPECTIVE_CORNERS;
+  // Almost no paper detected — keep the 6% inset fallback.
+  if (cover < 0.08) return FALLBACK_PERSPECTIVE_CORNERS;
+  // Paper fills nearly the whole frame (common on phone close-ups):
+  // corners ≈ image edge, not the looser 6% inset used when background is visible.
+  if (cover > 0.97) {
+    return [
+      { x: 0.012, y: 0.012 },
+      { x: 0.988, y: 0.012 },
+      { x: 0.988, y: 0.988 },
+      { x: 0.012, y: 0.988 },
+    ];
+  }
 
   const mask = dilateMask(rawMask, w, h);
 
