@@ -43,7 +43,6 @@ import {
   FULL_FRAME_CORNERS,
   cropBoxFromCorners,
   paintWhiteBrushOnImage,
-  filterColoredAndPencilInk,
 } from "../utils/imageUtils";
 import { removeHandwritingWithAI } from "../services/aiService";
 
@@ -522,26 +521,6 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       pushHistory(enhanced);
     } catch (err) {
       console.error("Remove shadows failed:", err);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  /** One-tap local filter: bleach red pen marks only (not AI). Keeps maps/print; pencil/black →「去手寫」. */
-  const handleFilterColoredInk = async () => {
-    if (isProcessing || isErasingBusy) return;
-    setIsProcessing(true);
-    setProcessingText("正在過濾紅筆筆跡...");
-    try {
-      const filtered = await filterColoredAndPencilInk(currentImage, {
-        removeColored: true,
-        // Blue/green map fills must stay; graphite / black pen →「去手寫」.
-        removePencil: false,
-        removeBluePen: false,
-      });
-      pushHistory(filtered);
-    } catch (err) {
-      console.error("Filter colored/pencil ink failed:", err);
     } finally {
       setIsProcessing(false);
     }
@@ -1250,19 +1229,6 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               <span className="hidden sm:inline">AI 去手寫</span>
             </button>
 
-            {/* Color/pencil ink filter (local, non-AI) */}
-            <button
-              type="button"
-              onClick={() => void handleFilterColoredInk()}
-              disabled={isProcessing || isErasingBusy}
-              className="px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-bold text-rose-900 bg-rose-100 hover:bg-rose-200 active:scale-95 transition flex items-center gap-1 sm:gap-1.5 cursor-pointer whitespace-nowrap border border-rose-200 disabled:opacity-50"
-              title="本機過濾：去掉紅筆手寫，保留印刷字與彩色地圖。藍筆／鉛筆／黑手寫請改用「去手寫」塗白或「AI 去手寫」"
-            >
-              <Eraser className="w-3.5 h-3.5 text-rose-700" />
-              <span className="sm:hidden">濾紅筆</span>
-              <span className="hidden sm:inline">過濾紅筆</span>
-            </button>
-
             {/* Shadow Removal / Paper Whitening Quick Actions */}
             <div className="flex items-center gap-0.5 bg-amber-50/90 p-0.5 rounded-lg border border-amber-200 shadow-2xs">
               <button
@@ -1529,7 +1495,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         {/* Pending multi-crop queue */}
         {!isExistingQuestion && mode === "crop" && (
           <div className="px-2 sm:px-5 py-1 text-[10px] sm:text-[11px] text-slate-500 bg-slate-50 border-t border-slate-100 shrink-0">
-            框好一題後按「加入此錯題」，可再框下一題。建議先按「AI 去手寫」挖空圈選／勾選答案與筆跡；也可用「過濾紅筆」或手動「去手寫」塗白。
+            框好一題後按「加入此錯題」，可再框下一題。建議先按「AI 去手寫」挖空圈選／勾選答案與筆跡；也可用手動「去手寫」塗白。
           </div>
         )}
         {!isExistingQuestion && pendingCrops.length > 0 && (
