@@ -1,13 +1,17 @@
 import {
   buildAnalyzePrompt,
+  buildRemoveHandwritingPrompt,
   buildRewriteExplanationPrompt,
   buildSimilarPrompt,
   createGeminiClient,
+  extractInlineImageDataUrl,
   formatErrorMessage,
   generateContentWithRetry,
+  generateImageContentWithRetry,
   getAnalyzeResponseSchema,
   getRewriteExplanationResponseSchema,
   getSimilarResponseSchema,
+  IMAGE_EDIT_MODELS,
   parseJsonResponse,
   resolveModel,
   type RewriteExplanationParams,
@@ -449,6 +453,90 @@ async function rewriteExplanationFromAnswerOnClient(
   } catch (error: any) {
     if (error?.needKey) throw error;
     throwFormatted(error);
+  }
+}
+
+/**
+ * AI inpainting: remove handwriting from an exam photo while keeping print & maps.
+ * Uses Gemini image-edit models (not the text analysis model preference).
+ */
+async function removeHandwritingOnClient(imageBase64: string): Promise<string> {
+  const customApiKey = getStoredApiKey();
+  if (!customApiKey) {
+    throwNeedKey();
+  }
+
+  const mimeMatch = imageBase64.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,/);
+  const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+  const cleanBase64 = imageBase64.replace(/^data:image\/[a-zA-Z0-9+.-]+;base64,/, "");
+
+  try {
+    const ai = createGeminiClient(customApiKey);
+    const { response } = await generateImageContentWithRetry(ai, IMAGE_EDIT_MODELS[0], {
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType,
+              data: cleanBase64,
+            },
+          },
+          { text: buildRemoveHandwritingPrompt() },
+        ],
+      },
+      config: {
+        responseModalities: ["TEXT", "IMAGE"],
+      },
+    });
+
+    const out = extractInlineImageDataUrl(response);
+    if (!out) {
+      throw new Error("AI 未回傳去手寫後的圖片，請再試一次。");
+    }
+    return out;
+  } catch (error: any) {
+    if (error?.needKey) throw error;
+    throwFormatted(error);
+  }
+}
+
+export async function removeHandwritingWithAI(imageBase64: string): Promise<string> {
+  const customApiKey = getStoredApiKey();
+
+  try {
+    const response = await fetch("/api/remove-handwriting", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        imageBase64,
+        customApiKey,
+      }),
+    });
+
+    if (isBackendUnavailable(response)) {
+      return removeHandwritingOnClient(imageBase64);
+    }
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw parseServerError(errData, `AI 去手寫失敗 (${response.status})`, response.status);
+    }
+
+    const result = await response.json();
+    if (!result.success || !result.imageBase64) {
+      throw new Error("AI 去手寫回傳格式異常，請再試一次。");
+    }
+    return result.imageBase64 as string;
+  } catch (error: any) {
+    if (error?.needKey || error?.isKeyProblem || error?.isTransient) {
+      throw error;
+    }
+    if (error instanceof Error && error.message.includes("AI 去手寫")) {
+      throw error;
+    }
+    return removeHandwritingOnClient(imageBase64);
   }
 }
 

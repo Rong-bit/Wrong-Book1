@@ -263,7 +263,11 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
         <div className="flex items-center gap-3 text-[11px] text-slate-500">
           <span className="flex items-center gap-1 text-slate-600">
             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+<<<<<<< HEAD
             <span>透視拉正 · 著色選多題 · 過濾紅筆 · 去手寫塗白</span>
+=======
+            <span>透視拉正 · 多錯題框選 · AI去手寫 · 過濾紅筆 · 手動塗白</span>
+>>>>>>> origin/main
           </span>
         </div>
       </div>
