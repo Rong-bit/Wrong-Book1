@@ -733,20 +733,20 @@ export default function App() {
   }, [questions, selectedSubjectFilter]);
 
   /**
-   * Badge 題號：依拍攝／加入時間由小到大（最早=1）。
-   * 錯題本列表最新在上，故最大題號在最上面；校正縮圖左→右 = 第1→n。
+   * Badge 題號：依錯題本目前排列重編（上→下 = n→1，最大在上）。
+   * ↑↓ 移動後號碼跟著位置走；校正多選左→右仍對應第1→n（右最上）。
    */
   const captureNumberById = useMemo(() => {
-    const ordered = [...questions].sort(compareCaptureTime);
-    return new Map(ordered.map((q, i) => [q.id, i + 1]));
+    const n = questions.length;
+    return new Map(questions.map((q, i) => [q.id, n - i]));
   }, [questions]);
 
-  /** PDF：略過分析中，依題號由小到大（第1題先印） */
+  /** PDF：略過分析中，依題號由小到大（第1題先印 = 錯題本由下往上） */
   const printQuestions = useMemo(
     () =>
       [...questions]
         .filter((q) => q.status !== "analyzing")
-        .sort(compareCaptureTime),
+        .reverse(),
     [questions]
   );
 
