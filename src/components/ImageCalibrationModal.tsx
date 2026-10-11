@@ -50,6 +50,7 @@ import {
   applyMultiRegionCrop,
   clusterTightStrokeRects,
   CropRect,
+  LabeledCropRect,
 } from "../utils/imageUtils";
 import { removeHandwritingWithAI } from "../services/aiService";
 
@@ -100,12 +101,12 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const [pendingCrops, setPendingCrops] = useState<string[]>([]);
   const [cropTool, setCropTool] = useState<CropTool>("paint");
   const [selectPaintStrokes, setSelectPaintStrokes] = useState<Point[][]>([]);
-  const [selectRegions, setSelectRegions] = useState<CropRect[]>([]);
+  const [selectRegions, setSelectRegions] = useState<LabeledCropRect[]>([]);
   const [activeSelectStroke, setActiveSelectStroke] = useState<Point[] | null>(null);
   const [isSelectPainting, setIsSelectPainting] = useState(false);
   const selectStrokeRef = useRef<Point[] | null>(null);
   const selectPaintStrokesRef = useRef<Point[][]>([]);
-  const selectRegionsRef = useRef<CropRect[]>([]);
+  const selectRegionsRef = useRef<LabeledCropRect[]>([]);
   const cropDirtyAfterAddRef = useRef(false);
   const currentImageRef = useRef(currentImage);
   currentImageRef.current = currentImage;
@@ -1533,10 +1534,16 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                     onTouchStart={handleSelectPaintDown}
                     style={{ touchAction: "none" }}
                   >
-                    {selectRegions.map((r, idx) => (
+                    {selectRegions.map((r, idx) => {
+                      const isDiagram = r.kind === "diagram";
+                      return (
                       <div
                         key={`reg-${idx}`}
-                        className="absolute border-2 border-emerald-500 bg-emerald-400/15 pointer-events-none rounded-sm"
+                        className={`absolute border-2 pointer-events-none rounded-sm ${
+                          isDiagram
+                            ? "border-sky-500 bg-sky-400/15"
+                            : "border-emerald-500 bg-emerald-400/15"
+                        }`}
                         style={{
                           left: `${r.x * 100}%`,
                           top: `${r.y * 100}%`,
@@ -1544,11 +1551,16 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                           height: `${r.height * 100}%`,
                         }}
                       >
-                        <div className="absolute -top-5 left-0 px-1.5 py-0.5 rounded bg-emerald-700/90 text-white text-[9px] font-bold whitespace-nowrap">
-                          {idx === 0 ? "文字區" : idx === 1 ? "圖區" : `範圍 ${idx + 1}`}
+                        <div
+                          className={`absolute -top-5 left-0 px-1.5 py-0.5 rounded text-white text-[9px] font-bold whitespace-nowrap ${
+                            isDiagram ? "bg-sky-700/90" : "bg-emerald-700/90"
+                          }`}
+                        >
+                          {isDiagram ? "圖區" : "文字區"}
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                     <svg className="absolute inset-0 w-full h-full pointer-events-none">
                       {[...selectPaintStrokes, ...(activeSelectStroke ? [activeSelectStroke] : [])].map(
                         (stroke, idx) => (
@@ -1576,8 +1588,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                       {selectRegions.length > 1
                         ? `同一題 ${selectRegions.length} 區塊（文字／圖分開拼接）→ 加入錯題`
                         : selectPaintStrokes.length > 0
-                        ? "再畫圖區／另一塊文字，或按「加入錯題」"
-                        : "手指畫過文字＝文字框；再畫圖＝圖框（緊貼所畫範圍）"}
+                        ? selectRegions[0]?.kind === "diagram"
+                          ? "已圈圖區；再畫文字區，或按「加入錯題」"
+                          : "已圈文字區；再畫地圖／圖區，或按「加入錯題」"
+                        : "手指畫過文字＝文字區；畫過地圖／圖＝圖區"}
                     </div>
                   </div>
                 )}

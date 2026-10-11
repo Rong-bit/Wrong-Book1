@@ -316,6 +316,13 @@ export interface CropRect {
   height: number;
 }
 
+/** Content class for a paint-select island */
+export type RegionKind = "text" | "diagram";
+
+export interface LabeledCropRect extends CropRect {
+  kind: RegionKind;
+}
+
 export const FALLBACK_PERSPECTIVE_CORNERS: [Point, Point, Point, Point] = [
   { x: 0.06, y: 0.06 },
   { x: 0.94, y: 0.06 },
@@ -1299,10 +1306,89 @@ function rectsNearOrOverlap(a: CropRect, b: CropRect, gap: number): boolean {
 }
 
 /**
- * Merge multi-line text islands, but keep side-by-side text|diagram separate
- * even when the horizontal gap is tiny (common on exam pages like geo Q11).
+ * Classify a crop island as printed text vs diagram/map using chroma & ink stats.
  */
-function shouldMergePaintIslands(a: CropRect, b: CropRect, mergeGap: number): boolean {
+export function classifyCropRegion(
+  img: HTMLImageElement,
+  rect: CropRect,
+  maxSide = 280
+): RegionKind {
+  const natW = img.naturalWidth || img.width;
+  const natH = img.naturalHeight || img.height;
+  if (natW < 8 || natH < 8 || rect.width <= 0 || rect.height <= 0) return "text";
+
+  const rw = Math.max(8, Math.round(rect.width * natW));
+  const rh = Math.max(8, Math.round(rect.height * natH));
+  const scale = Math.min(1, maxSide / Math.max(rw, rh));
+  const w = Math.max(8, Math.round(rw * scale));
+  const h = Math.max(8, Math.round(rh * scale));
+  const sx = Math.max(0, Math.round(rect.x * natW));
+  const sy = Math.max(0, Math.round(rect.y * natH));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return "text";
+  ctx.drawImage(img, sx, sy, rw, rh, 0, 0, w, h);
+  const { data } = ctx.getImageData(0, 0, w, h);
+
+  let lumSum = 0;
+  let chromaSum = 0;
+  const n = w * h;
+  const lum = new Float32Array(n);
+  const chroma = new Uint8Array(n);
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    const v = 0.299 * r + 0.587 * g + 0.114 * b;
+    lum[p] = v;
+    lumSum += v;
+    const c = Math.max(r, g, b) - Math.min(r, g, b);
+    chroma[p] = c;
+    chromaSum += c;
+  }
+  const avgLum = lumSum / n;
+  const avgChroma = chromaSum / n;
+  const inkCut = Math.min(172, Math.max(95, avgLum * 0.74));
+
+  let ink = 0;
+  let diagram = 0;
+  for (let p = 0; p < n; p++) {
+    const isInk = lum[p] < inkCut && chroma[p] < 40;
+    const isDiagram = chroma[p] >= 26 && lum[p] < avgLum + 18;
+    if (isInk) ink++;
+    if (isDiagram) diagram++;
+  }
+
+  const content = Math.max(1, ink + diagram);
+  const diagramRatio = diagram / content;
+  const inkRatio = ink / n;
+
+  // Colorful / map-like patches
+  if (diagramRatio >= 0.2 || avgChroma >= 20) return "diagram";
+  // Sparse ink with some color (washed maps, light fills)
+  if (inkRatio < 0.045 && avgChroma >= 12) return "diagram";
+  // Squarish region with moderate chroma → often a small map card
+  const aspect = rect.width / Math.max(1e-6, rect.height);
+  if (avgChroma >= 14 && aspect > 0.55 && aspect < 1.85 && diagramRatio >= 0.12) {
+    return "diagram";
+  }
+  return "text";
+}
+
+/**
+ * Merge multi-line text (or diagram) islands of the same kind only.
+ * Never glue a text island to a map/diagram island.
+ */
+function shouldMergePaintIslands(
+  a: LabeledCropRect,
+  b: LabeledCropRect,
+  mergeGap: number
+): boolean {
+  if (a.kind !== b.kind) return false;
+
   const ax2 = a.x + a.width;
   const ay2 = a.y + a.height;
   const bx2 = b.x + b.width;
@@ -1311,6 +1397,7 @@ function shouldMergePaintIslands(a: CropRect, b: CropRect, mergeGap: number): bo
   const overlapX = Math.max(0, Math.min(ax2, bx2) - Math.max(a.x, b.x));
   const overlapY = Math.max(0, Math.min(ay2, by2) - Math.max(a.y, b.y));
   const gapY = Math.max(0, Math.max(a.y, b.y) - Math.min(ay2, by2));
+  const gapX = Math.max(0, Math.max(a.x, b.x) - Math.min(ax2, bx2));
   const minW = Math.min(a.width, b.width);
   const minArea = Math.min(a.width * a.height, b.width * b.height);
 
@@ -1322,7 +1409,11 @@ function shouldMergePaintIslands(a: CropRect, b: CropRect, mergeGap: number): bo
   // Vertically stacked with column alignment (multi-line stem text)
   if (gapY <= mergeGap && overlapX >= minW * 0.4) return true;
 
-  // Side-by-side (text | map) stays as two rects
+  // Same-kind diagrams that sit in one row with a tiny gap may still merge
+  if (a.kind === "diagram" && gapX <= mergeGap && overlapY >= Math.min(a.height, b.height) * 0.4) {
+    return true;
+  }
+
   return false;
 }
 
@@ -1362,14 +1453,17 @@ export function mergeNearbyCropRects(rects: CropRect[], mergeGap = 0.035): CropR
   return current;
 }
 
-/** Merge stacked text lines only — do not glue left text to right diagram. */
-export function mergePaintIslandRects(rects: CropRect[], mergeGap = 0.035): CropRect[] {
+/** Merge stacked same-kind islands only — never glue text to diagram. */
+export function mergePaintIslandRects(
+  rects: LabeledCropRect[],
+  mergeGap = 0.035
+): LabeledCropRect[] {
   if (!rects.length) return [];
   let current = rects.map((r) => ({ ...r }));
   let changed = true;
   while (changed) {
     changed = false;
-    const next: CropRect[] = [];
+    const next: LabeledCropRect[] = [];
     const used = new Set<number>();
     for (let i = 0; i < current.length; i++) {
       if (used.has(i)) continue;
@@ -1377,7 +1471,8 @@ export function mergePaintIslandRects(rects: CropRect[], mergeGap = 0.035): Crop
       for (let j = i + 1; j < current.length; j++) {
         if (used.has(j)) continue;
         if (shouldMergePaintIslands(acc, current[j], mergeGap)) {
-          acc = unionRects(acc, current[j]);
+          const u = unionRects(acc, current[j]);
+          acc = { ...u, kind: acc.kind };
           used.add(j);
           changed = true;
         }
@@ -1408,18 +1503,24 @@ export function clusterPaintStrokesToRects(
 
 /**
  * Build tight content-aware rects from paint strokes (text one island, diagram another).
- * Side-by-side text|map (e.g. geo Q11) stay as two rects even when nearly touching.
+ * Each island is classified as text | diagram; different kinds never merge.
  */
 export function clusterTightStrokeRects(
   img: HTMLImageElement,
   strokes: Point[][],
   corridorNorm = 0.02,
   mergeGap = 0.035
-): CropRect[] {
+): LabeledCropRect[] {
   const seed = strokes
     .map((s) => tightCropRectAlongStroke(img, s, corridorNorm))
-    .filter((r): r is CropRect => Boolean(r));
-  return mergePaintIslandRects(seed, mergeGap);
+    .filter((r): r is CropRect => Boolean(r))
+    .map((r) => ({ ...r, kind: classifyCropRegion(img, r) }));
+  const merged = mergePaintIslandRects(seed, mergeGap);
+  // Text blocks first (reading order), then diagrams
+  return merged.sort((a, b) => {
+    if (a.kind !== b.kind) return a.kind === "text" ? -1 : 1;
+    return Math.abs(a.y - b.y) > 0.04 ? a.y - b.y : a.x - b.x;
+  });
 }
 
 export function unionCropRects(rects: CropRect[]): CropRect | null {
@@ -1427,7 +1528,15 @@ export function unionCropRects(rects: CropRect[]): CropRect | null {
   return rects.reduce((acc, r) => unionRects(acc, r));
 }
 
-type PixelPatch = { sx: number; sy: number; sw: number; sh: number; cx: number; cy: number };
+type PixelPatch = {
+  sx: number;
+  sy: number;
+  sw: number;
+  sh: number;
+  cx: number;
+  cy: number;
+  kind: RegionKind;
+};
 
 /**
  * Crop one question that may span multiple rectangular islands (stem + map).
@@ -1436,7 +1545,7 @@ type PixelPatch = { sx: number; sy: number; sw: number; sh: number; cx: number; 
  */
 export async function applyMultiRegionCrop(
   imageSrc: string,
-  regions: CropRect[],
+  regions: Array<CropRect | LabeledCropRect>,
   quality = 0.92
 ): Promise<string> {
   const normSrc = normalizeImageSrc(imageSrc);
@@ -1464,6 +1573,10 @@ export async function applyMultiRegionCrop(
           const sy = Math.max(0, Math.round(r.y * h));
           const sw = Math.max(1, Math.min(w - sx, Math.round(r.width * w)));
           const sh = Math.max(1, Math.min(h - sy, Math.round(r.height * h)));
+          const kind: RegionKind =
+            "kind" in r && (r.kind === "text" || r.kind === "diagram")
+              ? r.kind
+              : classifyCropRegion(img, r);
           return {
             sx,
             sy,
@@ -1471,20 +1584,24 @@ export async function applyMultiRegionCrop(
             sh,
             cx: r.x + r.width / 2,
             cy: r.y + r.height / 2,
+            kind,
           };
         });
 
-        // Stack vertically as two (or more) blocks — not one long strip.
-        // Same row (stem | map): left panel first; else top→bottom.
-        patches.sort((a, b) => (Math.abs(a.cy - b.cy) > 0.06 ? a.cy - b.cy : a.cx - b.cx));
+        // Text blocks first, then diagrams (stable reading order within kind)
+        patches.sort((a, b) => {
+          if (a.kind !== b.kind) return a.kind === "text" ? -1 : 1;
+          return Math.abs(a.cy - b.cy) > 0.06 ? a.cy - b.cy : a.cx - b.cx;
+        });
 
         const labelH = Math.max(18, Math.round(Math.min(w, h) * 0.014));
         const gutter = Math.max(16, Math.round(Math.min(w, h) * 0.02));
         const pad = Math.max(12, Math.round(Math.min(w, h) * 0.012));
         const paper = "#e8e6de";
         const border = "#64748b";
-        const labels =
-          patches.length === 2 ? ["文字區", "圖區"] : patches.map((_, i) => `範圍 ${i + 1}`);
+        const labels = patches.map((p, i) =>
+          p.kind === "diagram" ? "圖區" : p.kind === "text" ? "文字區" : `範圍 ${i + 1}`
+        );
 
         const maxW = Math.max(...patches.map((p) => p.sw));
         const canvasW = pad * 2 + maxW;
@@ -1513,7 +1630,7 @@ export async function applyMultiRegionCrop(
           const dy = cursorY + labelH;
 
           // Label chip
-          ctx.fillStyle = i === 0 ? "#0f766e" : "#0369a1";
+          ctx.fillStyle = p.kind === "diagram" ? "#0369a1" : "#0f766e";
           const chipW = Math.min(panelW, Math.max(56, labels[i].length * 14 + 16));
           ctx.beginPath();
           ctx.roundRect(dx, cursorY, chipW, labelH - 2, 4);
