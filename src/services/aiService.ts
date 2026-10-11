@@ -12,7 +12,11 @@ import {
   resolveModel,
   type RewriteExplanationParams,
 } from "./geminiCore";
-import { alignAnalysisLabels, CurriculumLabel } from "../utils/curriculumLabels";
+import {
+  alignAnalysisLabels,
+  CurriculumLabel,
+  formatExistingLabelsForPrompt,
+} from "../utils/curriculumLabels";
 
 export interface AIAnalysisResult {
   科目: string;
@@ -274,13 +278,7 @@ export async function analyzeQuestionImage(
   const mimeMatch = imageBase64.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,/);
   const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
   const existingLabelsText = existingLabels.length
-    ? existingLabels
-        .map((label) =>
-          ["- ", [label.gradeLevel, label.chapter, label.unit].filter(Boolean).join(" / ")].join("")
-        )
-        .filter((line) => line !== "- ")
-        .slice(0, 40)
-        .join("\n")
+    ? formatExistingLabelsForPrompt(existingLabels)
     : "";
 
   const alignResult = (data: AIAnalysisResult) =>
