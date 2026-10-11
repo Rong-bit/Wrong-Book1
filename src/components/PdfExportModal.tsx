@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import {
   X,
   Printer,
@@ -23,6 +23,8 @@ import { getTextOnlyFigureSrc } from "../utils/questionExport";
 interface PdfExportModalProps {
   isOpen: boolean;
   questions: QuestionItem[];
+  /** Total notebook size (may include analyzing); shown when export skips some. */
+  notebookTotal?: number;
   settings: PaperSettings;
   onClose: () => void;
   onUpdateSettings: (newSettings: PaperSettings) => void;
@@ -44,6 +46,7 @@ const REVIEW_INTERVALS = ["1D", "2D", "4D", "7D", "15D"];
 export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   isOpen,
   questions,
+  notebookTotal,
   settings,
   onClose,
   onUpdateSettings,
@@ -52,12 +55,133 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   const [showPreview, setShowPreview] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
 
+  const isCornellCompact = settings.questionsPerPage === "compact";
+  const estimatedCompactSize = settings.paperSize === "B5" ? 5 : 6;
+  /** Shrinks when a compact page overflows so no question is clipped. */
+  const [compactFitSize, setCompactFitSize] = useState(estimatedCompactSize);
+
   useEffect(() => {
     if (!isOpen) {
       setShowPreview(false);
       setExportError(null);
     }
   }, [isOpen]);
+
+  const questionsFitKey = useMemo(
+    () => questions.map((q) => `${q.id}:${q.figureImageBase64 ? "f" : q.imageBase64 ? "i" : "n"}`).join("|"),
+    [questions]
+  );
+
+  useEffect(() => {
+    setCompactFitSize(settings.paperSize === "B5" ? 5 : 6);
+  }, [
+    settings.paperSize,
+    settings.questionsPerPage,
+    settings.questionDisplayMode,
+    questionsFitKey,
+    isOpen,
+  ]);
+
+  const cornellPageSize = isCornellCompact
+    ? Math.max(1, compactFitSize)
+    : settings.questionsPerPage === 1
+    ? 1
+    : 2;
+
+  const cornellPages = useMemo(() => {
+    const pages: { pageIndex: number; questions: { q: QuestionItem; index: number }[] }[] =
+      [];
+    for (let i = 0; i < questions.length; i += cornellPageSize) {
+      const chunk = questions.slice(i, i + cornellPageSize).map((q, offset) => ({
+        q,
+        index: i + offset,
+      }));
+      pages.push({
+        pageIndex: Math.floor(i / cornellPageSize),
+        questions: chunk,
+      });
+    }
+    return pages;
+  }, [questions, cornellPageSize]);
+
+  // Compact pages use fixed paper height; re-measure after images / KaTeX / resize
+  useLayoutEffect(() => {
+    if (!isOpen || !showPreview || !isCornellCompact) return;
+    const root = previewRef.current;
+    if (!root) return;
+
+    let cancelled = false;
+    let shrinkQueued = false;
+
+    const pageOverflows = () => {
+      const bodies = root.querySelectorAll<HTMLElement>("[data-cornell-body]");
+      for (let i = 0; i < bodies.length; i++) {
+        const el = bodies[i];
+        if (el.scrollHeight > el.clientHeight + 2) return true;
+      }
+      return false;
+    };
+
+    const shrinkIfNeeded = () => {
+      if (cancelled || shrinkQueued) return;
+      if (!pageOverflows()) return;
+      shrinkQueued = true;
+      // Defer setState so ResizeObserver callbacks settle first
+      requestAnimationFrame(() => {
+        shrinkQueued = false;
+        if (cancelled) return;
+        if (!pageOverflows()) return;
+        setCompactFitSize((n) => (n > 1 ? n - 1 : n));
+      });
+    };
+
+    shrinkIfNeeded();
+
+    const ro =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => shrinkIfNeeded())
+        : null;
+    root.querySelectorAll("[data-cornell-body]").forEach((el) => ro?.observe(el));
+
+    const onAssetSettle = () => shrinkIfNeeded();
+    const imgs: HTMLImageElement[] = Array.from(
+      root.querySelectorAll("img")
+    ) as HTMLImageElement[];
+    for (const img of imgs) {
+      if (!img.complete) {
+        img.addEventListener("load", onAssetSettle);
+        img.addEventListener("error", onAssetSettle);
+      }
+    }
+
+    // KaTeX / font metrics often settle after first paint
+    const t1 = window.setTimeout(onAssetSettle, 120);
+    const t2 = window.setTimeout(onAssetSettle, 500);
+    const t3 = window.setTimeout(onAssetSettle, 1400);
+    if (typeof document !== "undefined" && "fonts" in document) {
+      void document.fonts.ready.then(onAssetSettle).catch(() => undefined);
+    }
+
+    return () => {
+      cancelled = true;
+      ro?.disconnect();
+      for (const img of imgs) {
+        img.removeEventListener("load", onAssetSettle);
+        img.removeEventListener("error", onAssetSettle);
+      }
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(t3);
+    };
+  }, [
+    isOpen,
+    showPreview,
+    isCornellCompact,
+    compactFitSize,
+    cornellPages,
+    settings.questionDisplayMode,
+    settings.paperSize,
+  ]);
 
   if (!isOpen) return null;
 
@@ -66,6 +190,20 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       previewRef.current ||
       document.getElementById("printable-paper-container");
     if (!source) return;
+
+    // Last-chance fit check after images loaded; avoid printing clipped compact pages
+    if (isCornellCompact) {
+      const bodies = source.querySelectorAll<HTMLElement>("[data-cornell-body]");
+      let overflow = false;
+      bodies.forEach((el) => {
+        if (el.scrollHeight > el.clientHeight + 2) overflow = true;
+      });
+      if (overflow && compactFitSize > 1) {
+        setCompactFitSize((n) => n - 1);
+        setExportError("密排仍在依內容調整每頁題數，請確認預覽無裁切後再列印一次");
+        return;
+      }
+    }
 
     const root = document.documentElement;
     const isB5 = settings.paperSize === "B5";
@@ -121,28 +259,6 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     window.setTimeout(cleanup, 120000);
     window.print();
   };
-
-  // Chunk questions for Cornell mode
-  const isCornellCompact = settings.questionsPerPage === "compact";
-  // 背科精簡：無手寫留白、題與題緊接；B5 約 5 題／A4 約 6 題；其餘為固定 1 或 2 題
-  const cornellPageSize = isCornellCompact
-    ? settings.paperSize === "B5"
-      ? 5
-      : 6
-    : settings.questionsPerPage === 1
-    ? 1
-    : 2;
-  const cornellPages: { pageIndex: number; questions: { q: QuestionItem; index: number }[] }[] = [];
-  for (let i = 0; i < questions.length; i += cornellPageSize) {
-    const chunk = questions.slice(i, i + cornellPageSize).map((q, offset) => ({
-      q,
-      index: i + offset,
-    }));
-    cornellPages.push({
-      pageIndex: Math.floor(i / cornellPageSize),
-      questions: chunk,
-    });
-  }
 
   const paperWidthStyle = settings.paperSize === "B5" ? "182mm" : "210mm";
   const paperHeightStyle = settings.paperSize === "B5" ? "257mm" : "297mm";
@@ -390,9 +506,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   </div>
                   {settings.questionsPerPage === "compact" && (
                     <p className="mt-1.5 text-[10px] text-amber-800/90 leading-snug">
-                      適合地理、公民、歷史等死背科目：
-                      {settings.paperSize === "B5" ? "B5 約 5 題／頁" : "A4 約 6 題／頁"}
-                      ，題與題緊接、不留手寫訂正空白。
+                      適合地理、公民、歷史等死背科目：題與題緊接、不留手寫空白；預覽會依內容自動調整每頁題數（目前約{" "}
+                      {cornellPageSize} 題／頁），避免題目被裁切。
                     </p>
                   )}
                 </div>
@@ -706,6 +821,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
                       {/* Questions in this sheet */}
                       <div
+                        data-cornell-body
                         className={`flex-1 min-h-0 flex flex-col ${
                           isCornellCompact ? "gap-1.5 justify-start overflow-hidden" : "gap-2.5"
                         }`}
@@ -1299,7 +1415,13 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
         {/* Modal Bottom Footer Actions */}
         <div className="app-safe-footer px-4 pt-3 md:px-6 md:pt-3.5 bg-white border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0 no-print">
           <div className="text-[11px] sm:text-xs text-slate-500 flex items-center gap-1.5 sm:gap-2 flex-wrap min-w-0">
-            <span>已加入 {questions.length} 道試題</span>
+            <span>
+              匯出 {questions.length} 道試題
+              {typeof notebookTotal === "number" && notebookTotal > questions.length
+                ? `（錯題本 ${notebookTotal}，已略過分析中 ${notebookTotal - questions.length}）`
+                : ""}
+              {isCornellCompact ? ` · 密排約 ${cornellPageSize} 題／頁` : ""}
+            </span>
             <span className="hidden sm:inline">·</span>
             <span>
               規格：{settings.paperSize} ({settings.paperSize === "B5" ? "182×257mm" : "210×297mm"})
