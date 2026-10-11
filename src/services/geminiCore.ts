@@ -314,9 +314,13 @@ ${existingLabelsText ? `本錯題本既有標籤（格式：科目 / 冊別 / �
   "答案": "正確標準答案（例如：(C) 或 x = 3 或 80 J）",
   "核心考點": "本題考核的核心公式、定理或觀念定義",
   "易錯陷阱": "學生作答此題最容易犯錯的陷阱、盲點或概念混淆處",
-  "詳解步驟": "清晰條理、逐步推導的完整解題詳解",
+  "詳解步驟": "清晰條理、逐步推導的完整解題詳解（每個步驟必須換行，禁止「1、……。2、……」黏在同一行）",
   "關鍵技巧": "解題關鍵口訣、速解法或審題注意點"
-}`;
+}
+
+【詳解步驟格式】
+- 使用 1、2、3、（或 1. 2. 3.）條列，每一步結束後必須換行，下一步從新行開始。
+- 禁止把「2、」緊接在「1、」那段的句尾同一行。`;
 }
 
 export function getAnalyzeResponseSchema() {
@@ -332,7 +336,11 @@ export function getAnalyzeResponseSchema() {
       答案: { type: Type.STRING, description: "本題標準答案" },
       核心考點: { type: Type.STRING, description: "關鍵知識點" },
       易錯陷阱: { type: Type.STRING, description: "學生常錯痛點" },
-      詳解步驟: { type: Type.STRING, description: "詳細解題流程" },
+      詳解步驟: {
+        type: Type.STRING,
+        description:
+          "詳細解題流程；以 1、2、3、分步，每步結束必須換行，不可把下一步黏在同一行",
+      },
       關鍵技巧: { type: Type.STRING, description: "答題技巧" },
     },
     required: ["科目", "單元", "題目文字", "詳解步驟"],
@@ -375,8 +383,9 @@ ${params.questionText || "（無題幹文字，請依據上述考點與科目設
 2. 題目文字必須完整明確，如果是選擇題請提供 (A)(B)(C)(D) 選項；如果是計算題或填充題請明確交代求解目標與單位。
 3. 使用標準台灣繁體中文，專業學科術語必須符合教育部課綱標準。
 4. 務必提供標準答案，並附上邏輯嚴謹、步驟清晰完整的「詳細推導與解題過程」。
-5. 若題目或詳解包含數學式或方程式，請一律使用標準 LaTeX 格式並以 $...$ 或 $$...$$ 包裹。
-6. 請提供「變形重點說明」，用簡短的一兩句話向學生指出這道練習題與原本錯題有什麼異同（例如：「數字由整數改為帶分數，並反轉未知數的位置」）。`;
+5. 詳解步驟以 1、2、3、條列，每一步結束後必須換行；禁止「1、……。2、……」黏在同一行。
+6. 若題目或詳解包含數學式或方程式，請一律使用標準 LaTeX 格式並以 $...$ 或 $$...$$ 包裹。
+7. 請提供「變形重點說明」，用簡短的一兩句話向學生指出這道練習題與原本錯題有什麼異同（例如：「數字由整數改為帶分數，並反轉未知數的位置」）。`;
 }
 
 export function getSimilarResponseSchema() {
@@ -387,7 +396,11 @@ export function getSimilarResponseSchema() {
       答案: { type: Type.STRING, description: "本練習題標準答案" },
       核心考點: { type: Type.STRING, description: "對應的核心知識點" },
       變形設計重點: { type: Type.STRING, description: "與原錯題的差異與改編方向說明" },
-      詳解步驟: { type: Type.STRING, description: "循序漸進的詳細推導算式或論述" },
+      詳解步驟: {
+        type: Type.STRING,
+        description:
+          "循序漸進的詳細推導；1、2、3、分步且每步換行，不可黏在同一行",
+      },
       解題技巧提示: { type: Type.STRING, description: "下筆關鍵思維點撥" },
       難度: { type: Type.STRING, description: "基礎、中等 或 挑戰" },
     },
@@ -424,10 +437,11 @@ ${params.previousExplanation ? `- 先前詳解（僅供參考，請依指定答�
 3. 若題幹與指定答案明顯矛盾，仍依指定答案撰寫推導，並在詳解開頭用一句話簡短標註「題幹與指定答案可能不一致，以下依指定答案說明」。
 4. 數學式與科學符號一律使用標準 LaTeX，以 $...$ 或 $$...$$ 包裹；JSON 字串中反斜線需合法雙重轉義。
 5. 使用台灣繁體中文。
+6. 詳解步驟以 1、2、3、條列，每一步結束後必須換行；禁止「1、……。2、……」黏在同一行。
 
 請嚴格輸出合法 JSON（不要 Markdown 外框）：
 {
-  "詳解步驟": "能推導至指定答案的完整逐步詳解",
+  "詳解步驟": "能推導至指定答案的完整逐步詳解（每步換行）",
   "核心考點": "本題核心公式、定理或觀念",
   "易錯陷阱": "學生最容易犯錯的盲點",
   "關鍵技巧": "解題關鍵口訣或審題注意點"
@@ -438,7 +452,11 @@ export function getRewriteExplanationResponseSchema() {
   return {
     type: Type.OBJECT,
     properties: {
-      詳解步驟: { type: Type.STRING, description: "依指定答案重寫的詳細解題流程" },
+      詳解步驟: {
+        type: Type.STRING,
+        description:
+          "依指定答案重寫的詳細解題流程；1、2、3、分步且每步換行",
+      },
       核心考點: { type: Type.STRING, description: "關鍵知識點" },
       易錯陷阱: { type: Type.STRING, description: "學生常錯痛點" },
       關鍵技巧: { type: Type.STRING, description: "答題技巧" },
