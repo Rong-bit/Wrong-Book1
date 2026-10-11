@@ -186,10 +186,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     cropBoxFromCorners(FALLBACK_PERSPECTIVE_CORNERS)
   );
 
-  // Dragging states
+  // Dragging states (UI highlight)
   const [activeDragCorner, setActiveDragCorner] = useState<number | null>(null);
   const [activeCropHandle, setActiveCropHandle] = useState<string | null>(null);
-  const [cropDragStart, setCropDragStart] = useState<{ x: number; y: number; box: typeof cropBox } | null>(null);
 
   // Loupe magnifier position
   const [loupeInfo, setLoupeInfo] = useState<{ visible: boolean; x: number; y: number; srcX: number; srcY: number } | null>(null);
@@ -198,6 +197,22 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const loupeCanvasRef = useRef<HTMLCanvasElement>(null);
+  /** Sync drag session — avoids missing the first touchmove before React state commits */
+  const dragSessionRef = useRef<
+    | { kind: "corner"; index: number }
+    | {
+        kind: "crop";
+        handle: string;
+        startX: number;
+        startY: number;
+        box: { x: number; y: number; w: number; h: number };
+      }
+    | null
+  >(null);
+  const aspectRatioModeRef = useRef(aspectRatioMode);
+  const naturalDimensionsRef = useRef(naturalDimensions);
+  aspectRatioModeRef.current = aspectRatioMode;
+  naturalDimensionsRef.current = naturalDimensions;
 
   // Initialize or reset when imageSrc or modal opens
   useEffect(() => {
@@ -624,7 +639,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const handleCornerDown = (index: number, e: React.MouseEvent | React.TouchEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    dragSessionRef.current = { kind: "corner", index };
     setActiveDragCorner(index);
+    setActiveCropHandle(null);
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
     const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
     const pos = getNormalizedPos(clientX, clientY);
@@ -643,11 +660,40 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     if (cropTool === "erase") return;
     e.preventDefault();
     e.stopPropagation();
-    setActiveCropHandle(handle);
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
     const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
     const pos = getNormalizedPos(clientX, clientY);
-    setCropDragStart({ x: pos.x, y: pos.y, box: { ...cropBox } });
+    dragSessionRef.current = {
+      kind: "crop",
+      handle,
+      startX: pos.x,
+      startY: pos.y,
+      box: { ...cropBox },
+    };
+    setActiveCropHandle(handle);
+    setActiveDragCorner(null);
+  };
+
+  /** Finger / mouse drag on empty area: draw a brand-new crop rectangle (mobile-friendly). */
+  const handleCropDrawDown = (e: React.MouseEvent | React.TouchEvent) => {
+    if (cropTool !== "frame" || mode !== "crop") return;
+    e.preventDefault();
+    e.stopPropagation();
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+    const pos = getNormalizedPos(clientX, clientY);
+    const seed = { x: pos.x, y: pos.y, w: 0.02, h: 0.02 };
+    dragSessionRef.current = {
+      kind: "crop",
+      handle: "draw",
+      startX: pos.x,
+      startY: pos.y,
+      box: seed,
+    };
+    setCropBox(seed);
+    setActiveCropHandle("draw");
+    setActiveDragCorner(null);
+    cropDirtyAfterAddRef.current = true;
   };
 
   // Erase brush stroke tracking
@@ -689,22 +735,39 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     };
   }, [isErasing, getNormalizedPos]);
 
-  // Window-level move and up listeners during drag
+  // Window-level move/up while modal open — reads dragSessionRef so first touchmove is never missed
   useEffect(() => {
-    if (activeDragCorner === null && activeCropHandle === null) return;
+    if (!isOpen) return;
+
+    const applyAspect = (newX: number, newY: number, newW: number, newH: number) => {
+      const mode = aspectRatioModeRef.current;
+      const nat = naturalDimensionsRef.current;
+      if (mode === "free") return { x: newX, y: newY, w: newW, h: newH };
+      let targetRatio = 1;
+      if (mode === "4:3") targetRatio = 4 / 3;
+      if (mode === "16:9") targetRatio = 16 / 9;
+      if (mode === "1:1") targetRatio = 1;
+      if (mode === "paper") targetRatio = 1 / 1.414;
+      const imageRatio = nat.height > 0 ? nat.width / nat.height : 1;
+      const h = Math.max(0.05, Math.min(1 - newY, (newW * imageRatio) / targetRatio));
+      return { x: newX, y: newY, w: newW, h };
+    };
 
     const handlePointerMove = (e: MouseEvent | TouchEvent) => {
+      const session = dragSessionRef.current;
+      if (!session) return;
+      // Prevent page scroll while adjusting crop / perspective on touch devices
+      if ("touches" in e) e.preventDefault();
       const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
       const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
       const pos = getNormalizedPos(clientX, clientY);
 
-      if (activeDragCorner !== null) {
+      if (session.kind === "corner") {
         setCorners((prev) => {
           const next = [...prev] as [Point, Point, Point, Point];
-          next[activeDragCorner] = { x: pos.x, y: pos.y };
+          next[session.index] = { x: pos.x, y: pos.y };
           return next;
         });
-
         setLoupeInfo({
           visible: true,
           x: clientX,
@@ -712,63 +775,68 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           srcX: pos.x,
           srcY: pos.y,
         });
-      } else if (activeCropHandle !== null && cropDragStart) {
-        const dx = pos.x - cropDragStart.x;
-        const dy = pos.y - cropDragStart.y;
-        const orig = cropDragStart.box;
-
-        if (activeCropHandle === "move") {
-          const newX = Math.max(0, Math.min(1 - orig.w, orig.x + dx));
-          const newY = Math.max(0, Math.min(1 - orig.h, orig.y + dy));
-          cropDirtyAfterAddRef.current = true;
-          setCropBox({ ...orig, x: newX, y: newY });
-        } else {
-          let newX = orig.x;
-          let newY = orig.y;
-          let newW = orig.w;
-          let newH = orig.h;
-
-          // Resize edges
-          if (activeCropHandle.includes("e")) {
-            newW = Math.max(0.05, Math.min(1 - orig.x, orig.w + dx));
-          }
-          if (activeCropHandle.includes("w")) {
-            const possibleX = Math.max(0, Math.min(orig.x + orig.w - 0.05, orig.x + dx));
-            newW = orig.w + (orig.x - possibleX);
-            newX = possibleX;
-          }
-          if (activeCropHandle.includes("s")) {
-            newH = Math.max(0.05, Math.min(1 - orig.y, orig.h + dy));
-          }
-          if (activeCropHandle.includes("n")) {
-            const possibleY = Math.max(0, Math.min(orig.y + orig.h - 0.05, orig.y + dy));
-            newH = orig.h + (orig.y - possibleY);
-            newY = possibleY;
-          }
-
-          // Maintain Aspect Ratio constraint if specified
-          if (aspectRatioMode !== "free") {
-            let targetRatio = 1;
-            if (aspectRatioMode === "4:3") targetRatio = 4 / 3;
-            if (aspectRatioMode === "16:9") targetRatio = 16 / 9;
-            if (aspectRatioMode === "1:1") targetRatio = 1;
-            if (aspectRatioMode === "paper") targetRatio = 1 / 1.414; // A4 / B5 vertical ratio
-
-            const imageRatio = naturalDimensions.width / naturalDimensions.height;
-            // newW / newH * imageRatio = targetRatio => newH = (newW * imageRatio) / targetRatio
-            newH = Math.max(0.05, Math.min(1 - newY, (newW * imageRatio) / targetRatio));
-          }
-
-          cropDirtyAfterAddRef.current = true;
-          setCropBox({ x: newX, y: newY, w: newW, h: newH });
-        }
+        return;
       }
+
+      const dx = pos.x - session.startX;
+      const dy = pos.y - session.startY;
+      const orig = session.box;
+
+      if (session.handle === "draw") {
+        const x1 = Math.max(0, Math.min(1, session.startX));
+        const y1 = Math.max(0, Math.min(1, session.startY));
+        const x2 = Math.max(0, Math.min(1, pos.x));
+        const y2 = Math.max(0, Math.min(1, pos.y));
+        let newX = Math.min(x1, x2);
+        let newY = Math.min(y1, y2);
+        let newW = Math.max(0.05, Math.abs(x2 - x1));
+        let newH = Math.max(0.05, Math.abs(y2 - y1));
+        if (newX + newW > 1) newW = 1 - newX;
+        if (newY + newH > 1) newH = 1 - newY;
+        cropDirtyAfterAddRef.current = true;
+        setCropBox(applyAspect(newX, newY, newW, newH));
+        return;
+      }
+
+      if (session.handle === "move") {
+        const newX = Math.max(0, Math.min(1 - orig.w, orig.x + dx));
+        const newY = Math.max(0, Math.min(1 - orig.h, orig.y + dy));
+        cropDirtyAfterAddRef.current = true;
+        setCropBox({ ...orig, x: newX, y: newY });
+        return;
+      }
+
+      let newX = orig.x;
+      let newY = orig.y;
+      let newW = orig.w;
+      let newH = orig.h;
+
+      if (session.handle.includes("e")) {
+        newW = Math.max(0.05, Math.min(1 - orig.x, orig.w + dx));
+      }
+      if (session.handle.includes("w")) {
+        const possibleX = Math.max(0, Math.min(orig.x + orig.w - 0.05, orig.x + dx));
+        newW = orig.w + (orig.x - possibleX);
+        newX = possibleX;
+      }
+      if (session.handle.includes("s")) {
+        newH = Math.max(0.05, Math.min(1 - orig.y, orig.h + dy));
+      }
+      if (session.handle.includes("n")) {
+        const possibleY = Math.max(0, Math.min(orig.y + orig.h - 0.05, orig.y + dy));
+        newH = orig.h + (orig.y - possibleY);
+        newY = possibleY;
+      }
+
+      cropDirtyAfterAddRef.current = true;
+      setCropBox(applyAspect(newX, newY, newW, newH));
     };
 
     const handlePointerUp = () => {
+      if (!dragSessionRef.current) return;
+      dragSessionRef.current = null;
       setActiveDragCorner(null);
       setActiveCropHandle(null);
-      setCropDragStart(null);
       setLoupeInfo(null);
     };
 
@@ -776,14 +844,16 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     window.addEventListener("mouseup", handlePointerUp);
     window.addEventListener("touchmove", handlePointerMove, { passive: false });
     window.addEventListener("touchend", handlePointerUp);
+    window.addEventListener("touchcancel", handlePointerUp);
 
     return () => {
       window.removeEventListener("mousemove", handlePointerMove);
       window.removeEventListener("mouseup", handlePointerUp);
       window.removeEventListener("touchmove", handlePointerMove);
       window.removeEventListener("touchend", handlePointerUp);
+      window.removeEventListener("touchcancel", handlePointerUp);
     };
-  }, [activeDragCorner, activeCropHandle, cropDragStart, getNormalizedPos, aspectRatioMode, naturalDimensions]);
+  }, [isOpen, getNormalizedPos]);
 
   // Global keyboard shortcuts: Enter for Next Step, Escape to close
   useEffect(() => {
@@ -940,7 +1010,16 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
 
     return (
       <div className="absolute inset-0 pointer-events-none">
-        <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+        {/* Drag on dimmed area to finger-draw a new crop box */}
+        <div
+          className="absolute inset-0 pointer-events-auto z-[5] cursor-crosshair"
+          style={{ touchAction: "none" }}
+          onMouseDown={handleCropDrawDown}
+          onTouchStart={handleCropDrawDown}
+          title="在空白處拖曳可重新框選錯題範圍"
+        />
+
+        <svg className="w-full h-full relative z-[6] pointer-events-none" viewBox="0 0 100 100" preserveAspectRatio="none">
           {/* Dark shaded backdrop outside crop box using robust evenodd cutout */}
           <path d={cropBackdropPath} fill="rgba(15, 23, 42, 0.5)" fillRule="evenodd" />
         </svg>
@@ -978,7 +1057,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           </div>
         </div>
 
-        {/* 8 Resize Handles */}
+        {/* 8 Resize Handles — larger hit targets for finger */}
         {handles.map((h) => (
           <div
             key={h.id}
@@ -990,10 +1069,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               cursor: h.cursor,
               touchAction: "none",
             }}
-            className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-20 group w-11 h-11 flex items-center justify-center"
+            className="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-auto z-20 group w-12 h-12 sm:w-11 sm:h-11 flex items-center justify-center"
           >
             <div
-              className={`w-3.5 h-3.5 rounded-sm bg-white border-2 border-emerald-600 shadow-md group-hover:scale-130 transition-transform ${
+              className={`w-4 h-4 sm:w-3.5 sm:h-3.5 rounded-sm bg-white border-2 border-emerald-600 shadow-md group-hover:scale-130 transition-transform ${
                 activeCropHandle === h.id ? "scale-140 bg-emerald-500 border-white ring-2 ring-emerald-300" : ""
               }`}
             />
@@ -1022,7 +1101,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 hidden md:block truncate">
-                透視一次後可連續框選多個錯題，並可塗白手寫答案
+                透視一次後可連續框選多題；手指拖曳暗處重畫框，或拖綠框微調
               </p>
             </div>
           </div>
@@ -1494,7 +1573,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         {/* Pending multi-crop queue */}
         {!isExistingQuestion && mode === "crop" && (
           <div className="px-2 sm:px-5 py-1 text-[10px] sm:text-[11px] text-slate-500 bg-slate-50 border-t border-slate-100 shrink-0">
-            框好一題後按「加入此錯題」，可再框下一題。可用「過濾紅筆」一鍵去紅筆，或切「去手寫」手動塗白藍筆／鉛筆／黑手寫。
+            手指在暗處拖曳可重畫框；拖綠框或四角可微調。框好一題按「加入此錯題」再框下一題。可用「過濾紅筆」或「去手寫」塗白。
           </div>
         )}
         {!isExistingQuestion && pendingCrops.length > 0 && (
