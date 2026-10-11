@@ -526,15 +526,17 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     }
   };
 
-  /** One-tap local filter: bleach red/blue pens and light pencil (not AI). */
+  /** One-tap local filter: bleach red pen marks only (not AI). Keeps maps/print; pencil/black →「去手寫」. */
   const handleFilterColoredInk = async () => {
     if (isProcessing || isErasingBusy) return;
     setIsProcessing(true);
-    setProcessingText("正在過濾彩筆與鉛筆筆跡...");
+    setProcessingText("正在過濾紅筆筆跡...");
     try {
       const filtered = await filterColoredAndPencilInk(currentImage, {
         removeColored: true,
-        removePencil: true,
+        // Blue/green map fills must stay; graphite / black pen →「去手寫」.
+        removePencil: false,
+        removeBluePen: false,
       });
       pushHistory(filtered);
     } catch (err) {
@@ -1219,11 +1221,11 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               onClick={() => void handleFilterColoredInk()}
               disabled={isProcessing || isErasingBusy}
               className="px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-bold text-rose-900 bg-rose-100 hover:bg-rose-200 active:scale-95 transition flex items-center gap-1 sm:gap-1.5 cursor-pointer whitespace-nowrap border border-rose-200 disabled:opacity-50"
-              title="本機顏色過濾：去掉紅／藍原子筆與淡鉛筆，保留深黑印刷字（黑色原子筆手寫可能仍留存，可改用去手寫塗白）"
+              title="本機過濾：去掉紅筆手寫，保留印刷字與彩色地圖。藍筆／鉛筆／黑手寫請改用「去手寫」塗白"
             >
               <Eraser className="w-3.5 h-3.5 text-rose-700" />
-              <span className="sm:hidden">濾彩筆</span>
-              <span className="hidden sm:inline">過濾彩筆／鉛筆</span>
+              <span className="sm:hidden">濾紅筆</span>
+              <span className="hidden sm:inline">過濾紅筆</span>
             </button>
 
             {/* Shadow Removal / Paper Whitening Quick Actions */}
@@ -1492,7 +1494,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
         {/* Pending multi-crop queue */}
         {!isExistingQuestion && mode === "crop" && (
           <div className="px-2 sm:px-5 py-1 text-[10px] sm:text-[11px] text-slate-500 bg-slate-50 border-t border-slate-100 shrink-0">
-            框好一題後按「加入此錯題」，可再框下一題。可用「過濾彩筆／鉛筆」一鍵去紅藍筆，或切「去手寫」手動塗白。
+            框好一題後按「加入此錯題」，可再框下一題。可用「過濾紅筆」一鍵去紅筆，或切「去手寫」手動塗白藍筆／鉛筆／黑手寫。
           </div>
         )}
         {!isExistingQuestion && pendingCrops.length > 0 && (

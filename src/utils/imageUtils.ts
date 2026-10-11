@@ -1006,17 +1006,84 @@ export async function rotateImage(
 export type ShadowRemovalMode = "pure_bw" | "clean_gray" | "clean_color";
 
 export interface HandwritingColorFilterOptions {
-  /** Remove saturated colored ink (red/blue/green pens, markers). Default true. */
+  /** Remove chromatic pen marks (red by default; optional dark blue). Default true. */
   removeColored?: boolean;
-  /** Remove light gray pencil-like strokes (not dark printed black). Default true. */
+  /**
+   * Remove light graphite-like strokes. Default false — phone photos often render
+   * print as mid-gray, and AA edges look like pencil; prefer the manual brush.
+   */
   removePencil?: boolean;
+  /**
+   * Also remove dark blue ballpoint. Default false — geography maps use light cyan/blue
+   * fills that must stay; enable only when the page has no printed blue graphics.
+   */
+  removeBluePen?: boolean;
   quality?: number;
 }
 
 /**
- * Local (non-AI) filter: bleach colored pen marks and light pencil while keeping
- * dark near-black printed text. Black ballpoint handwriting may remain — use the
- * manual white brush for those.
+ * Red / scarlet / pink ballpoint & marker — the usual 「對錯」手寫.
+ * Intentionally ignores yellow/orange map land, green mats, cyan oceans, and skin.
+ * True red ink has G≈B; yellow/orange print keeps G high while B drops.
+ */
+function isRedPenInk(r: number, g: number, b: number, chroma: number, lum: number): boolean {
+  if (lum >= 222 || lum <= 38) return false;
+  if (r < 110) return false;
+  // Warm paper: R and G stay close
+  if (g >= r - 20) return false;
+  // Yellow / amber / orange map fills (G stays high, B collapses)
+  if (g - b > 24 && g >= 90) return false;
+  // Skin / warm flesh: R>G>B with both G and B still elevated
+  if (r > g && g > b && g - b >= 10 && g >= 115 && b >= 95 && lum >= 130 && lum <= 210) {
+    return false;
+  }
+  // Red & magenta pens: G and B track together (phone JPEG often B≈G)
+  if (Math.abs(g - b) > 32) return false;
+
+  const rOverG = r - g;
+  const rOverB = r - b;
+
+  // Strong red / magenta ink core (ink dyes push G&B down together)
+  if (rOverG >= 34 && rOverB >= 30 && chroma >= 32 && Math.max(g, b) <= 170) return true;
+  // Softer pink AA fringe of red strokes (still ink-like, not skin)
+  if (
+    r >= 150 &&
+    rOverG >= 30 &&
+    rOverB >= 28 &&
+    chroma >= 36 &&
+    lum <= 190 &&
+    Math.max(g, b) <= 155
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Weak reddish fringe allowed only when dilating a confirmed red stroke (not map pigment). */
+function isRedStrokeFringe(r: number, g: number, b: number, chroma: number, lum: number): boolean {
+  if (lum >= 225 || lum <= 40 || r < 100) return false;
+  if (g - b > 22 && g >= 90) return false; // yellow/orange
+  if (b - r >= 18 && b >= 100) return false; // cyan/blue map
+  if (g - r >= 18 && g >= 100) return false; // green
+  if (r > g && g > b && g >= 120 && b >= 100 && lum >= 140) return false; // skin
+  const rOverG = r - g;
+  const rOverB = r - b;
+  return rOverG >= 18 && rOverB >= 16 && chroma >= 22 && Math.abs(g - b) <= 40;
+}
+
+/**
+ * Dark blue ballpoint only. Light cyan map fills (higher lum, weaker dominance) stay.
+ */
+function isDarkBluePenInk(r: number, g: number, b: number, chroma: number, lum: number): boolean {
+  if (lum < 45 || lum > 155) return false;
+  if (chroma < 48) return false;
+  return b >= r + 40 && b >= g + 28 && b >= 105;
+}
+
+/**
+ * Local (non-AI) filter: bleach red pen marks (and optional dark blue / pencil)
+ * while keeping printed text, colored maps, and paper. Never mass-bleaches the page.
+ * Black ballpoint handwriting may remain — use the manual white brush for those.
  */
 export async function filterColoredAndPencilInk(
   imageSrc: string,
@@ -1024,7 +1091,8 @@ export async function filterColoredAndPencilInk(
 ): Promise<string> {
   const {
     removeColored = true,
-    removePencil = true,
+    removePencil = false,
+    removeBluePen = false,
     quality = 0.92,
   } = options;
 
@@ -1056,8 +1124,41 @@ export async function filterColoredAndPencilInk(
         ctx.drawImage(img, 0, 0, w, h);
         const imgData = ctx.getImageData(0, 0, w, h);
         const data = imgData.data;
+        const pixelCount = w * h;
 
-        for (let i = 0; i < data.length; i += 4) {
+        // Estimate paper fill from bright low-chroma pixels (avoids pure-white holes on cream paper)
+        let paperR = 248;
+        let paperG = 246;
+        let paperB = 240;
+        let paperSumR = 0;
+        let paperSumG = 0;
+        let paperSumB = 0;
+        let paperN = 0;
+        const step = Math.max(4, Math.floor(pixelCount / 80000) * 4);
+        for (let i = 0; i < data.length; i += step) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          if (lum >= 200 && chroma < 40) {
+            paperSumR += r;
+            paperSumG += g;
+            paperSumB += b;
+            paperN++;
+          }
+        }
+        if (paperN > 8) {
+          paperR = Math.round(paperSumR / paperN);
+          paperG = Math.round(paperSumG / paperN);
+          paperB = Math.round(paperSumB / paperN);
+        }
+
+        // Build mask first so we can dilate thin stroke AA and enforce a safety cap
+        const mask = new Uint8Array(pixelCount);
+        let hitCount = 0;
+
+        for (let i = 0, p = 0; i < data.length; i += 4, p++) {
           const r = data[i];
           const g = data[i + 1];
           const b = data[i + 2];
@@ -1066,35 +1167,80 @@ export async function filterColoredAndPencilInk(
           const chroma = maxc - minc;
           const lum = 0.299 * r + 0.587 * g + 0.114 * b;
 
-          // Dark printed ink: keep
-          const isPrintBlack = lum < 100 && chroma < 45;
-          if (isPrintBlack) continue;
+          // Keep near-neutral dark print and bright paper
+          if (chroma < 28 && lum < 160) continue;
+          if (lum > 220) continue;
 
-          // Paper / near-white: leave alone
-          if (lum > 235 && chroma < 20) continue;
-
-          // Saturated color pens (red/blue/green/purple)
-          const chromaRatio = chroma / (maxc + 1);
-          const isColored =
+          const isRed = removeColored && isRedPenInk(r, g, b, chroma, lum);
+          const isBlue =
             removeColored &&
-            chroma >= 26 &&
-            chromaRatio >= 0.11 &&
-            // Avoid nuking slightly warm/cool paper casts that are still very light
-            lum < 230;
-
-          // Soft pencil: gray, mid-light, low chroma (darker print already kept above)
+            removeBluePen &&
+            !isRed &&
+            isDarkBluePenInk(r, g, b, chroma, lum);
           const isPencil =
             removePencil &&
-            !isColored &&
-            chroma < 28 &&
-            lum >= 105 &&
-            lum <= 205;
+            !isRed &&
+            !isBlue &&
+            chroma < 20 &&
+            lum >= 160 &&
+            lum <= 200;
 
-          if (isColored || isPencil) {
-            data[i] = 255;
-            data[i + 1] = 255;
-            data[i + 2] = 255;
+          if (isRed || isBlue || isPencil) {
+            mask[p] = 1;
+            hitCount++;
           }
+        }
+
+        // Safety: if the mask is huge, the heuristic misfired — leave the image alone
+        // (old filter bleached ~55% on real exam photos; red pen strokes are typically << 8%)
+        if (hitCount / pixelCount > 0.12) {
+          console.warn(
+            "Color ink filter aborted: mask too large",
+            Math.round((100 * hitCount) / pixelCount) + "%"
+          );
+          resolve(normSrc);
+          return;
+        }
+
+        if (hitCount === 0) {
+          resolve(normSrc);
+          return;
+        }
+
+        // 1px dilate only into reddish AA fringe — never into map/skin pigment
+        const dilated = new Uint8Array(pixelCount);
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const p = y * w + x;
+            if (!mask[p]) continue;
+            dilated[p] = 1;
+            for (let dy = -1; dy <= 1; dy++) {
+              for (let dx = -1; dx <= 1; dx++) {
+                if (dx === 0 && dy === 0) continue;
+                const nx = x + dx;
+                const ny = y + dy;
+                if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+                const np = ny * w + nx;
+                if (mask[np] || dilated[np]) continue;
+                const ni = np * 4;
+                const nr = data[ni];
+                const ng = data[ni + 1];
+                const nb = data[ni + 2];
+                const nChroma = Math.max(nr, ng, nb) - Math.min(nr, ng, nb);
+                const nLum = 0.299 * nr + 0.587 * ng + 0.114 * nb;
+                if (isRedStrokeFringe(nr, ng, nb, nChroma, nLum) || nChroma < 18) {
+                  dilated[np] = 1;
+                }
+              }
+            }
+          }
+        }
+
+        for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+          if (!dilated[p]) continue;
+          data[i] = paperR;
+          data[i + 1] = paperG;
+          data[i + 2] = paperB;
         }
 
         ctx.putImageData(imgData, 0, 0);
