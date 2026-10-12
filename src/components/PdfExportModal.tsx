@@ -75,14 +75,25 @@ function questionImageStyle(
   };
 }
 
-function ExportFigure({ src, maxHeight }: { src: string; maxHeight: string }) {
+function ExportFigure({
+  src,
+  maxHeight,
+  fit = false,
+}: {
+  src: string;
+  maxHeight?: string;
+  /** Fill the leftover slot so two questions can share one page. */
+  fit?: boolean;
+}) {
   return (
-    <div className="print-figure flex w-full justify-end">
+    <div className={`print-figure flex w-full justify-end ${fit ? "h-full min-h-0 items-start" : ""}`}>
       <img
         src={normalizeImageSrc(src)}
         alt="題目附圖（地圖／圖示）"
-        className="print-figure-img block h-auto w-auto max-w-full object-contain border border-slate-300 bg-white rounded-sm"
-        style={{ maxHeight }}
+        className={`print-figure-img block w-auto max-w-full object-contain border border-slate-300 bg-white rounded-sm ${
+          fit ? "h-auto max-h-full min-h-0" : "h-auto"
+        }`}
+        style={fit ? undefined : { maxHeight }}
       />
     </div>
   );
@@ -92,10 +103,13 @@ function CornellReview({
   isCornellCompact,
   showGrid,
   showReviewTrack,
+  sharePage = false,
 }: {
   isCornellCompact: boolean;
   showGrid: boolean;
   showReviewTrack: boolean;
+  /** Two questions share the sheet: keep a writing strip, don't grow past the other card. */
+  sharePage?: boolean;
 }) {
   if (isCornellCompact) {
     if (!showReviewTrack) return null;
@@ -119,9 +133,9 @@ function CornellReview({
 
   return (
     <div
-      className={`flex-1 min-h-[28mm] p-2 flex flex-col justify-between relative ${
-        showGrid ? "math-grid-bg" : "bg-white"
-      }`}
+      className={`${
+        sharePage ? "shrink-0 min-h-[22mm]" : "flex-1 min-h-[28mm]"
+      } p-2 flex flex-col justify-between relative ${showGrid ? "math-grid-bg" : "bg-white"}`}
     >
       <div className="text-[10px] text-slate-400 font-sans tracking-wider pointer-events-none select-none">
         【演算推導 · 思維訂正筆記區】
@@ -166,6 +180,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     if (settings.questionsPerPage === 1) return 1;
     return 2;
   }, [settings.questionsPerPage, settings.paperSize]);
+  /** 每頁 2 題：兩張卡片平分紙高，圖縮進格子裡，不改成一題一頁。 */
+  const isTwoUp = !isCornellCompact && requestedCornellCap === 2;
   /**
    * Actual questions per page after overflow fit.
    * Same idea as 背科精簡: shrink until page content is not clipped.
@@ -246,10 +262,11 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     return pages;
   }, [exportQuestions, cornellPageSize]);
 
-  // Cornell fixed-height sheets: re-measure after images / KaTeX / resize
-  // (背科精簡、每頁 2 題、每頁 1 題共用，溢出則降低每頁題數以免裁圖)
+  // Compact packs as many as fit. 每頁 1／2 題 stays at the chosen count;
+  // figures shrink into the sheet instead of dropping the second question.
   useLayoutEffect(() => {
     if (!isOpen || !showPreview || settings.mode !== "cornell") return;
+    if (!isCornellCompact) return;
     if (cornellFitSize <= 1) return;
     const root = previewRef.current;
     if (!root) return;
@@ -347,6 +364,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     cornellPages,
     settings.questionDisplayMode,
     settings.paperSize,
+    isCornellCompact,
   ]);
 
   if (!isOpen) return null;
@@ -357,8 +375,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       document.getElementById("printable-paper-container");
     if (!source) return;
 
-    // Last-chance fit check after images loaded; avoid printing clipped Cornell pages
-    if (settings.mode === "cornell" && cornellFitSize > 1) {
+    // Compact only: fixed 1／2 per page must not be rewritten at print time.
+    if (settings.mode === "cornell" && isCornellCompact && cornellFitSize > 1) {
       const bodies = Array.from(
         source.querySelectorAll("[data-cornell-body]")
       ) as HTMLElement[];
@@ -748,11 +766,13 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                       適合地理、公民、歷史等死背科目：題與題緊接、不留手寫空白；預覽會依內容自動調整每頁題數（目前約{" "}
                       {cornellPageSize} 題／頁），避免題目被裁切。
                     </p>
+                  ) : settings.questionsPerPage === 1 ? (
+                    <p className="mt-1.5 text-[10px] text-amber-800/90 leading-snug">
+                      固定每頁 1 題，圖形與演算區用滿該頁。
+                    </p>
                   ) : (
                     <p className="mt-1.5 text-[10px] text-amber-800/90 leading-snug">
-                      預覽會偵測溢出：題幹或圖形過高時自動降低每頁題數（目前{" "}
-                      {cornellPageSize} 題／頁）
-                      {cornellFitReduced ? "，以免裁切地圖／附圖" : "，避免列印裁切"}。
+                      固定每頁 2 題。圖形與筆記區會縮進同一頁，不會改成一題一頁。
                     </p>
                   )}
                 </div>
@@ -1121,8 +1141,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                             className={`border border-slate-300 rounded-lg overflow-hidden flex flex-row relative bg-white ${
                               isCornellCompact
                                 ? "shrink-0 items-start"
-                                : // min-h-min: grow for handwriting space, never shrink below stem/figure
-                                  "flex-1 min-h-min"
+                                : isTwoUp
+                                  ? "flex-1 min-h-0"
+                                  : "flex-1 min-h-min"
                             }`}
                           >
                             {/* LEFT SIDEBAR: Metadata & Mistake Reason Analysis */}
@@ -1218,8 +1239,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                             {/* RIGHT MAIN AREA: Question text + Math grid notebook workspace */}
                             <div
                               className={`flex-1 flex flex-col min-w-0 bg-white ${
-                                // compact may pack tightly; 1/2-per-page must not min-h-0-collapse stems
-                                isCornellCompact ? "min-h-0" : "min-h-min"
+                                isCornellCompact || isTwoUp ? "min-h-0" : "min-h-min"
                               }`}
                             >
                               {/* Top Question Body — natural height (no max-h clip); page fit shrinks density instead */}
@@ -1326,12 +1346,17 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                   if (!figureSrc) return null;
                                   return (
                                     <div
-                                      className={`shrink-0 border-b border-slate-200 bg-white ${
-                                        isCornellCompact ? "px-1.5 py-1" : "px-2 py-1.5"
+                                      className={`border-b border-slate-200 bg-white ${
+                                        isTwoUp
+                                          ? "flex-1 min-h-0 overflow-hidden px-2 py-1"
+                                          : isCornellCompact
+                                            ? "shrink-0 px-1.5 py-1"
+                                            : "shrink-0 px-2 py-1.5"
                                       }`}
                                     >
                                       <ExportFigure
                                         src={figureSrc}
+                                        fit={isTwoUp}
                                         maxHeight={
                                           isCornellCompact
                                             ? FIGURE_MAX_HEIGHT.cornellCompact
@@ -1345,6 +1370,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                 isCornellCompact={isCornellCompact}
                                 showGrid={settings.showGrid !== false}
                                 showReviewTrack={settings.showReviewTrack !== false}
+                                sharePage={isTwoUp}
                               />
                             </div>
                           </div>
@@ -1651,9 +1677,11 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 ? `（錯題本共 ${notebookTotal}）`
                 : ""}
               {settings.mode === "cornell"
-                ? ` · ${isCornellCompact ? "密排" : "排版"}約 ${cornellPageSize} 題／頁${
-                    cornellFitReduced ? "（已自動降密以免裁切）" : ""
-                  }`
+                ? isCornellCompact
+                  ? ` · 密排約 ${cornellPageSize} 題／頁${
+                      cornellFitReduced ? "（已自動降密以免裁切）" : ""
+                    }`
+                  : ` · 每頁 ${cornellPageSize} 題`
                 : ""}
             </span>
             <span className="hidden sm:inline">·</span>
