@@ -81,15 +81,30 @@ function ExportFigure({
 }: {
   src: string;
   maxHeight?: string;
-  /** Fill the leftover slot so two questions can share one page. */
-  fit?: boolean;
+  /**
+   * true: image caps to a flex-grown cell (背科精簡).
+   * "range": image caps to this question's half-page box and does not
+   * grow the box past the scaled bitmap (每頁 2 題).
+   */
+  fit?: boolean | "range";
 }) {
-  return (
-    <div className={`print-figure flex w-full justify-end ${fit ? "h-full min-h-0 items-start" : ""}`}>
+  if (fit === "range") {
+    // Direct image so the half-page grid row can size to the bitmap, while
+    // max-height still caps a tall figure to that question's range.
+    return (
       <img
         src={normalizeImageSrc(src)}
         alt="題目附圖（地圖／圖示）"
-        className={`print-figure-img block w-auto max-w-full object-contain border border-slate-300 bg-white rounded-sm ${
+        className="print-figure print-figure-img block max-h-full max-w-full min-h-0 w-auto h-auto object-contain object-right-top border border-slate-300 bg-white rounded-sm"
+      />
+    );
+  }
+  return (
+    <div className={`print-figure flex w-full justify-end items-start ${fit ? "h-full min-h-0" : ""}`}>
+      <img
+        src={normalizeImageSrc(src)}
+        alt="題目附圖（地圖／圖示）"
+        className={`print-figure-img block w-auto max-w-full object-contain object-right-top border border-slate-300 bg-white rounded-sm ${
           fit ? "h-auto max-h-full min-h-0" : "h-auto"
         }`}
         style={fit ? undefined : { maxHeight }}
@@ -133,7 +148,7 @@ function CornellReview({
   return (
     <div
       className={`${
-        sharePage ? "shrink-0 min-h-[22mm]" : "flex-1 min-h-[28mm]"
+        sharePage ? "row-start-3 min-h-[22mm] h-full" : "flex-1 min-h-[28mm]"
       } p-2 flex flex-col justify-between relative ${showGrid ? "math-grid-bg" : "bg-white"}`}
     >
       <div className="text-[10px] text-slate-400 font-sans tracking-wider pointer-events-none select-none">
@@ -177,7 +192,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     if (settings.questionsPerPage === 1) return 1;
     return 2;
   }, [settings.questionsPerPage]);
-  /** 每頁 2 題：兩張卡片平分紙高。背科精簡同樣把圖縮進格子，固定 4 題。 */
+  /** 每頁 2 題：兩張卡片各占半頁，圖形縮進該題範圍。背科精簡同樣把圖縮進格子，固定 4 題。 */
   const isTwoUp = !isCornellCompact && requestedCornellCap === 2;
   const scaleFigure = isTwoUp || isCornellCompact;
 
@@ -560,7 +575,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                       }`}
                     >
                       <div className="text-[11px] font-bold">每頁 2 題</div>
-                      <div className="text-[9px] opacity-80 mt-0.5">黃金比例 · 數理演算</div>
+                      <div className="text-[9px] opacity-80 mt-0.5">半頁一題 · 圖隨格縮放</div>
                     </button>
                     <button
                       type="button"
@@ -602,7 +617,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                     </p>
                   ) : (
                     <p className="mt-1.5 text-[10px] text-amber-800/90 leading-snug">
-                      固定每頁 2 題。圖形與筆記區會縮進同一頁，不會改成一題一頁。
+                      固定每頁 2 題，每一題占半頁。圖形依該題範圍縮放（寬圖偏扁、高圖偏窄），緊接在題幹下，剩下的高度留給演算複習。
                     </p>
                   )}
                 </div>
@@ -1064,8 +1079,10 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
                             {/* RIGHT MAIN AREA: Question text + Math grid notebook workspace */}
                             <div
-                              className={`flex-1 flex flex-col min-w-0 bg-white ${
-                                scaleFigure ? "min-h-0" : "min-h-min"
+                              className={`flex-1 min-w-0 bg-white ${
+                                isTwoUp
+                                  ? "min-h-0 grid grid-rows-[auto_minmax(0,max-content)_minmax(22mm,1fr)]"
+                                  : `flex flex-col ${scaleFigure ? "min-h-0" : "min-h-min"}`
                               }`}
                             >
                               {/* Top Question Body — natural height (no max-h clip); page fit shrinks density instead */}
@@ -1173,14 +1190,16 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                   return (
                                     <div
                                       className={`border-b border-slate-200 bg-white ${
-                                        scaleFigure
-                                          ? "flex-1 min-h-0 overflow-hidden px-1.5 py-1"
-                                          : "shrink-0 px-2 py-1.5"
+                                        isTwoUp
+                                          ? "min-h-0 min-w-0 overflow-hidden px-1.5 py-1 flex justify-end items-start"
+                                          : scaleFigure
+                                            ? "flex-1 min-h-0 overflow-hidden px-1.5 py-1"
+                                            : "shrink-0 px-2 py-1.5"
                                       }`}
                                     >
                                       <ExportFigure
                                         src={figureSrc}
-                                        fit={scaleFigure}
+                                        fit={isTwoUp ? "range" : scaleFigure}
                                         maxHeight={FIGURE_MAX_HEIGHT.cornell}
                                       />
                                     </div>
