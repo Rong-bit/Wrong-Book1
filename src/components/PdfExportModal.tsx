@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   X,
   Printer,
@@ -56,7 +56,6 @@ const REVIEW_INTERVALS = ["1D", "2D", "4D", "7D", "15D"];
  * Old caps were 16–40 CSS px-rem (~17–42mm), so place names were unreadably small.
  */
 const FIGURE_MAX_HEIGHT = {
-  cornellCompact: "72mm",
   cornell: "96mm",
   paper: "112mm",
 } as const;
@@ -172,21 +171,15 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   const previewRef = useRef<HTMLDivElement>(null);
 
   const isCornellCompact = settings.questionsPerPage === "compact";
-  /** User-requested max questions per Cornell page (before auto-fit shrink). */
+  /** 背科精簡固定 4 題；圖形縮進每格剩餘高度。每頁 1／2 題也固定題數。 */
   const requestedCornellCap = useMemo(() => {
-    if (settings.questionsPerPage === "compact") {
-      return settings.paperSize === "B5" ? 5 : 6;
-    }
+    if (settings.questionsPerPage === "compact") return 4;
     if (settings.questionsPerPage === 1) return 1;
     return 2;
-  }, [settings.questionsPerPage, settings.paperSize]);
-  /** 每頁 2 題：兩張卡片平分紙高，圖縮進格子裡，不改成一題一頁。 */
+  }, [settings.questionsPerPage]);
+  /** 每頁 2 題：兩張卡片平分紙高。背科精簡同樣把圖縮進格子，固定 4 題。 */
   const isTwoUp = !isCornellCompact && requestedCornellCap === 2;
-  /**
-   * Actual questions per page after overflow fit.
-   * Same idea as 背科精簡: shrink until page content is not clipped.
-   */
-  const [cornellFitSize, setCornellFitSize] = useState(requestedCornellCap);
+  const scaleFigure = isTwoUp || isCornellCompact;
 
   const subjectOptions = useMemo(
     () => listSubjectFilterKeys(questions.map((q) => q.subject)),
@@ -221,30 +214,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     setExportSubject(canonical);
   }, [isOpen, initialSubjectFilter]);
 
-  const questionsFitKey = useMemo(
-    () =>
-      exportQuestions
-        .map((q) => `${q.id}:${q.figureImageBase64 ? "f" : q.imageBase64 ? "i" : "n"}`)
-        .join("|"),
-    [exportQuestions]
-  );
-
-  useEffect(() => {
-    setCornellFitSize(requestedCornellCap);
-  }, [
-    requestedCornellCap,
-    settings.questionDisplayMode,
-    questionsFitKey,
-    exportSubject,
-    isOpen,
-  ]);
-
-  const cornellPageSize = Math.max(
-    1,
-    Math.min(cornellFitSize, requestedCornellCap)
-  );
-  /** True when auto-fit lowered density below the user's chip choice. */
-  const cornellFitReduced = cornellPageSize < requestedCornellCap;
+  const cornellPageSize = requestedCornellCap;
 
   const cornellPages = useMemo(() => {
     const pages: { pageIndex: number; questions: { q: QuestionItem; index: number }[] }[] =
@@ -262,110 +232,6 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     return pages;
   }, [exportQuestions, cornellPageSize]);
 
-  // Compact packs as many as fit. 每頁 1／2 題 stays at the chosen count;
-  // figures shrink into the sheet instead of dropping the second question.
-  useLayoutEffect(() => {
-    if (!isOpen || !showPreview || settings.mode !== "cornell") return;
-    if (!isCornellCompact) return;
-    if (cornellFitSize <= 1) return;
-    const root = previewRef.current;
-    if (!root) return;
-
-    let cancelled = false;
-    let shrinkQueued = false;
-
-    const pageOverflows = () => {
-      const bodies = Array.from(
-        root.querySelectorAll("[data-cornell-body]")
-      ) as HTMLElement[];
-      for (const el of bodies) {
-        if (el.scrollHeight > el.clientHeight + 2) return true;
-        const cards = Array.from(
-          el.querySelectorAll("[data-cornell-card]")
-        ) as HTMLElement[];
-        // flex-1 + min-h-0 used to shrink cards and clip inside overflow:hidden,
-        // leaving scrollHeight === clientHeight. Measure natural card heights instead.
-        if (cards.length > 0) {
-          const first = cards[0];
-          const last = cards[cards.length - 1];
-          const span =
-            last.offsetTop + last.scrollHeight - first.offsetTop;
-          if (span > el.clientHeight + 2) return true;
-        }
-        for (const card of cards) {
-          if (card.scrollHeight > card.clientHeight + 2) return true;
-        }
-        const panes = Array.from(
-          el.querySelectorAll("[data-cornell-question]")
-        ) as HTMLElement[];
-        for (const pane of panes) {
-          if (pane.scrollHeight > pane.clientHeight + 2) return true;
-        }
-      }
-      return false;
-    };
-
-    const shrinkIfNeeded = () => {
-      if (cancelled || shrinkQueued) return;
-      if (!pageOverflows()) return;
-      shrinkQueued = true;
-      // Defer setState so ResizeObserver callbacks settle first
-      requestAnimationFrame(() => {
-        shrinkQueued = false;
-        if (cancelled) return;
-        if (!pageOverflows()) return;
-        setCornellFitSize((n) => (n > 1 ? n - 1 : n));
-      });
-    };
-
-    shrinkIfNeeded();
-
-    const ro =
-      typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(() => shrinkIfNeeded())
-        : null;
-    root.querySelectorAll("[data-cornell-body]").forEach((el) => ro?.observe(el));
-
-    const onAssetSettle = () => shrinkIfNeeded();
-    const imgs: HTMLImageElement[] = Array.from(
-      root.querySelectorAll("img")
-    ) as HTMLImageElement[];
-    for (const img of imgs) {
-      if (!img.complete) {
-        img.addEventListener("load", onAssetSettle);
-        img.addEventListener("error", onAssetSettle);
-      }
-    }
-
-    // KaTeX / font metrics often settle after first paint
-    const t1 = window.setTimeout(onAssetSettle, 120);
-    const t2 = window.setTimeout(onAssetSettle, 500);
-    const t3 = window.setTimeout(onAssetSettle, 1400);
-    if (typeof document !== "undefined" && "fonts" in document) {
-      void document.fonts.ready.then(onAssetSettle).catch(() => undefined);
-    }
-
-    return () => {
-      cancelled = true;
-      ro?.disconnect();
-      for (const img of imgs) {
-        img.removeEventListener("load", onAssetSettle);
-        img.removeEventListener("error", onAssetSettle);
-      }
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
-      window.clearTimeout(t3);
-    };
-  }, [
-    isOpen,
-    showPreview,
-    settings.mode,
-    cornellFitSize,
-    cornellPages,
-    settings.questionDisplayMode,
-    settings.paperSize,
-    isCornellCompact,
-  ]);
 
   if (!isOpen) return null;
 
@@ -374,41 +240,6 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       previewRef.current ||
       document.getElementById("printable-paper-container");
     if (!source) return;
-
-    // Compact only: fixed 1／2 per page must not be rewritten at print time.
-    if (settings.mode === "cornell" && isCornellCompact && cornellFitSize > 1) {
-      const bodies = Array.from(
-        source.querySelectorAll("[data-cornell-body]")
-      ) as HTMLElement[];
-      let overflow = false;
-      for (const el of bodies) {
-        if (el.scrollHeight > el.clientHeight + 2) overflow = true;
-        const cards = Array.from(
-          el.querySelectorAll("[data-cornell-card]")
-        ) as HTMLElement[];
-        if (cards.length > 0) {
-          const first = cards[0];
-          const last = cards[cards.length - 1];
-          const span =
-            last.offsetTop + last.scrollHeight - first.offsetTop;
-          if (span > el.clientHeight + 2) overflow = true;
-        }
-        for (const card of cards) {
-          if (card.scrollHeight > card.clientHeight + 2) overflow = true;
-        }
-        const panes = Array.from(
-          el.querySelectorAll("[data-cornell-question]")
-        ) as HTMLElement[];
-        for (const pane of panes) {
-          if (pane.scrollHeight > pane.clientHeight + 2) overflow = true;
-        }
-      }
-      if (overflow) {
-        setCornellFitSize((n) => n - 1);
-        setExportError("仍在依內容調整每頁題數以免裁切圖形，請確認預覽後再列印一次");
-        return;
-      }
-    }
 
     const root = document.documentElement;
     const isB5 = settings.paperSize === "B5";
@@ -758,13 +589,12 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                       title="地理、公民、歷史等背科：題與題緊接、不留手寫空白，避免紙張浪費"
                     >
                       <div className="text-[11px] font-bold">背科精簡</div>
-                      <div className="text-[9px] opacity-80 mt-0.5">無留白 · 密排</div>
+                      <div className="text-[9px] opacity-80 mt-0.5">四題一頁 · 圖隨格縮放</div>
                     </button>
                   </div>
                   {settings.questionsPerPage === "compact" ? (
                     <p className="mt-1.5 text-[10px] text-amber-800/90 leading-snug">
-                      適合地理、公民、歷史等死背科目：題與題緊接、不留手寫空白；預覽會依內容自動調整每頁題數（目前約{" "}
-                      {cornellPageSize} 題／頁），避免題目被裁切。
+                      固定每頁 4 題。圖形依每一格剩下的高度縮放（寬圖偏扁、高圖偏窄），題幹在圖上、複習列在圖下。
                     </p>
                   ) : settings.questionsPerPage === 1 ? (
                     <p className="mt-1.5 text-[10px] text-amber-800/90 leading-snug">
@@ -1139,11 +969,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                             key={q.id}
                             data-cornell-card
                             className={`border border-slate-300 rounded-lg overflow-hidden flex flex-row relative bg-white ${
-                              isCornellCompact
-                                ? "shrink-0 items-start"
-                                : isTwoUp
-                                  ? "flex-1 min-h-0"
-                                  : "flex-1 min-h-min"
+                              scaleFigure ? "flex-1 min-h-0" : "flex-1 min-h-min"
                             }`}
                           >
                             {/* LEFT SIDEBAR: Metadata & Mistake Reason Analysis */}
@@ -1239,7 +1065,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                             {/* RIGHT MAIN AREA: Question text + Math grid notebook workspace */}
                             <div
                               className={`flex-1 flex flex-col min-w-0 bg-white ${
-                                isCornellCompact || isTwoUp ? "min-h-0" : "min-h-min"
+                                scaleFigure ? "min-h-0" : "min-h-min"
                               }`}
                             >
                               {/* Top Question Body — natural height (no max-h clip); page fit shrinks density instead */}
@@ -1347,21 +1173,15 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                   return (
                                     <div
                                       className={`border-b border-slate-200 bg-white ${
-                                        isTwoUp
-                                          ? "flex-1 min-h-0 overflow-hidden px-2 py-1"
-                                          : isCornellCompact
-                                            ? "shrink-0 px-1.5 py-1"
-                                            : "shrink-0 px-2 py-1.5"
+                                        scaleFigure
+                                          ? "flex-1 min-h-0 overflow-hidden px-1.5 py-1"
+                                          : "shrink-0 px-2 py-1.5"
                                       }`}
                                     >
                                       <ExportFigure
                                         src={figureSrc}
-                                        fit={isTwoUp}
-                                        maxHeight={
-                                          isCornellCompact
-                                            ? FIGURE_MAX_HEIGHT.cornellCompact
-                                            : FIGURE_MAX_HEIGHT.cornell
-                                        }
+                                        fit={scaleFigure}
+                                        maxHeight={FIGURE_MAX_HEIGHT.cornell}
                                       />
                                     </div>
                                   );
@@ -1677,11 +1497,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 ? `（錯題本共 ${notebookTotal}）`
                 : ""}
               {settings.mode === "cornell"
-                ? isCornellCompact
-                  ? ` · 密排約 ${cornellPageSize} 題／頁${
-                      cornellFitReduced ? "（已自動降密以免裁切）" : ""
-                    }`
-                  : ` · 每頁 ${cornellPageSize} 題`
+                ? ` · 每頁 ${cornellPageSize} 題`
                 : ""}
             </span>
             <span className="hidden sm:inline">·</span>
