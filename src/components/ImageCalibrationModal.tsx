@@ -722,7 +722,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       ];
     }
     const imageBase64 = await applyMultiRegionCrop(currentImage, regions, 0.92);
-    const figureOnly = await cropFigureRegionsOnly(currentImage, regions, 0.92);
+    const figureOnly = await cropFigureRegionsOnly(currentImage, regions, 0.95);
     // "" = explicit none so PDF textOnly won't fall back to the stem screenshot
     return { imageBase64, figureImageBase64: figureOnly || "" };
   };

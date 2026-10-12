@@ -15,7 +15,7 @@ import {
   Camera,
   AlignLeft,
 } from "lucide-react";
-import { PaperSettings, QuestionItem, PaperSize } from "../types";
+import { PaperSettings, QuestionItem, PaperSize, ImageSettings } from "../types";
 import { MathRenderer } from "./MathRenderer";
 import { normalizeImageSrc } from "../utils/imageUtils";
 import { getTextOnlyFigureSrc } from "../utils/questionExport";
@@ -50,6 +50,43 @@ const MISTAKE_REASONS = [
 ];
 
 const REVIEW_INTERVALS = ["1D", "2D", "4D", "7D", "15D"];
+
+/**
+ * Printed height of a「選圖形」map.
+ * Old caps were 16–40 CSS px-rem (~17–42mm), so place names were unreadably small.
+ */
+const FIGURE_MAX_HEIGHT = {
+  cornellCompact: "72mm",
+  cornell: "96mm",
+  paper: "112mm",
+} as const;
+
+function questionImageStyle(
+  settings: ImageSettings | undefined
+): React.CSSProperties | undefined {
+  const rotation = settings?.rotation || 0;
+  const zoom = settings?.zoom ?? 100;
+  // rotate(0) scale(1) still promotes a layer; Chrome then prints that layer
+  // at screen DPI and maps/diagrams look soft.
+  if (rotation === 0 && zoom === 100) return undefined;
+  return {
+    transform: `rotate(${rotation}deg) scale(${zoom / 100})`,
+    transformOrigin: "center center",
+  };
+}
+
+function ExportFigure({ src, maxHeight }: { src: string; maxHeight: string }) {
+  return (
+    <div className="print-figure mt-1.5 flex w-full justify-end">
+      <img
+        src={normalizeImageSrc(src)}
+        alt="題目附圖（地圖／圖示）"
+        className="print-figure-img block h-auto w-auto max-w-full object-contain border border-slate-300 bg-white rounded-sm"
+        style={{ maxHeight }}
+      />
+    </div>
+  );
+}
 
 export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   isOpen,
@@ -886,7 +923,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                     <div>
                       <span className="block text-xs">僅排版文字（附圖形圖）</span>
                       <span className="block text-[10px] text-slate-500 font-normal">
-                        印排版文字；有「選圖形」才附地圖／圖區於右下，不附文字截圖
+                        印排版文字；有「選圖形」才把地圖／圖區以可讀尺寸附於右下，不附文字截圖
                       </span>
                     </div>
                   </div>
@@ -1026,13 +1063,18 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                           <div
                             key={q.id}
                             data-cornell-card
-                            className={`border border-slate-300 rounded-lg overflow-hidden flex flex-row relative bg-white ${
+                            className={`border border-slate-300 rounded-lg overflow-hidden flex flex-col relative bg-white ${
                               isCornellCompact
-                                ? "shrink-0 items-start"
+                                ? "shrink-0"
                                 : // min-h-min: grow for handwriting space, never shrink below stem/figure
                                   "flex-1 min-h-min"
                             }`}
                           >
+                            <div
+                              className={`flex flex-row min-w-0 flex-1 ${
+                                isCornellCompact ? "items-start" : "min-h-min"
+                              }`}
+                            >
                             {/* LEFT SIDEBAR: Metadata & Mistake Reason Analysis */}
                             <div
                               className={`shrink-0 bg-slate-50 border-r border-slate-300 flex flex-col text-[11px] font-sans ${
@@ -1168,16 +1210,12 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                       <img
                                         src={normalizeImageSrc(q.imageBase64)}
                                         alt="題目原圖截圖"
-                                        className={`w-auto object-contain border border-slate-200 rounded shadow-2xs ${
+                                        className={`w-auto max-w-full object-contain border border-slate-200 rounded shadow-2xs ${
                                           isCornellCompact
                                             ? "max-h-20"
                                             : "max-h-48 sm:max-h-56"
                                         }`}
-                                        style={{
-                                          transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
-                                            (q.imageSettings.zoom || 100) / 100
-                                          })`,
-                                        }}
+                                        style={questionImageStyle(q.imageSettings)}
                                       />
                                     </div>
                                   ) : (
@@ -1198,27 +1236,6 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                     >
                                       <MathRenderer content={q.questionText} />
                                     </div>
-                                    {displayMode === "textOnly" &&
-                                      (() => {
-                                        const figureSrc = getTextOnlyFigureSrc(q);
-                                        if (!figureSrc) return null;
-                                        return (
-                                          <div className="flex justify-end pt-0.5">
-                                            <img
-                                              src={normalizeImageSrc(figureSrc)}
-                                              alt="題目附圖（地圖／圖示）"
-                                              className={`object-contain border border-slate-200 rounded ${
-                                                isCornellCompact ? "max-h-16" : "max-h-28"
-                                              }`}
-                                              style={{
-                                                transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
-                                                  (q.imageSettings.zoom || 100) / 100
-                                                })`,
-                                              }}
-                                            />
-                                          </div>
-                                        );
-                                      })()}
                                   </div>
                                 ) : (
                                   <>
@@ -1235,14 +1252,10 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                           <img
                                             src={normalizeImageSrc(q.imageBase64)}
                                             alt="題目原圖"
-                                            className={`object-contain border border-slate-200 rounded ${
+                                            className={`max-w-full object-contain border border-slate-200 rounded ${
                                               isCornellCompact ? "max-h-16" : "max-h-28"
                                             }`}
-                                            style={{
-                                              transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
-                                                (q.imageSettings.zoom || 100) / 100
-                                              })`,
-                                            }}
+                                            style={questionImageStyle(q.imageSettings)}
                                           />
                                         </div>
                                       )}
@@ -1305,6 +1318,28 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                 </div>
                               )}
                             </div>
+                            </div>
+                            {displayMode === "textOnly" &&
+                              (() => {
+                                const figureSrc = getTextOnlyFigureSrc(q);
+                                if (!figureSrc) return null;
+                                return (
+                                  <div
+                                    className={`shrink-0 border-t border-slate-200 bg-white ${
+                                      isCornellCompact ? "px-1.5 py-1" : "px-2 py-1.5"
+                                    }`}
+                                  >
+                                    <ExportFigure
+                                      src={figureSrc}
+                                      maxHeight={
+                                        isCornellCompact
+                                          ? FIGURE_MAX_HEIGHT.cornellCompact
+                                          : FIGURE_MAX_HEIGHT.cornell
+                                      }
+                                    />
+                                  </div>
+                                );
+                              })()}
                           </div>
                         ))}
                       </div>
@@ -1404,13 +1439,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                               <img
                                 src={normalizeImageSrc(q.imageBase64)}
                                 alt="題目原圖截圖"
-                                className="max-h-64 object-contain border border-slate-200 rounded shadow-2xs"
-                                style={{
-                                  transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
-                                    (q.imageSettings.zoom || 100) / 100
-                                  })`,
-                                  transformOrigin: "center center",
-                                }}
+                                className="max-h-64 max-w-full object-contain border border-slate-200 rounded shadow-2xs"
+                                style={questionImageStyle(q.imageSettings)}
                               />
                             </div>
                           ) : (
@@ -1431,19 +1461,10 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                 const figureSrc = getTextOnlyFigureSrc(q);
                                 if (!figureSrc) return null;
                                 return (
-                                  <div className="flex justify-end">
-                                    <img
-                                      src={normalizeImageSrc(figureSrc)}
-                                      alt="題目附圖（地圖／圖示）"
-                                      className="max-h-40 object-contain border border-slate-200 rounded"
-                                      style={{
-                                        transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
-                                          (q.imageSettings.zoom || 100) / 100
-                                        })`,
-                                        transformOrigin: "center center",
-                                      }}
-                                    />
-                                  </div>
+                                  <ExportFigure
+                                    src={figureSrc}
+                                    maxHeight={FIGURE_MAX_HEIGHT.paper}
+                                  />
                                 );
                               })()}
                           </div>
@@ -1462,13 +1483,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                   <img
                                     src={normalizeImageSrc(q.imageBase64)}
                                     alt="題目原圖"
-                                    className="max-h-52 object-contain border border-slate-200 rounded"
-                                    style={{
-                                      transform: `rotate(${q.imageSettings.rotation || 0}deg) scale(${
-                                        (q.imageSettings.zoom || 100) / 100
-                                      })`,
-                                      transformOrigin: "center center",
-                                    }}
+                                    className="max-h-52 max-w-full object-contain border border-slate-200 rounded"
+                                    style={questionImageStyle(q.imageSettings)}
                                   />
                                 </div>
                               )}

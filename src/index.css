@@ -100,6 +100,12 @@
   max-width: 100%;
 }
 
+/* Downscale maps with the source pixels instead of a soft screen snapshot. */
+.print-figure-img {
+  image-rendering: auto;
+  image-rendering: high-quality;
+}
+
 /* 5mm crisp math grid paper for Cornell mistake notes */
 .math-grid-bg {
   background-image: 
@@ -146,7 +152,8 @@
     box-shadow: none !important;
     border: none !important;
     box-sizing: border-box !important;
-    overflow: hidden !important;
+    /* visible: overflow:hidden makes Chrome flatten images at screen DPI */
+    overflow: visible !important;
     page-break-after: always !important;
     break-after: page !important;
     page-break-inside: auto !important;
@@ -161,9 +168,18 @@
   /* Do NOT force min-height:0 on all descendants — that undoes Cornell
      cards' min-h-min and re-enables flex shrink + overflow clip on print. */
 
+  html.printing-exam #exam-print-root .overflow-hidden,
   html.printing-exam #exam-print-root .overflow-y-auto,
   html.printing-exam #exam-print-root .overflow-x-auto {
-    overflow: hidden !important;
+    overflow: visible !important;
+  }
+
+  /* Figure crops must print from the bitmap, not a transformed screen layer. */
+  html.printing-exam #exam-print-root .print-figure,
+  html.printing-exam #exam-print-root .print-figure-img {
+    overflow: visible !important;
+    transform: none !important;
+    filter: none !important;
   }
 
   html.printing-exam #exam-print-root .katex-display {
