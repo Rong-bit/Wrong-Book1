@@ -77,13 +77,68 @@ function questionImageStyle(
 
 function ExportFigure({ src, maxHeight }: { src: string; maxHeight: string }) {
   return (
-    <div className="print-figure mt-1.5 flex w-full justify-end">
+    <div className="print-figure flex w-full justify-end">
       <img
         src={normalizeImageSrc(src)}
         alt="題目附圖（地圖／圖示）"
         className="print-figure-img block h-auto w-auto max-w-full object-contain border border-slate-300 bg-white rounded-sm"
         style={{ maxHeight }}
       />
+    </div>
+  );
+}
+
+function CornellReview({
+  isCornellCompact,
+  showGrid,
+  showReviewTrack,
+}: {
+  isCornellCompact: boolean;
+  showGrid: boolean;
+  showReviewTrack: boolean;
+}) {
+  if (isCornellCompact) {
+    if (!showReviewTrack) return null;
+    return (
+      <div className="px-1.5 py-0.5 flex justify-end shrink-0 bg-white">
+        <div className="bg-white rounded border border-slate-300/80 flex items-center gap-1 px-1.5 py-0.5 text-[8px] text-slate-700">
+          <span className="font-bold text-slate-800">複習：</span>
+          <div className="flex items-center gap-1">
+            {REVIEW_INTERVALS.map((label) => (
+              <div
+                key={label}
+                className="w-3 h-3 rounded-[2px] border border-slate-400 bg-white"
+                title={label}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`flex-1 min-h-[28mm] p-2 flex flex-col justify-between relative ${
+        showGrid ? "math-grid-bg" : "bg-white"
+      }`}
+    >
+      <div className="text-[10px] text-slate-400 font-sans tracking-wider pointer-events-none select-none">
+        【演算推導 · 思維訂正筆記區】
+      </div>
+      {showReviewTrack && (
+        <div className="self-end bg-white/95 px-2.5 py-1 rounded-md border border-slate-300/80 shadow-2xs flex items-center gap-2 text-[10px] text-slate-700">
+          <span className="font-bold text-slate-800">艾賓浩斯複習打卡 (V/X)：</span>
+          <div className="flex items-center gap-1">
+            {REVIEW_INTERVALS.map((label) => (
+              <div key={label} className="flex flex-col items-center">
+                <div className="w-4 h-4 rounded-[2px] border-2 border-slate-400 bg-white" />
+                <span className="text-[8px] text-slate-400 mt-0.5">{label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -923,7 +978,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                     <div>
                       <span className="block text-xs">僅排版文字（附圖形圖）</span>
                       <span className="block text-[10px] text-slate-500 font-normal">
-                        印排版文字；有「選圖形」才把地圖／圖區以可讀尺寸附於右下，不附文字截圖
+                        印排版文字；有「選圖形」才緊接題幹附上地圖／圖區，複習區在圖下，不附文字截圖
                       </span>
                     </div>
                   </div>
@@ -1063,18 +1118,13 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                           <div
                             key={q.id}
                             data-cornell-card
-                            className={`border border-slate-300 rounded-lg overflow-hidden flex flex-col relative bg-white ${
+                            className={`border border-slate-300 rounded-lg overflow-hidden flex flex-row relative bg-white ${
                               isCornellCompact
-                                ? "shrink-0"
+                                ? "shrink-0 items-start"
                                 : // min-h-min: grow for handwriting space, never shrink below stem/figure
                                   "flex-1 min-h-min"
                             }`}
                           >
-                            <div
-                              className={`flex flex-row min-w-0 flex-1 ${
-                                isCornellCompact ? "items-start" : "min-h-min"
-                              }`}
-                            >
                             {/* LEFT SIDEBAR: Metadata & Mistake Reason Analysis */}
                             <div
                               className={`shrink-0 bg-slate-50 border-r border-slate-300 flex flex-col text-[11px] font-sans ${
@@ -1270,76 +1320,33 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                 )}
                               </div>
 
-                              {/* Bottom: compact = no handwriting blank (optional thin review strip); else spacious grid */}
-                              {isCornellCompact ? (
-                                settings.showReviewTrack !== false && (
-                                  <div className="px-1.5 py-0.5 border-t border-slate-100 flex justify-end shrink-0 bg-white">
-                                    <div className="bg-white rounded border border-slate-300/80 flex items-center gap-1 px-1.5 py-0.5 text-[8px] text-slate-700">
-                                      <span className="font-bold text-slate-800">複習：</span>
-                                      <div className="flex items-center gap-1">
-                                        {REVIEW_INTERVALS.map((label) => (
-                                          <div
-                                            key={label}
-                                            className="w-3 h-3 rounded-[2px] border border-slate-400 bg-white"
-                                            title={label}
-                                          />
-                                        ))}
-                                      </div>
+                              {displayMode === "textOnly" &&
+                                (() => {
+                                  const figureSrc = getTextOnlyFigureSrc(q);
+                                  if (!figureSrc) return null;
+                                  return (
+                                    <div
+                                      className={`shrink-0 border-b border-slate-200 bg-white ${
+                                        isCornellCompact ? "px-1.5 py-1" : "px-2 py-1.5"
+                                      }`}
+                                    >
+                                      <ExportFigure
+                                        src={figureSrc}
+                                        maxHeight={
+                                          isCornellCompact
+                                            ? FIGURE_MAX_HEIGHT.cornellCompact
+                                            : FIGURE_MAX_HEIGHT.cornell
+                                        }
+                                      />
                                     </div>
-                                  </div>
-                                )
-                              ) : (
-                                <div
-                                  className={`flex-1 p-2 flex flex-col justify-between relative ${
-                                    settings.showGrid !== false ? "math-grid-bg" : "bg-white"
-                                  }`}
-                                >
-                                  <div className="text-[10px] text-slate-400 font-sans tracking-wider pointer-events-none select-none">
-                                    【演算推導 · 思維訂正筆記區】
-                                  </div>
-
-                                  {settings.showReviewTrack !== false && (
-                                    <div className="self-end bg-white/95 px-2.5 py-1 rounded-md border border-slate-300/80 shadow-2xs flex items-center gap-2 text-[10px] text-slate-700">
-                                      <span className="font-bold text-slate-800">
-                                        艾賓浩斯複習打卡 (V/X)：
-                                      </span>
-                                      <div className="flex items-center gap-1">
-                                        {REVIEW_INTERVALS.map((label) => (
-                                          <div key={label} className="flex flex-col items-center">
-                                            <div className="w-4 h-4 rounded-[2px] border-2 border-slate-400 bg-white" />
-                                            <span className="text-[8px] text-slate-400 mt-0.5">
-                                              {label}
-                                            </span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
+                                  );
+                                })()}
+                              <CornellReview
+                                isCornellCompact={isCornellCompact}
+                                showGrid={settings.showGrid !== false}
+                                showReviewTrack={settings.showReviewTrack !== false}
+                              />
                             </div>
-                            </div>
-                            {displayMode === "textOnly" &&
-                              (() => {
-                                const figureSrc = getTextOnlyFigureSrc(q);
-                                if (!figureSrc) return null;
-                                return (
-                                  <div
-                                    className={`shrink-0 border-t border-slate-200 bg-white ${
-                                      isCornellCompact ? "px-1.5 py-1" : "px-2 py-1.5"
-                                    }`}
-                                  >
-                                    <ExportFigure
-                                      src={figureSrc}
-                                      maxHeight={
-                                        isCornellCompact
-                                          ? FIGURE_MAX_HEIGHT.cornellCompact
-                                          : FIGURE_MAX_HEIGHT.cornell
-                                      }
-                                    />
-                                  </div>
-                                );
-                              })()}
                           </div>
                         ))}
                       </div>
