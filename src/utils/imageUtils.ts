@@ -181,16 +181,21 @@ export async function convertHeicToJpegBlob(fileOrBlob: Blob): Promise<Blob> {
 }
 
 /**
+ * Longest side kept for print. ~300 dpi across an A4 short edge (210mm),
+ * so a cropped map still has pixels left after it is placed large on the sheet.
+ */
+export const PRINT_SOURCE_MAX_EDGE = 2480;
+
+/**
  * Compresses an image file or base64 string to a crisp, storage-friendly JPEG data URL.
  * Automatically supports HEIC/HEIF images (e.g. from iPhone / iPad cameras).
- * Max dimension: 1600px (crystal clear for 300dpi printing and high-res monitors).
- * File size typically reduced from 5MB~10MB down to 100KB~250KB.
+ * Default longest side is {@link PRINT_SOURCE_MAX_EDGE}.
  */
 export async function compressImage(
   fileOrBase64: File | Blob | string,
-  maxWidth = 1600,
-  maxHeight = 1600,
-  quality = 0.88
+  maxWidth = PRINT_SOURCE_MAX_EDGE,
+  maxHeight = PRINT_SOURCE_MAX_EDGE,
+  quality = 0.92
 ): Promise<string> {
   let target: File | Blob | string = fileOrBase64;
 
@@ -261,7 +266,8 @@ export async function compressImage(
         ctx.fillStyle = "#ffffff";
         ctx.fillRect(0, 0, width, height);
 
-        // Draw image onto canvas
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = "high";
         ctx.drawImage(img, 0, 0, width, height);
 
         // Output as high quality JPEG
@@ -630,9 +636,9 @@ export function detectNearWhitePaperCorners(
 export async function applyPerspectiveCorrection(
   imageSrc: string,
   corners: [Point, Point, Point, Point],
-  outputMaxWidth = 1800,
-  outputMaxHeight = 1800,
-  quality = 0.92
+  outputMaxWidth = PRINT_SOURCE_MAX_EDGE,
+  outputMaxHeight = PRINT_SOURCE_MAX_EDGE,
+  quality = 0.94
 ): Promise<string> {
   const normSrc = normalizeImageSrc(imageSrc);
   if (!normSrc) return "";
@@ -852,6 +858,8 @@ function cropLoadedImage(
   const ctx = canvas.getContext("2d");
   if (!ctx) return fallbackSrc;
 
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, cropW, cropH);
   ctx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
@@ -1801,7 +1809,7 @@ export async function applyMultiRegionCrop(
 export async function cropFigureRegionsOnly(
   imageSrc: string,
   regions: LabeledCropRect[],
-  quality = 0.92
+  quality = 0.95
 ): Promise<string | undefined> {
   const diagrams = regions.filter((r) => r.kind === "diagram");
   if (!diagrams.length) return undefined;
