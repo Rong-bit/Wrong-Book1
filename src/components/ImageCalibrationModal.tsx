@@ -906,6 +906,20 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
             bleachErr
           );
         }
+        try {
+          // Whitened paper + deeper print for readable black/white contrast.
+          kept = await removeShadowsAndBinarize(kept, {
+            mode: "clean_gray",
+            contrast: 1.35,
+            whiteLevel: 0.9,
+            blackLevel: 0.42,
+          });
+        } catch (contrastErr) {
+          console.warn(
+            "Post hollow contrast enhance failed, keeping bleached image:",
+            contrastErr
+          );
+        }
         pushHistory(kept);
       }
     } catch (err: any) {
@@ -1943,7 +1957,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               onClick={() => void handleAiRemoveHandwriting()}
               disabled={isProcessing}
               className="px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-bold text-violet-950 bg-violet-100 hover:bg-violet-200 active:scale-95 transition flex items-center gap-1 sm:gap-1.5 cursor-pointer whitespace-nowrap border border-violet-200 disabled:opacity-50"
-              title="AI 去除手寫；以原圖為底合成避免幻覺圖形，並清除殘留彩筆。需 Gemini API Key"
+              title="AI 去除手寫；清除紅藍筆／貼圖，並強化黑白對比。需 Gemini API Key"
             >
               <Sparkles className="w-3.5 h-3.5 text-violet-700" />
               <span className="sm:hidden">AI挖空</span>

@@ -192,3 +192,35 @@ console.log(
   }
   console.log("OK: surgical bleach clears red sticker, keeps mid-gray print");
 }
+
+// Dark core inside a red X must clear (red-corrected → black remnant case)
+{
+  const page = rgba(W, H, paper);
+  // printed text away from the mark
+  for (let y = 10; y < 18; y++) {
+    for (let x = 10; x < 40; x++) setPx(page, W, x, y, print);
+  }
+  // Red X with a near-black core (simulates ballpoint layering)
+  for (let k = 0; k < 18; k++) {
+    setPx(page, W, 60 + k, 30 + k, red);
+    setPx(page, W, 77 - k, 30 + k, red);
+    if (k > 4 && k < 14) {
+      setPx(page, W, 60 + k, 30 + k, [40, 20, 18]);
+      setPx(page, W, 77 - k, 30 + k, [40, 20, 18]);
+    }
+  }
+  const outX = bleachColoredPensOnlyPixels(page, W, H);
+  {
+    const [r, g, b] = getPx(outX, W, 69, 39);
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    assert(lum > 200, `dark core of red X must clear, lum=${lum}`);
+  }
+  {
+    const [r, g, b] = getPx(outX, W, 20, 12);
+    assert(
+      0.299 * r + 0.587 * g + 0.114 * b < 80,
+      "print near red X must remain"
+    );
+  }
+  console.log("OK: red X dark core cleared; nearby print kept");
+}

@@ -10,6 +10,9 @@ import {
   compositeCleanExamPixels,
 } from "../src/utils/imageUtils";
 
+// Note: contrast enhance (removeShadowsAndBinarize) needs DOM canvas; this
+// script validates pen bleach + print keep on raw pixels.
+
 const src =
   process.argv[2] ||
   "/home/ubuntu/.cursor/projects/workspace/assets/8383ead0-6ae1-44d9-8dce-eeeb2cf31f69.jpg";

@@ -370,14 +370,22 @@ function dilateDarkMask(
 
 /** Red ballpoint / marker / solid red sticker (hue-aware). */
 function isRedPenPixel(r: number, g: number, b: number, lum: number, chroma: number): boolean {
-  if (lum >= 232 || lum <= 35) return false;
-  return (
+  // Photographed red pen is often muted pink/maroon (low chroma, r/g≈1.05).
+  if (lum >= 236 || lum <= 18) return false;
+  const warm =
+    r >= g + 6 &&
+    r >= b + 6 &&
+    chroma >= 10 &&
+    r / (g + 1) >= 1.05 &&
+    r / (b + 1) >= 1.05;
+  // Stronger classic red (stickers, fresh ink)
+  const vivid =
     r >= g + 12 &&
     r >= b + 12 &&
     chroma >= 18 &&
     r / (g + 1) >= 1.12 &&
-    r / (b + 1) >= 1.12
-  );
+    r / (b + 1) >= 1.12;
+  return warm || vivid;
 }
 
 /** Blue / cyan ballpoint. */
@@ -1256,9 +1264,12 @@ export async function blankHandwritingMarks(
 }
 
 /**
- * Residual cleanup after AI挖空: remove only red/blue pens and solid red
- * stickers. Does NOT clear pencil/mid-gray — photographed print often sits in
- * that band and must stay.
+ * Residual cleanup after AI挖空: remove red/blue pens and solid red stickers.
+ * Does NOT clear pencil/mid-gray print.
+ *
+ * Red ballpoint O/X often has a near-black core. Dilate the colored-pen mask,
+ * then also wipe dark pixels that fall inside that neighborhood — so black
+ * remnants of red corrections go away without flooding into printed stems.
  */
 export function bleachColoredPensOnlyPixels(
   rgba: Uint8ClampedArray | Uint8Array,
@@ -1283,14 +1294,28 @@ export function bleachColoredPensOnlyPixels(
     if (isColoredPenRgb(r, g, b, v, c)) pen[p] = 1;
   }
 
-  // One dilation only — enough for pen edges, not enough to swallow glyphs.
-  const remove = dilateDarkMask(pen, w, h);
+  // Neighborhood around colored pen (~stroke width); dark cores inside are wiped.
+  let nearPen = pen;
+  for (let k = 0; k < 3; k++) nearPen = dilateDarkMask(nearPen, w, h);
+
+  const remove = new Uint8Array(n);
   for (let p = 0; p < n; p++) {
-    if (!remove[p]) continue;
-    // Never paper-fill dark low-chroma print cores the dilation touched.
-    if (lum[p] < 125 && chroma[p] < 34 && !pen[p]) {
-      remove[p] = 0;
+    if (pen[p]) {
+      remove[p] = 1;
+      continue;
     }
+    if (!nearPen[p]) continue;
+    // Dark / maroon remnant of the same stroke
+    if (lum[p] <= 170 && chroma[p] < 60) remove[p] = 1;
+  }
+
+  // One more soft edge; refuse to eat very dark low-chroma print outside pen
+  const removeGrown = dilateDarkMask(remove, w, h);
+  for (let p = 0; p < n; p++) {
+    if (!removeGrown[p] || remove[p]) continue;
+    if (lum[p] < 95 && chroma[p] < 28 && !nearPen[p]) continue;
+    if (lum[p] < 95 && chroma[p] < 28 && !pen[p]) continue;
+    remove[p] = 1;
   }
 
   const block = 48;
