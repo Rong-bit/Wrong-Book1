@@ -62,10 +62,14 @@ assert(
   "prompt should address shadows and crease lines"
 );
 assert(
-  prompt.includes("禁止") && prompt.includes("整頁重畫"),
-  "prompt must forbid full-page redraw when cleaning shadows"
+  prompt.includes("禁止") &&
+    (prompt.includes("發明圖形") || prompt.includes("不發明圖")),
+  "prompt must forbid inventing figures when cleaning shadows"
 );
-assert(prompt.includes("不重繪印刷字"), "prompt must forbid redrawing print");
+assert(
+  prompt.includes("重繪印刷字") && !prompt.includes("不重繪印刷字"),
+  "prompt must require redrawing print (not forbid it)"
+);
 assert(prompt.includes("不發明圖"), "prompt must forbid inventing figures");
 assert(prompt.includes("不位移構圖"), "prompt must forbid shifting layout");
 
@@ -111,7 +115,7 @@ const out = compositeCleanExamPixels(orig, edit, W, H);
 
 {
   const [r, g, b] = getPx(out, W, 12, 22);
-  assert(luma(r, g, b) < 80, "printed glyph must remain from original");
+  assert(luma(r, g, b) < 80, "printed glyph must remain");
 }
 {
   const [r, g, b] = getPx(out, W, 60, 35);
@@ -148,6 +152,30 @@ const out = compositeCleanExamPixels(orig, edit, W, H);
 {
   const [r, g, b] = getPx(out, W, 20, 60);
   assert(g > 100 && g > r, `green map must stay, got ${[r, g, b]}`);
+}
+
+// Redrawn print: model replaces speckled print with solid black in-place.
+// Composite must keep AI redraw, not discard it for the original photo.
+{
+  const W3 = 80;
+  const H3 = 40;
+  const page = rgba(W3, H3, paper);
+  for (let y = 12; y < 24; y++) {
+    for (let x = 8; x < 50; x++) {
+      if ((x + y) % 3 !== 0) setPx(page, W3, x, y, [40, 40, 40]);
+    }
+  }
+  const redrawn: [number, number, number] = [8, 8, 8];
+  const edited = new Uint8ClampedArray(page);
+  for (let y = 12; y < 24; y++) {
+    for (let x = 8; x < 50; x++) setPx(edited, W3, x, y, redrawn);
+  }
+  const outRedraw = compositeCleanExamPixels(page, edited, W3, H3);
+  const [r, g, b] = getPx(outRedraw, W3, 20, 16);
+  assert(
+    r === 8 && g === 8 && b === 8,
+    `AI redrawn print must be kept, got ${[r, g, b]}`
+  );
 }
 assert(
   buildRemoveHandwritingPrompt().includes("圖一") ||
@@ -205,5 +233,5 @@ assert(
 }
 
 console.log(
-  "OK: hallucinated circuit rejected; print/map kept; red sticker + pens cleared; washout keeps handwriting clears"
+  "OK: hallucinated circuit rejected; AI redrawn print kept; map kept; red sticker + pens cleared; washout keeps handwriting clears"
 );
