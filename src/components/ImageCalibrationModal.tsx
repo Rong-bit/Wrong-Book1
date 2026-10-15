@@ -70,7 +70,7 @@ interface ImageCalibrationModalProps {
 }
 
 type CalibrationMode = "perspective" | "crop";
-/** paint = 選文字滑過整行、選圖形緊貼筆畫；frame = 矩形微調 */
+/** paint = 選文字滑到哪框到哪、選圖形緊貼筆畫；frame = 矩形微調 */
 type CropTool = "paint" | "frame";
 type AspectRatioMode = "free" | "4:3" | "16:9" | "1:1" | "paper";
 /** Explicit paint target: start with text, tap again for diagram. */
@@ -744,7 +744,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setProcessingText(
         paintKind === "diagram"
           ? "請先畫過地圖／圖形範圍（目前為「選圖形」）"
-          : "請先滑過題幹文字（目前為「選文字」，滑過即框整行；再點按鈕可切換選圖形）"
+          : "請先滑過要框的文字（目前為「選文字」，滑到哪就框到哪；再點按鈕可切換選圖形）"
       );
       setIsProcessing(true);
       setTimeout(() => setIsProcessing(false), 1400);
@@ -1696,7 +1696,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 hidden md:block truncate">
-                滑過文字即框整行；圖形另畫一框，兩區不重疊
+                滑到哪就框到哪；圖形另畫一框，兩區不重疊
               </p>
             </div>
           </div>
@@ -1812,7 +1812,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                         ? "目前選圖形：再點一次切回選文字"
                         : cropTool === "paint"
                         ? "目前選文字：再點一次切換選圖形"
-                        : "滑過題幹即框住整行文字（預設）；進入後再點可切換選圖形"
+                        : "滑過的字才入框（預設）；進入後再點可切換選圖形"
                     }
                   >
                     <Paintbrush className="w-3 h-3" />
@@ -2240,10 +2240,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 : selectPaintStrokes.length > 0
                 ? paintKind === "diagram"
                   ? "目前「選圖形」：畫地圖／圖形（與文字區不重疊）；再點按鈕可切回選文字"
-                  : "已框住滑過的文字行 → 再點「選文字」按鈕切成「選圖形」後畫地圖"
+                  : "已框住滑過的文字 → 再點「選文字」按鈕切成「選圖形」後畫地圖"
                 : paintKind === "diagram"
                 ? "「選圖形」：請畫地圖／圖形範圍；再點按鈕可切回選文字"
-                : "「選文字」：手指滑過文字即框整行；再點同一按鈕可切換「選圖形」"
+                : "「選文字」：滑到哪就框到哪，只含該行字高；再點同一按鈕可切換「選圖形」"
               : selectRegions.filter((r) => r.kind !== paintKind).length > 0
               ? paintKind === "diagram"
                 ? "已鎖定文字區 → 調整「框圖形」矩形；兩者會一併裁切"
