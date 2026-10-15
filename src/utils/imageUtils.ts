@@ -1839,10 +1839,11 @@ export interface InkLineBounds {
 }
 
 /**
- * Snap a finger stroke to the text lines it crosses.
+ * Snap a finger stroke to the text lines it actually crosses.
  * Each crossed line is boxed edge to edge (character gaps are bridged).
- * Only the nearest line to the stroke is taken, so a swipe on one row
- * does not swallow the line above or below. Pixel coords, inclusive.
+ * A neighboring line that only falls inside the search radius is dropped, so
+ * one horizontal swipe stays on that row instead of the whole passage.
+ * Pixel coords, inclusive.
  */
 export function textLineRectFromInk(
   ink: Uint8Array,
@@ -1856,8 +1857,8 @@ export function textLineRectFromInk(
   const radius2 = radius * radius;
   // Bridge character side-bearings, but not a wide column gutter.
   const gapTol = Math.max(4, Math.round(w * 0.028));
-  const blankLimit = Math.max(2, Math.round(Math.min(w, h) * 0.006));
-  const maxExtra = Math.max(8, Math.round(Math.min(w, h) * 0.03));
+  // Finish the glyph from a stroke through its middle. Kept under one extra line.
+  const maxExtra = Math.max(8, Math.round(Math.min(w, h) * 0.022));
 
   const decimated: Point[] = [];
   for (const p of stroke) {
@@ -1886,7 +1887,17 @@ export function textLineRectFromInk(
   rowMin.fill(-1);
   rowMax.fill(-1);
 
+  // Ignore a stray point far from the stroke's main band so one glitch
+  // cannot stretch the box from the swiped line to the rest of the page.
+  const bandYs = decimated.map((p) => p.y).sort((a, b) => a - b);
+  const yLo = bandYs[Math.floor((bandYs.length - 1) * 0.1)] ?? 0;
+  const yHi = bandYs[Math.ceil((bandYs.length - 1) * 0.9)] ?? h - 1;
+  const yGate = Math.max(radius * 1.25, (yHi - yLo) * 0.5);
+  const bandLo = yLo - yGate;
+  const bandHi = yHi + yGate;
+
   for (const p of decimated) {
+    if (p.y < bandLo || p.y > bandHi) continue;
     const x0 = Math.max(0, Math.floor(p.x - radius));
     const y0 = Math.max(0, Math.floor(p.y - radius));
     const x1 = Math.min(w - 1, Math.ceil(p.x + radius));
@@ -1913,14 +1924,15 @@ export function textLineRectFromInk(
     if (bestX > rowMax[bestY]) rowMax[bestY] = bestX;
   }
 
-  const rowHasInk = (y: number, x0: number, x1: number): boolean => {
-    if (y < 0 || y >= h) return false;
+  const countRowInk = (y: number, x0: number, x1: number): number => {
+    if (y < 0 || y >= h) return 0;
     const lo = Math.max(0, x0);
     const hi = Math.min(w - 1, x1);
+    let hits = 0;
     for (let x = lo; x <= hi; x++) {
-      if (ink[y * w + x]) return true;
+      if (ink[y * w + x]) hits++;
     }
-    return false;
+    return hits;
   };
 
   const columnHasInk = (x: number, top: number, bot: number): boolean => {
@@ -1959,6 +1971,10 @@ export function textLineRectFromInk(
     return [xMin, xMax];
   };
 
+  /**
+   * Grow through the glyph, then stop. A faint gap is the next line — do not
+   * skip it. The threshold comes from this line's own rows, not the neighbor.
+   */
   const growVertically = (
     top: number,
     bot: number,
@@ -1967,29 +1983,29 @@ export function textLineRectFromInk(
     originTop: number,
     originBot: number
   ): [number, number] => {
+    let peak = 0;
+    for (let y = top; y <= bot; y++) peak = Math.max(peak, countRowInk(y, xMin, xMax));
+    for (let d = 1; d <= 2; d++) {
+      if (top - d >= 0) peak = Math.max(peak, countRowInk(top - d, xMin, xMax));
+      if (bot + d < h) peak = Math.max(peak, countRowInk(bot + d, xMin, xMax));
+    }
+    const need = Math.max(4, Math.round(peak * 0.22));
+    const rowOk = (y: number) => countRowInk(y, xMin, xMax) >= need;
+
     let nextTop = top;
     let nextBot = bot;
-    let blank = 0;
     for (let yy = top - 1; yy >= Math.max(0, originTop - maxExtra); yy--) {
-      if (rowHasInk(yy, xMin, xMax)) {
-        nextTop = yy;
-        blank = 0;
-      } else if (++blank > blankLimit) break;
+      if (!rowOk(yy)) break;
+      nextTop = yy;
     }
-    blank = 0;
     for (let yy = bot + 1; yy <= Math.min(h - 1, originBot + maxExtra); yy++) {
-      if (rowHasInk(yy, xMin, xMax)) {
-        nextBot = yy;
-        blank = 0;
-      } else if (++blank > blankLimit) break;
+      if (!rowOk(yy)) break;
+      nextBot = yy;
     }
     return [nextTop, nextBot];
   };
 
-  let minX = w;
-  let minY = h;
-  let maxX = -1;
-  let maxY = -1;
+  const bands: InkLineBounds[] = [];
 
   let y = 0;
   while (y < h) {
@@ -2001,24 +2017,30 @@ export function textLineRectFromInk(
     let y1 = y;
     let look = y;
     let hole = 0;
+    let seedL = rowMin[y];
+    let seedR = rowMax[y];
     while (look + 1 < h) {
       if (rowMin[look + 1] >= 0) {
         look++;
         y1 = look;
         hole = 0;
+        if (rowMin[look] < seedL) seedL = rowMin[look];
+        if (rowMax[look] > seedR) seedR = rowMax[look];
       } else if (hole < 2) {
+        // Bridge a stroke miss inside the glyph. A real line gap has no ink.
+        const bridgeL = Math.max(0, seedL - gapTol);
+        const bridgeR = Math.min(w - 1, seedR + gapTol);
+        const bridgePeak = Math.max(
+          countRowInk(y0, bridgeL, bridgeR),
+          countRowInk(y1, bridgeL, bridgeR)
+        );
+        const bridgeNeed = Math.max(4, Math.round(bridgePeak * 0.22));
+        if (countRowInk(look + 1, bridgeL, bridgeR) < bridgeNeed) break;
         hole++;
         look++;
       } else break;
     }
 
-    let seedL = w;
-    let seedR = -1;
-    for (let ry = y0; ry <= y1; ry++) {
-      if (rowMin[ry] < 0) continue;
-      if (rowMin[ry] < seedL) seedL = rowMin[ry];
-      if (rowMax[ry] > seedR) seedR = rowMax[ry];
-    }
     if (seedR < seedL) {
       y = y1 + 1;
       continue;
@@ -2032,20 +2054,51 @@ export function textLineRectFromInk(
     [top, bot] = growVertically(top, bot, xMin, xMax, y0, y1);
     [xMin, xMax] = expandLineX(xMin, xMax, top, bot);
 
-    minX = Math.min(minX, xMin);
-    maxX = Math.max(maxX, xMax);
-    minY = Math.min(minY, top);
-    maxY = Math.max(maxY, bot);
+    bands.push({ x0: xMin, y0: top, x1: xMax, y1: bot });
     y = Math.max(y1 + 1, bot + 1);
   }
 
+  if (!bands.length) return null;
+
+  // Search radius can tag the line above or below. Keep a band only when the
+  // finger itself enters it, then union just those lines.
+  const slop = Math.max(2, Math.round(radius * 0.3));
+  const strokeYs = decimated.map((p) => p.y);
+  const overlapsStroke = (band: InkLineBounds) =>
+    strokeYs.some((sy) => sy >= band.y0 - slop && sy <= band.y1 + slop);
+  let chosen = bands.filter(overlapsStroke);
+  if (!chosen.length) {
+    const mid = strokeYs[Math.floor(strokeYs.length / 2)] ?? strokeYs[0];
+    let best = bands[0];
+    let bestD = Infinity;
+    for (const band of bands) {
+      const cy = (band.y0 + band.y1) / 2;
+      const d = Math.abs(cy - mid);
+      if (d < bestD) {
+        bestD = d;
+        best = band;
+      }
+    }
+    chosen = [best];
+  }
+
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+  for (const band of chosen) {
+    minX = Math.min(minX, band.x0);
+    maxX = Math.max(maxX, band.x1);
+    minY = Math.min(minY, band.y0);
+    maxY = Math.max(maxY, band.y1);
+  }
   if (maxX < minX || maxY < minY) return null;
   return { x0: minX, y0: minY, x1: maxX, y1: maxY };
 }
 
 /**
- * 選文字：手指滑過的每一行都框成整行（含完整字高），而不是筆畫細條。
- * 沒掃到墨跡時退回筆畫外框。
+ * 選文字：手指滑過的那一行框成整行（含完整字高）。
+ * 行間空白會停住，沒滑過的上下行不會併成整篇。沒掃到墨跡時退回筆畫外框。
  */
 export function textLineCropAlongStroke(
   img: HTMLImageElement,
@@ -2091,7 +2144,8 @@ export function textLineCropAlongStroke(
   if (!bounds) return fallback;
 
   const padX = Math.max(2, Math.round(w * 0.012));
-  const padY = Math.max(2, Math.round(h * 0.008));
+  // Keep vertical padding inside the line gap so the box does not cover the next row.
+  const padY = Math.max(1, Math.round(Math.min(w, h) * 0.003));
   const rx0 = Math.max(0, bounds.x0 - padX);
   const ry0 = Math.max(0, bounds.y0 - padY);
   const rx1 = Math.min(w - 1, bounds.x1 + padX);
