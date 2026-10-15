@@ -371,10 +371,10 @@ function dilateDarkMask(
 /**
  * Composite AI 去手寫 onto the original photo geometry.
  *
- * Start from the original so printed text / maps never get a second, shifted copy
- * from the model (the usual ghosting source). Only replace pixels that look like
- * student marks — colored ink, pencil, thin strokes, or dark ink the model cleared
- * that is not a solid printed glyph core.
+ * The model image is used only as a *detector* of what was cleared — replacement
+ * pixels always come from local paper color on the original. That avoids importing
+ * the model's ghosted / low-res redraw (which made the page look blurry), and
+ * avoids bleaching mid-gray paper or circuit lines as "pencil" / "thin strokes".
  */
 export function compositeCleanExamPixels(
   originalRgba: Uint8ClampedArray | Uint8Array,
@@ -409,7 +409,7 @@ export function compositeCleanExamPixels(
     }
   }
 
-  // Morphological opening: thin pen circles/ticks vanish; solid print glyphs remain.
+  // Solid printed glyph cores (opening). Used only to protect print the model erased.
   const printCore = dilateDarkMask(erodeDarkMask(dark, w, h), w, h);
 
   const rowMin = Math.max(8, Math.round(w * 0.01));
@@ -498,78 +498,77 @@ export function compositeCleanExamPixels(
     }
   }
 
-  const fillPaper = (i: number, bi: number) => {
-    const samples = paperN[bi];
-    if (samples > 8) {
-      out[i] = Math.round(paperR[bi] / samples);
-      out[i + 1] = Math.round(paperG[bi] / samples);
-      out[i + 2] = Math.round(paperB[bi] / samples);
-    } else {
-      out[i] = 255;
-      out[i + 1] = 255;
-      out[i + 2] = 255;
-    }
-  };
+  // Mark mask: colored pens + places the model lightened (handwriting / circles).
+  // Do NOT treat mid-gray paper or all thin dark lines as marks — that washes
+  // shadows into blotches and erases circuit diagram strokes.
+  const remove = new Uint8Array(n);
+  let darkTotal = 0;
+  let darkClearedByAi = 0;
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    if (dark[p]) darkTotal++;
+    if (keepColor[p]) continue;
 
-  const takeEditOrPaper = (i: number, bi: number) => {
-    const eLum = lumaAt(ed, i);
-    if (eLum >= 185) {
-      out[i] = ed[i];
-      out[i + 1] = ed[i + 1];
-      out[i + 2] = ed[i + 2];
-    } else {
-      fillPaper(i, bi);
+    if (isColor[p]) {
+      remove[p] = 1;
+      continue;
     }
-  };
+
+    const eLum = lumaAt(ed, i);
+    const lifted = eLum > lum[p] + 32;
+    if (!lifted) continue;
+
+    // Protect solid printed glyphs the model accidentally erased.
+    if (protectRow[(p / w) | 0] && printCore[p]) continue;
+
+    // Dark ink the model cleared (black pen circles, ticks, handwriting).
+    // Mid-gray paper / shadows are intentionally ignored — bleaching them
+    // imported AI ghosts and made the page look blotchy.
+    if (dark[p]) {
+      remove[p] = 1;
+      darkClearedByAi++;
+    }
+  }
+
+  // If the model washed most dark ink, trust only colored-pen removal — otherwise
+  // circuit lines and print get paper-filled and the page looks destroyed.
+  const aiWashout =
+    darkTotal > 200 && darkClearedByAi / darkTotal > 0.28;
+  if (aiWashout) {
+    remove.fill(0);
+    for (let p = 0; p < n; p++) {
+      if (isColor[p] && !keepColor[p]) remove[p] = 1;
+    }
+  } else {
+    // Grow the clear mask slightly so circle edges the model half-erased get filled.
+    const removeGrown = dilateDarkMask(dilateDarkMask(remove, w, h), w, h);
+    for (let p = 0; p < n; p++) {
+      if (!removeGrown[p]) continue;
+      if (keepColor[p]) continue;
+      if (protectRow[(p / w) | 0] && printCore[p]) continue;
+      // Never punch holes in dark ink the model still kept (circuit lines, print).
+      const i = p * 4;
+      if (dark[p] && lumaAt(ed, i) <= lum[p] + 18) continue;
+      remove[p] = 1;
+    }
+  }
 
   for (let py = 0; py < h; py++) {
-    const rowProtected = protectRow[py] === 1;
     const by = Math.min(blocksY - 1, (py / block) | 0);
     for (let px = 0; px < w; px++) {
       const p = py * w + px;
+      if (!remove[p]) continue;
       const i = p * 4;
       const bx = Math.min(blocksX - 1, (px / block) | 0);
       const bi = by * blocksX + bx;
-
-      // Maps stay on original geometry — never blend the model's redraw.
-      if (keepColor[p]) continue;
-
-      // Colored pen / marker (not part of a map).
-      if (isColor[p]) {
-        takeEditOrPaper(i, bi);
-        continue;
-      }
-
-      // Soft pencil: mid-gray, low chroma.
-      const isPencil =
-        !dark[p] &&
-        chroma[p] < 28 &&
-        lum[p] >= 105 &&
-        lum[p] <= 205;
-      if (isPencil) {
-        takeEditOrPaper(i, bi);
-        continue;
-      }
-
-      if (!dark[p]) continue;
-
-      const eLum = lumaAt(ed, i);
-      const aiCleared = eLum > lum[p] + 28;
-      const isPrintGlyph = rowProtected && printCore[p] === 1;
-      const isThinStroke = dark[p] === 1 && printCore[p] === 0;
-
-      // Solid printed glyph in a text band: keep original even if the model erased it.
-      if (isPrintGlyph) continue;
-
-      // Thin strokes (circles, ticks, underlines) — clear even if the model missed them.
-      if (isThinStroke) {
-        takeEditOrPaper(i, bi);
-        continue;
-      }
-
-      // Dark handwriting outside print cores that the model lightened.
-      if (aiCleared) {
-        takeEditOrPaper(i, bi);
+      const samples = paperN[bi];
+      if (samples > 8) {
+        out[i] = Math.round(paperR[bi] / samples);
+        out[i + 1] = Math.round(paperG[bi] / samples);
+        out[i + 2] = Math.round(paperB[bi] / samples);
+      } else {
+        out[i] = 255;
+        out[i + 1] = 255;
+        out[i + 2] = 255;
       }
     }
   }
