@@ -310,6 +310,167 @@ export async function compressImage(
   });
 }
 
+function loadImageElement(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("image load failed"));
+    img.src = normalizeImageSrc(src);
+  });
+}
+
+/**
+ * After AI 去手寫, put printed question glyphs back from the original photo.
+ * Colored pen strokes and marks that are not a printed text band stay cleared.
+ * Large color regions (maps) are left as the edited image drew them.
+ */
+export async function preservePrintedQuestionText(
+  originalSrc: string,
+  editedSrc: string
+): Promise<string> {
+  const [original, edited] = await Promise.all([
+    loadImageElement(originalSrc),
+    loadImageElement(editedSrc),
+  ]);
+  const w = original.naturalWidth || original.width;
+  const h = original.naturalHeight || original.height;
+  if (w < 8 || h < 8) return editedSrc;
+
+  const origCanvas = document.createElement("canvas");
+  origCanvas.width = w;
+  origCanvas.height = h;
+  const origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
+  const editCanvas = document.createElement("canvas");
+  editCanvas.width = w;
+  editCanvas.height = h;
+  const editCtx = editCanvas.getContext("2d", { willReadFrequently: true });
+  if (!origCtx || !editCtx) return editedSrc;
+
+  origCtx.drawImage(original, 0, 0, w, h);
+  editCtx.imageSmoothingEnabled = true;
+  editCtx.imageSmoothingQuality = "high";
+  editCtx.drawImage(edited, 0, 0, w, h);
+
+  const origData = origCtx.getImageData(0, 0, w, h);
+  const editData = editCtx.getImageData(0, 0, w, h);
+  const od = origData.data;
+  const out = editData.data;
+
+  const n = w * h;
+  const lum = new Uint16Array(n);
+  const chroma = new Uint8Array(n);
+  const printed = new Uint8Array(n);
+  const rowInk = new Uint32Array(h);
+  const rowLumSum = new Float64Array(h);
+
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const r = od[i];
+    const g = od[i + 1];
+    const b = od[i + 2];
+    const v = 0.299 * r + 0.587 * g + 0.114 * b;
+    const c = Math.max(r, g, b) - Math.min(r, g, b);
+    lum[p] = v;
+    chroma[p] = c;
+    if (v < 125 && c < 34) {
+      printed[p] = 1;
+      const y = (p / w) | 0;
+      rowInk[y]++;
+      rowLumSum[y] += v;
+    }
+  }
+
+  const rowMin = Math.max(8, Math.round(w * 0.01));
+  const protectRow = new Uint8Array(h);
+  let y = 0;
+  while (y < h) {
+    if (rowInk[y] < rowMin) {
+      y++;
+      continue;
+    }
+    let y2 = y;
+    while (y2 < h && rowInk[y2] >= rowMin) y2++;
+    if (y2 - y >= 4) {
+      let ink = 0;
+      let sum = 0;
+      for (let yy = y; yy < y2; yy++) {
+        ink += rowInk[yy];
+        sum += rowLumSum[yy];
+      }
+      if (sum / Math.max(1, ink) <= 105) {
+        for (let yy = y; yy < y2; yy++) protectRow[yy] = 1;
+      }
+    }
+    y = y2;
+  }
+
+  const block = 48;
+  const blocksX = Math.ceil(w / block);
+  const blocksY = Math.ceil(h / block);
+  const paperR = new Float64Array(blocksX * blocksY);
+  const paperG = new Float64Array(blocksX * blocksY);
+  const paperB = new Float64Array(blocksX * blocksY);
+  const paperN = new Uint32Array(blocksX * blocksY);
+  const colorN = new Uint32Array(blocksX * blocksY);
+  const blockArea = new Uint32Array(blocksX * blocksY);
+
+  for (let py = 0; py < h; py++) {
+    const by = Math.min(blocksY - 1, (py / block) | 0);
+    for (let px = 0; px < w; px++) {
+      const bx = Math.min(blocksX - 1, (px / block) | 0);
+      const bi = by * blocksX + bx;
+      blockArea[bi]++;
+      const p = py * w + px;
+      const i = p * 4;
+      if (chroma[p] > 48) colorN[bi]++;
+      if (lum[p] > 205 && chroma[p] < 28) {
+        paperR[bi] += od[i];
+        paperG[bi] += od[i + 1];
+        paperB[bi] += od[i + 2];
+        paperN[bi]++;
+      }
+    }
+  }
+
+  const editLumAt = (i: number) =>
+    0.299 * out[i] + 0.587 * out[i + 1] + 0.114 * out[i + 2];
+
+  for (let py = 0; py < h; py++) {
+    const by = Math.min(blocksY - 1, (py / block) | 0);
+    const rowProtected = protectRow[py] === 1;
+    for (let px = 0; px < w; px++) {
+      const p = py * w + px;
+      const i = p * 4;
+      const bx = Math.min(blocksX - 1, (px / block) | 0);
+      const bi = by * blocksX + bx;
+      const isPrinted = printed[p] === 1 && rowProtected;
+
+      if (isPrinted && editLumAt(i) > lum[p] + 22) {
+        out[i] = od[i];
+        out[i + 1] = od[i + 1];
+        out[i + 2] = od[i + 2];
+        continue;
+      }
+
+      const colorFrac = colorN[bi] / Math.max(1, blockArea[bi]);
+      if (!isPrinted && chroma[p] > 46 && lum[p] < 230 && colorFrac < 0.5) {
+        const samples = paperN[bi];
+        if (samples > 8) {
+          out[i] = Math.round(paperR[bi] / samples);
+          out[i + 1] = Math.round(paperG[bi] / samples);
+          out[i + 2] = Math.round(paperB[bi] / samples);
+        } else {
+          out[i] = 255;
+          out[i + 1] = 255;
+          out[i + 2] = 255;
+        }
+      }
+    }
+  }
+
+  editCtx.putImageData(editData, 0, 0);
+  return editCanvas.toDataURL("image/jpeg", 0.92);
+}
+
 export interface Point {
   x: number;
   y: number;
