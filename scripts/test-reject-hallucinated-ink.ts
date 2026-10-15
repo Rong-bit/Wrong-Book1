@@ -65,6 +65,9 @@ assert(
   prompt.includes("禁止") && prompt.includes("整頁重畫"),
   "prompt must forbid full-page redraw when cleaning shadows"
 );
+assert(prompt.includes("不重繪印刷字"), "prompt must forbid redrawing print");
+assert(prompt.includes("不發明圖"), "prompt must forbid inventing figures");
+assert(prompt.includes("不位移構圖"), "prompt must forbid shifting layout");
 
 const W = 120;
 const H = 80;
