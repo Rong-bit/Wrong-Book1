@@ -457,9 +457,8 @@ async function rewriteExplanationFromAnswerOnClient(
 }
 
 /**
- * AI inpainting: remove handwriting via Gemini image-edit.
- * Callers should composite onto the original (preservePrintedQuestionText)
- * so hallucinated ink from the model is discarded.
+ * AI inpainting: remove handwriting via Gemini image-edit (original approach).
+ * Returns the model image as-is — no local paper-fill / compositing.
  */
 async function removeHandwritingOnClient(imageBase64: string): Promise<string> {
   const customApiKey = getStoredApiKey();
