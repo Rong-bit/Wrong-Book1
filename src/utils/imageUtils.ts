@@ -1830,8 +1830,283 @@ export function separateDifferentKindRects(rects: LabeledCropRect[]): LabeledCro
   );
 }
 
+export interface InkLineBounds {
+  /** Inclusive pixel bounds in the ink mask. */
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/**
+ * Snap a finger stroke to the text lines it crosses.
+ * Each crossed line is boxed edge to edge (character gaps are bridged).
+ * Only the nearest line to the stroke is taken, so a swipe on one row
+ * does not swallow the line above or below. Pixel coords, inclusive.
+ */
+export function textLineRectFromInk(
+  ink: Uint8Array,
+  w: number,
+  h: number,
+  stroke: Point[],
+  searchR: number
+): InkLineBounds | null {
+  if (w < 2 || h < 2 || !stroke.length) return null;
+  const radius = Math.max(2, Math.round(searchR));
+  const radius2 = radius * radius;
+  // Bridge character side-bearings, but not a wide column gutter.
+  const gapTol = Math.max(4, Math.round(w * 0.028));
+  const blankLimit = Math.max(2, Math.round(Math.min(w, h) * 0.006));
+  const maxExtra = Math.max(8, Math.round(Math.min(w, h) * 0.03));
+
+  const decimated: Point[] = [];
+  for (const p of stroke) {
+    const x = Math.max(0, Math.min(w - 1, p.x));
+    const y = Math.max(0, Math.min(h - 1, p.y));
+    const prev = decimated[decimated.length - 1];
+    if (!prev) {
+      decimated.push({ x, y });
+      continue;
+    }
+    const dx = x - prev.x;
+    const dy = y - prev.y;
+    if (dx * dx + dy * dy >= 4) decimated.push({ x, y });
+  }
+  const last = stroke[stroke.length - 1];
+  const tail = decimated[decimated.length - 1];
+  if (tail && (Math.abs(tail.x - last.x) > 0.5 || Math.abs(tail.y - last.y) > 0.5)) {
+    decimated.push({
+      x: Math.max(0, Math.min(w - 1, last.x)),
+      y: Math.max(0, Math.min(h - 1, last.y)),
+    });
+  }
+
+  const rowMin = new Int16Array(h);
+  const rowMax = new Int16Array(h);
+  rowMin.fill(-1);
+  rowMax.fill(-1);
+
+  for (const p of decimated) {
+    const x0 = Math.max(0, Math.floor(p.x - radius));
+    const y0 = Math.max(0, Math.floor(p.y - radius));
+    const x1 = Math.min(w - 1, Math.ceil(p.x + radius));
+    const y1 = Math.min(h - 1, Math.ceil(p.y + radius));
+    let bestD = radius2 + 1;
+    let bestX = -1;
+    let bestY = -1;
+    for (let y = y0; y <= y1; y++) {
+      const row = y * w;
+      const dy = y - p.y;
+      for (let x = x0; x <= x1; x++) {
+        if (!ink[row + x]) continue;
+        const dx = x - p.x;
+        const d = dx * dx + dy * dy;
+        if (d < bestD) {
+          bestD = d;
+          bestX = x;
+          bestY = y;
+        }
+      }
+    }
+    if (bestX < 0) continue;
+    if (rowMin[bestY] < 0 || bestX < rowMin[bestY]) rowMin[bestY] = bestX;
+    if (bestX > rowMax[bestY]) rowMax[bestY] = bestX;
+  }
+
+  const rowHasInk = (y: number, x0: number, x1: number): boolean => {
+    if (y < 0 || y >= h) return false;
+    const lo = Math.max(0, x0);
+    const hi = Math.min(w - 1, x1);
+    for (let x = lo; x <= hi; x++) {
+      if (ink[y * w + x]) return true;
+    }
+    return false;
+  };
+
+  const columnHasInk = (x: number, top: number, bot: number): boolean => {
+    if (x < 0 || x >= w) return false;
+    const yLo = Math.max(0, top);
+    const yHi = Math.min(h - 1, bot);
+    for (let yy = yLo; yy <= yHi; yy++) {
+      if (ink[yy * w + x]) return true;
+    }
+    return false;
+  };
+
+  /** Walk the line using the whole glyph height, so a sparse stroke row cannot stop early. */
+  const expandLineX = (
+    left: number,
+    right: number,
+    top: number,
+    bot: number
+  ): [number, number] => {
+    let xMin = left;
+    let xMax = right;
+    let gap = 0;
+    for (let x = left - 1; x >= 0; x--) {
+      if (columnHasInk(x, top, bot)) {
+        xMin = x;
+        gap = 0;
+      } else if (++gap > gapTol) break;
+    }
+    gap = 0;
+    for (let x = right + 1; x < w; x++) {
+      if (columnHasInk(x, top, bot)) {
+        xMax = x;
+        gap = 0;
+      } else if (++gap > gapTol) break;
+    }
+    return [xMin, xMax];
+  };
+
+  const growVertically = (
+    top: number,
+    bot: number,
+    xMin: number,
+    xMax: number,
+    originTop: number,
+    originBot: number
+  ): [number, number] => {
+    let nextTop = top;
+    let nextBot = bot;
+    let blank = 0;
+    for (let yy = top - 1; yy >= Math.max(0, originTop - maxExtra); yy--) {
+      if (rowHasInk(yy, xMin, xMax)) {
+        nextTop = yy;
+        blank = 0;
+      } else if (++blank > blankLimit) break;
+    }
+    blank = 0;
+    for (let yy = bot + 1; yy <= Math.min(h - 1, originBot + maxExtra); yy++) {
+      if (rowHasInk(yy, xMin, xMax)) {
+        nextBot = yy;
+        blank = 0;
+      } else if (++blank > blankLimit) break;
+    }
+    return [nextTop, nextBot];
+  };
+
+  let minX = w;
+  let minY = h;
+  let maxX = -1;
+  let maxY = -1;
+
+  let y = 0;
+  while (y < h) {
+    if (rowMin[y] < 0) {
+      y++;
+      continue;
+    }
+    let y0 = y;
+    let y1 = y;
+    let look = y;
+    let hole = 0;
+    while (look + 1 < h) {
+      if (rowMin[look + 1] >= 0) {
+        look++;
+        y1 = look;
+        hole = 0;
+      } else if (hole < 2) {
+        hole++;
+        look++;
+      } else break;
+    }
+
+    let seedL = w;
+    let seedR = -1;
+    for (let ry = y0; ry <= y1; ry++) {
+      if (rowMin[ry] < 0) continue;
+      if (rowMin[ry] < seedL) seedL = rowMin[ry];
+      if (rowMax[ry] > seedR) seedR = rowMax[ry];
+    }
+    if (seedR < seedL) {
+      y = y1 + 1;
+      continue;
+    }
+
+    // Glyph height of the characters under the finger, then extend across the line.
+    const localL = Math.max(0, seedL - gapTol);
+    const localR = Math.min(w - 1, seedR + gapTol);
+    let [top, bot] = growVertically(y0, y1, localL, localR, y0, y1);
+    let [xMin, xMax] = expandLineX(seedL, seedR, top, bot);
+    [top, bot] = growVertically(top, bot, xMin, xMax, y0, y1);
+    [xMin, xMax] = expandLineX(xMin, xMax, top, bot);
+
+    minX = Math.min(minX, xMin);
+    maxX = Math.max(maxX, xMax);
+    minY = Math.min(minY, top);
+    maxY = Math.max(maxY, bot);
+    y = Math.max(y1 + 1, bot + 1);
+  }
+
+  if (maxX < minX || maxY < minY) return null;
+  return { x0: minX, y0: minY, x1: maxX, y1: maxY };
+}
+
+/**
+ * 選文字：手指滑過的每一行都框成整行（含完整字高），而不是筆畫細條。
+ * 沒掃到墨跡時退回筆畫外框。
+ */
+export function textLineCropAlongStroke(
+  img: HTMLImageElement,
+  stroke: Point[],
+  corridorNorm = 0.02,
+  maxSide = 720
+): CropRect | null {
+  if (!stroke.length) return null;
+  const fallback = strokeToCropRect(stroke, corridorNorm * 0.45, 0.008);
+  const natW = img.naturalWidth || img.width;
+  const natH = img.naturalHeight || img.height;
+  if (natW < 8 || natH < 8) return fallback;
+
+  const scale = Math.min(1, maxSide / Math.max(natW, natH));
+  const w = Math.max(32, Math.round(natW * scale));
+  const h = Math.max(32, Math.round(natH * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return fallback;
+  ctx.drawImage(img, 0, 0, w, h);
+  const { data } = ctx.getImageData(0, 0, w, h);
+
+  const lum = new Float32Array(w * h);
+  let lumSum = 0;
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    const v = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    lum[p] = v;
+    lumSum += v;
+  }
+  const avgLum = lumSum / (w * h);
+  const inkCut = Math.min(168, Math.max(90, avgLum * 0.72));
+  const ink = new Uint8Array(w * h);
+  for (let p = 0; p < ink.length; p++) ink[p] = lum[p] < inkCut ? 1 : 0;
+
+  const pts = stroke.map((p) => ({
+    x: Math.max(0, Math.min(w - 1, p.x * (w - 1))),
+    y: Math.max(0, Math.min(h - 1, p.y * (h - 1))),
+  }));
+  const searchR = Math.max(5, Math.round(Math.min(w, h) * corridorNorm));
+  const bounds = textLineRectFromInk(ink, w, h, pts, searchR);
+  if (!bounds) return fallback;
+
+  const padX = Math.max(2, Math.round(w * 0.012));
+  const padY = Math.max(2, Math.round(h * 0.008));
+  const rx0 = Math.max(0, bounds.x0 - padX);
+  const ry0 = Math.max(0, bounds.y0 - padY);
+  const rx1 = Math.min(w - 1, bounds.x1 + padX);
+  const ry1 = Math.min(h - 1, bounds.y1 + padY);
+  return {
+    x: rx0 / w,
+    y: ry0 / h,
+    width: Math.max(0.012, (rx1 - rx0 + 1) / w),
+    height: Math.max(0.01, (ry1 - ry0 + 1) / h),
+  };
+}
+
 /**
  * Build tight content-aware rects from paint strokes (text one island, diagram another).
+ * 選文字 snaps to whole text lines the finger crosses; 選圖形 stays a tight ink corridor.
  * Prefer explicit per-stroke kinds (UI 選文字／選圖形); otherwise auto-classify.
  * Different kinds never merge, and final rects are separated so they do not overlap.
  */
@@ -1844,9 +2119,12 @@ export function clusterTightStrokeRects(
 ): LabeledCropRect[] {
   const seed = strokes
     .map((s, i) => {
-      const r = tightCropRectAlongStroke(img, s, corridorNorm);
-      if (!r) return null;
       const forced = strokeKinds?.[i];
+      const r =
+        forced === "text"
+          ? textLineCropAlongStroke(img, s, Math.max(corridorNorm, 0.02))
+          : tightCropRectAlongStroke(img, s, corridorNorm);
+      if (!r) return null;
       const kind: RegionKind =
         forced === "text" || forced === "diagram"
           ? forced

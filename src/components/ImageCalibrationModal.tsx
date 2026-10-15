@@ -70,7 +70,7 @@ interface ImageCalibrationModalProps {
 }
 
 type CalibrationMode = "perspective" | "crop";
-/** paint = 畫過文字／圖緊貼框選；frame = 矩形微調 */
+/** paint = 選文字滑過整行、選圖形緊貼筆畫；frame = 矩形微調 */
 type CropTool = "paint" | "frame";
 type AspectRatioMode = "free" | "4:3" | "16:9" | "1:1" | "paper";
 /** Explicit paint target: start with text, tap again for diagram. */
@@ -139,6 +139,11 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const selectHistoryRef = useRef<SelectSnapshot[]>([]);
   const [selectHistoryLen, setSelectHistoryLen] = useState(0);
   const pushSelectHistoryRef = useRef<() => void>(() => undefined);
+  const syncPaintRegionsRef = useRef<
+    (strokes: Point[][], kinds?: RegionKind[]) => void
+  >(() => undefined);
+  /** Captured on stroke start so live line-preview cannot poison undo. */
+  const pendingSelectSnapshotRef = useRef<SelectSnapshot | null>(null);
   paintKindRef.current = paintKind;
   cropToolRef.current = cropTool;
   selectStrokeKindsRef.current = selectStrokeKinds;
@@ -600,6 +605,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       cropDirtyAfterAddRef.current = true;
     }
   };
+  syncPaintRegionsRef.current = syncPaintRegionsFromStrokes;
 
   const enterCropMode = () => {
     setCropBox(cropBoxFromCorners(corners));
@@ -738,7 +744,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       setProcessingText(
         paintKind === "diagram"
           ? "請先畫過地圖／圖形範圍（目前為「選圖形」）"
-          : "請先畫過題幹文字範圍（目前為「選文字」；再點按鈕可切換選圖形）"
+          : "請先滑過題幹文字（目前為「選文字」，滑過即框整行；再點按鈕可切換選圖形）"
       );
       setIsProcessing(true);
       setTimeout(() => setIsProcessing(false), 1400);
@@ -832,6 +838,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     if (cropTool !== "paint" || mode !== "crop" || isProcessing) return;
     e.preventDefault();
     e.stopPropagation();
+    pendingSelectSnapshotRef.current = snapshotSelection();
     const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
     const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
     const pos = getNormalizedPos(clientX, clientY);
@@ -1118,9 +1125,23 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     setCropDragStart({ x: pos.x, y: pos.y, box: { ...cropBox } });
   };
 
-  // Paint stroke tracking → tight content boxes (text / diagram islands)
+  // Paint stroke tracking → text lines snap to the row; diagrams stay tight
   useEffect(() => {
     if (!isSelectPainting) return;
+
+    let previewTimer = 0;
+    const scheduleTextPreview = () => {
+      if (paintKindRef.current !== "text") return;
+      window.clearTimeout(previewTimer);
+      previewTimer = window.setTimeout(() => {
+        const active = selectStrokeRef.current;
+        if (!active || active.length < 2 || paintKindRef.current !== "text") return;
+        syncPaintRegionsRef.current(
+          [...selectPaintStrokesRef.current, active],
+          [...selectStrokeKindsRef.current, "text"]
+        );
+      }, 70);
+    };
 
     const handlePointerMove = (e: MouseEvent | TouchEvent) => {
       if (!selectStrokeRef.current) return;
@@ -1131,16 +1152,31 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       const next = [...selectStrokeRef.current, pos];
       selectStrokeRef.current = next;
       setActiveSelectStroke(next);
+      scheduleTextPreview();
     };
 
     const handlePointerUp = () => {
+      window.clearTimeout(previewTimer);
       const points = selectStrokeRef.current || [];
       selectStrokeRef.current = null;
       setActiveSelectStroke(null);
       setIsSelectPainting(false);
-      if (points.length < 2) return;
-      // Snapshot pre-stroke so「復原」可撤銷這一筆選文字／選圖形
-      pushSelectHistoryRef.current();
+      const prior = pendingSelectSnapshotRef.current;
+      pendingSelectSnapshotRef.current = null;
+      if (points.length < 2) {
+        if (prior) {
+          syncPaintRegionsRef.current(
+            selectPaintStrokesRef.current,
+            selectStrokeKindsRef.current
+          );
+        }
+        return;
+      }
+      // Use the pre-stroke snapshot — live preview already rewrote regions
+      if (prior) {
+        selectHistoryRef.current = [...selectHistoryRef.current, prior];
+        setSelectHistoryLen(selectHistoryRef.current.length);
+      }
       const kind = paintKindRef.current;
       const nextStrokes = [...selectPaintStrokesRef.current, points];
       const nextKinds = [...selectStrokeKindsRef.current, kind];
@@ -1162,6 +1198,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       window.removeEventListener("touchmove", handlePointerMove);
       window.removeEventListener("touchend", handlePointerUp);
       window.removeEventListener("touchcancel", handlePointerUp);
+      window.clearTimeout(previewTimer);
     };
   }, [isSelectPainting, getNormalizedPos]);
 
@@ -1659,7 +1696,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 hidden md:block truncate">
-                透視一次後畫過文字／圖框出錯題（文字一框、圖一框）
+                滑過文字即框整行；圖形另畫一框，兩區不重疊
               </p>
             </div>
           </div>
@@ -1775,7 +1812,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                         ? "目前選圖形：再點一次切回選文字"
                         : cropTool === "paint"
                         ? "目前選文字：再點一次切換選圖形"
-                        : "畫選題幹文字（預設）；進入後再點可切換選圖形"
+                        : "滑過題幹即框住整行文字（預設）；進入後再點可切換選圖形"
                     }
                   >
                     <Paintbrush className="w-3 h-3" />
@@ -2203,10 +2240,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 : selectPaintStrokes.length > 0
                 ? paintKind === "diagram"
                   ? "目前「選圖形」：畫地圖／圖形（與文字區不重疊）；再點按鈕可切回選文字"
-                  : "已圈文字區 → 再點「選文字」按鈕切成「選圖形」後畫地圖"
+                  : "已框住滑過的文字行 → 再點「選文字」按鈕切成「選圖形」後畫地圖"
                 : paintKind === "diagram"
                 ? "「選圖形」：請畫地圖／圖形範圍；再點按鈕可切回選文字"
-                : "「選文字」：請先畫題幹文字；再點同一按鈕可切換「選圖形」"
+                : "「選文字」：手指滑過文字即框整行；再點同一按鈕可切換「選圖形」"
               : selectRegions.filter((r) => r.kind !== paintKind).length > 0
               ? paintKind === "diagram"
                 ? "已鎖定文字區 → 調整「框圖形」矩形；兩者會一併裁切"
