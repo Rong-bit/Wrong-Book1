@@ -2251,14 +2251,14 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           >
             {cropTool === "paint"
               ? selectRegions.length > 1
-                ? `同一題 ${selectRegions.length} 區塊（文字／圖分開、不重疊）→ 按下方「加入此錯題」`
+                ? `同一題 ${selectRegions.length} 區塊（文字逐行一條／圖分開）→ 按下方「加入此錯題」`
                 : selectPaintStrokes.length > 0
                 ? paintKind === "diagram"
                   ? "目前「選圖形」：畫地圖／圖形（與文字區不重疊）；再點按鈕可切回選文字"
                   : "已框住滑過的文字 → 再點「選文字」按鈕切成「選圖形」後畫地圖"
                 : paintKind === "diagram"
                 ? "「選圖形」：請畫地圖／圖形範圍；再點按鈕可切回選文字"
-                : "「選文字」：滑到哪就框到哪，只含該行字高；再點同一按鈕可切換「選圖形」"
+                : "「選文字」：一行滑一條，可連續框下一行（不會併成大矩形）；再點同一按鈕可切換「選圖形」"
               : selectRegions.filter((r) => r.kind !== paintKind).length > 0
               ? paintKind === "diagram"
                 ? "已鎖定文字區 → 調整「框圖形」矩形；兩者會一併裁切"

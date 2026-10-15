@@ -2262,8 +2262,12 @@ export function classifyCropRegion(
 }
 
 /**
- * Merge multi-line text (or diagram) islands of the same kind only.
+ * Merge paint islands of the same kind only.
  * Never glue a text island to a map/diagram island.
+ * Text: only merge when strokes substantially overlap (re-paint / extend same
+ * line). Vertically stacked lines stay separate so「選文字」keeps one strip
+ * per swipe instead of growing into a tall outer rectangle.
+ * Diagram: still merge nearby same-kind patches into one figure island.
  */
 function shouldMergePaintIslands(
   a: LabeledCropRect,
@@ -2281,19 +2285,21 @@ function shouldMergePaintIslands(
   const overlapY = Math.max(0, Math.min(ay2, by2) - Math.max(a.y, b.y));
   const gapY = Math.max(0, Math.max(a.y, b.y) - Math.min(ay2, by2));
   const gapX = Math.max(0, Math.max(a.x, b.x) - Math.min(ax2, bx2));
-  const minW = Math.min(a.width, b.width);
   const minArea = Math.min(a.width * a.height, b.width * b.height);
 
-  // Substantial area overlap → same painted island
+  // Substantial area overlap → same painted island (either kind)
   if (overlapX > 0 && overlapY > 0) {
     return overlapX * overlapY >= minArea * 0.22;
   }
 
-  // Vertically stacked with column alignment (multi-line stem text)
-  if (gapY <= mergeGap && overlapX >= minW * 0.4) return true;
+  // Text lines: do not merge stacked rows — each stroke stays one strip.
+  if (a.kind === "text") return false;
 
-  // Same-kind diagrams that sit in one row with a tiny gap may still merge
-  if (a.kind === "diagram" && gapX <= mergeGap && overlapY >= Math.min(a.height, b.height) * 0.4) {
+  // Diagrams: merge vertically stacked / side-by-side patches of one figure
+  if (gapY <= mergeGap && overlapX >= Math.min(a.width, b.width) * 0.4) {
+    return true;
+  }
+  if (gapX <= mergeGap && overlapY >= Math.min(a.height, b.height) * 0.4) {
     return true;
   }
 
@@ -2842,8 +2848,8 @@ export function textLineCropAlongStroke(
 }
 
 /**
- * Build tight content-aware rects from paint strokes (text one island, diagram another).
- * 選文字 boxes only the glyphs the finger crosses; 選圖形 stays a tight ink corridor.
+ * Build tight content-aware rects from paint strokes.
+ * 選文字：每一筆滑過的字各自成一條（不併成跨行大矩形）；選圖形可併成一圖區。
  * Prefer explicit per-stroke kinds (UI 選文字／選圖形); otherwise auto-classify.
  * Different kinds never merge, and final rects are separated so they do not overlap.
  */
