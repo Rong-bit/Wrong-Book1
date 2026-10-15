@@ -826,7 +826,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     }
   };
 
-  /** Finger-draw over text / diagram; box tightly follows painted content. */
+  /** Finger-draw: 選文字 snaps to the printed line; 選圖形 stays tight to the stroke. */
   const handleSelectPaintDown = (e: React.MouseEvent | React.TouchEvent) => {
     if (cropTool !== "paint" || mode !== "crop" || isProcessing) return;
     e.preventDefault();
@@ -1652,7 +1652,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 hidden md:block truncate">
-                透視一次後畫過文字／圖框出錯題（文字一框、圖一框）
+                透視一次後，滑過一行即可框起該行文字（圖形另框）
               </p>
             </div>
           </div>
@@ -1768,7 +1768,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                         ? "目前選圖形：再點一次切回選文字"
                         : cropTool === "paint"
                         ? "目前選文字：再點一次切換選圖形"
-                        : "畫選題幹文字（預設）；進入後再點可切換選圖形"
+                        : "滑過一行即可框起該行文字（預設）；進入後再點可切換選圖形"
                     }
                   >
                     <Paintbrush className="w-3 h-3" />
@@ -2196,10 +2196,10 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
                 : selectPaintStrokes.length > 0
                 ? paintKind === "diagram"
                   ? "目前「選圖形」：畫地圖／圖形（與文字區不重疊）；再點按鈕可切回選文字"
-                  : "已圈文字區 → 再點「選文字」按鈕切成「選圖形」後畫地圖"
+                  : "已框起滑過的文字行 → 再點「選文字」按鈕切成「選圖形」後畫地圖"
                 : paintKind === "diagram"
                 ? "「選圖形」：請畫地圖／圖形範圍；再點按鈕可切回選文字"
-                : "「選文字」：請先畫題幹文字；再點同一按鈕可切換「選圖形」"
+                : "「選文字」：手指滑過一行，會像滑鼠選字一樣框起該行文字"
               : selectRegions.filter((r) => r.kind !== paintKind).length > 0
               ? paintKind === "diagram"
                 ? "已鎖定文字區 → 調整「框圖形」矩形；兩者會一併裁切"

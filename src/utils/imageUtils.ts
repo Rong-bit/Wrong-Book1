@@ -1116,6 +1116,199 @@ export function detectTextBlockAtPoint(
   };
 }
 
+/**
+ * 選文字：手指滑過的列，水平擴成該行整段印刷文字（像滑鼠拖曳選取該行）。
+ * 垂直只含滑過的列；空白行會停下，不會把沒滑到的上下行一起框進去。
+ * 圖形請改用 tightCropRectAlongStroke，避免把整行文字吸進來。
+ */
+export function lineSelectCropRectAlongStroke(
+  img: HTMLImageElement,
+  stroke: Point[],
+  maxSide = 720
+): CropRect | null {
+  if (!stroke.length) return null;
+  const fallback = strokeToCropRect(stroke, 0.012, 0.008);
+  const natW = img.naturalWidth || img.width;
+  const natH = img.naturalHeight || img.height;
+  if (natW < 8 || natH < 8) return fallback;
+
+  const scale = Math.min(1, maxSide / Math.max(natW, natH));
+  const w = Math.max(32, Math.round(natW * scale));
+  const h = Math.max(32, Math.round(natH * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return fallback;
+  ctx.drawImage(img, 0, 0, w, h);
+  const { data } = ctx.getImageData(0, 0, w, h);
+
+  const lum = new Float32Array(w * h);
+  let lumSum = 0;
+  for (let i = 0, p = 0; i < data.length; i += 4, p++) {
+    const v = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+    lum[p] = v;
+    lumSum += v;
+  }
+  const avgLum = lumSum / (w * h);
+  const inkCut = Math.min(168, Math.max(90, avgLum * 0.72));
+  const ink = new Uint8Array(w * h);
+  for (let p = 0; p < ink.length; p++) ink[p] = lum[p] < inkCut ? 1 : 0;
+
+  const pts = stroke.map((p) => ({
+    x: Math.max(0, Math.min(w - 1, p.x * (w - 1))),
+    y: Math.max(0, Math.min(h - 1, p.y * (h - 1))),
+  }));
+
+  let sy0 = h;
+  let sy1 = 0;
+  let sx0 = w;
+  let sx1 = 0;
+  for (const p of pts) {
+    sy0 = Math.min(sy0, p.y);
+    sy1 = Math.max(sy1, p.y);
+    sx0 = Math.min(sx0, p.x);
+    sx1 = Math.max(sx1, p.x);
+  }
+
+  const searchR = Math.max(10, Math.round(Math.min(w, h) * 0.045));
+  const yScan0 = Math.max(0, Math.floor(sy0 - searchR));
+  const yScan1 = Math.min(h - 1, Math.ceil(sy1 + searchR));
+  const xScan0 = Math.max(0, Math.floor(sx0 - searchR));
+  const xScan1 = Math.min(w - 1, Math.ceil(sx1 + searchR));
+  const gapTol = Math.max(4, Math.round(w * 0.035));
+
+  const rowInkSpan = (y: number, x0: number, x1: number) => {
+    if (y < 0 || y >= h) return null;
+    const lo = Math.max(0, x0);
+    const hi = Math.min(w - 1, x1);
+    let minX = hi;
+    let maxX = lo;
+    let hits = 0;
+    for (let x = lo; x <= hi; x++) {
+      if (!ink[y * w + x]) continue;
+      hits++;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+    }
+    if (hits < 1 || maxX < minX) return null;
+    return { minX, maxX, hits };
+  };
+
+  type LineBox = { x0: number; x1: number; y0: number; y1: number };
+  const lines: LineBox[] = [];
+  let bandTop = -1;
+
+  const commitBand = (yTop: number, yBot: number) => {
+    let seedX = -1;
+    let seedY = -1;
+    let bestHits = 0;
+    for (let y = yTop; y <= yBot; y++) {
+      const span = rowInkSpan(y, xScan0, xScan1);
+      if (!span || span.hits <= bestHits) continue;
+      bestHits = span.hits;
+      seedY = y;
+      seedX = Math.round((span.minX + span.maxX) / 2);
+    }
+    if (seedX < 0) return;
+
+    let xMin = seedX;
+    let xMax = seedX;
+    let gap = 0;
+    for (let x = seedX - 1; x >= 0; x--) {
+      if (ink[seedY * w + x]) {
+        xMin = x;
+        gap = 0;
+      } else if (++gap > gapTol) break;
+    }
+    gap = 0;
+    for (let x = seedX + 1; x < w; x++) {
+      if (ink[seedY * w + x]) {
+        xMax = x;
+        gap = 0;
+      } else if (++gap > gapTol) break;
+    }
+
+    let y0 = seedY;
+    let y1 = seedY;
+    while (y0 > 0 && rowInkSpan(y0 - 1, xMin, xMax)) y0--;
+    while (y1 < h - 1 && rowInkSpan(y1 + 1, xMin, xMax)) y1++;
+
+    for (let y = y0; y <= y1; y++) {
+      const span = rowInkSpan(y, 0, w - 1);
+      if (!span) continue;
+      // Only widen using ink that still belongs to this line (gap-limited from current edges)
+      let left = xMin;
+      gap = 0;
+      for (let x = xMin; x >= 0; x--) {
+        if (ink[y * w + x]) {
+          left = x;
+          gap = 0;
+        } else if (++gap > gapTol) break;
+      }
+      let right = xMax;
+      gap = 0;
+      for (let x = xMax; x < w; x++) {
+        if (ink[y * w + x]) {
+          right = x;
+          gap = 0;
+        } else if (++gap > gapTol) break;
+      }
+      xMin = Math.min(xMin, left);
+      xMax = Math.max(xMax, right);
+    }
+
+    const box: LineBox = { x0: xMin, x1: xMax, y0, y1 };
+    const prev = lines[lines.length - 1];
+    if (prev && box.y0 <= prev.y1 + 2) {
+      prev.x0 = Math.min(prev.x0, box.x0);
+      prev.x1 = Math.max(prev.x1, box.x1);
+      prev.y0 = Math.min(prev.y0, box.y0);
+      prev.y1 = Math.max(prev.y1, box.y1);
+      return;
+    }
+    lines.push(box);
+  };
+
+  for (let y = yScan0; y <= yScan1; y++) {
+    const hit = rowInkSpan(y, xScan0, xScan1);
+    if (hit) {
+      if (bandTop < 0) bandTop = y;
+    } else if (bandTop >= 0) {
+      commitBand(bandTop, y - 1);
+      bandTop = -1;
+    }
+  }
+  if (bandTop >= 0) commitBand(bandTop, yScan1);
+
+  if (!lines.length) return fallback;
+
+  let x0 = w;
+  let y0 = h;
+  let x1 = 0;
+  let y1 = 0;
+  for (const line of lines) {
+    x0 = Math.min(x0, line.x0);
+    y0 = Math.min(y0, line.y0);
+    x1 = Math.max(x1, line.x1);
+    y1 = Math.max(y1, line.y1);
+  }
+
+  const padX = Math.max(2, Math.round(w * 0.012));
+  const padY = Math.max(2, Math.round(h * 0.008));
+  const rx0 = Math.max(0, x0 - padX);
+  const ry0 = Math.max(0, y0 - padY);
+  const rx1 = Math.min(w - 1, x1 + padX);
+  const ry1 = Math.min(h - 1, y1 + padY);
+
+  return {
+    x: rx0 / w,
+    y: ry0 / h,
+    width: Math.max(0.02, (rx1 - rx0 + 1) / w),
+    height: Math.max(0.015, (ry1 - ry0 + 1) / h),
+  };
+}
+
 /** Bounding box of one paint stroke (normalized), with brush padding. */
 export function strokeToCropRect(
   stroke: Point[],
@@ -1634,9 +1827,14 @@ export function clusterTightStrokeRects(
 ): LabeledCropRect[] {
   const seed = strokes
     .map((s, i) => {
-      const r = tightCropRectAlongStroke(img, s, corridorNorm);
-      if (!r) return null;
       const forced = strokeKinds?.[i];
+      // 選文字：滑過哪一行就框起該行；選圖形仍緊貼筆畫，避免整行被吸進來。
+      const r =
+        forced === "text"
+          ? lineSelectCropRectAlongStroke(img, s) ??
+            tightCropRectAlongStroke(img, s, corridorNorm)
+          : tightCropRectAlongStroke(img, s, corridorNorm);
+      if (!r) return null;
       const kind: RegionKind =
         forced === "text" || forced === "diagram"
           ? forced
