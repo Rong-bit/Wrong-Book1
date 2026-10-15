@@ -883,8 +883,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       const prepared = await compressImage(currentImage, 2048, 2048, 0.92);
       const cleaned = await removeHandwritingWithAI(prepared);
       if (cleaned) {
-        // Lock print/map to original geometry; only keep AI fills where marks were cleared.
-        // Avoids ghosting from pasting original text onto a slightly shifted model redraw.
+        // Use AI only to locate cleared marks; fill from original paper so the
+        // model's ghosted/blurry redraw never lands on the page.
         let kept = cleaned;
         try {
           kept = await preservePrintedQuestionText(prepared, cleaned);
