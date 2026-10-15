@@ -322,7 +322,8 @@ function loadImageElement(src: string): Promise<HTMLImageElement> {
 /**
  * After AI 去手寫, put printed question glyphs back from the original photo.
  * Colored pen strokes and marks that are not a printed text band stay cleared.
- * Large color regions (maps) are left as the edited image drew them.
+ * A color region large enough to be a map is kept whole, including edge blocks
+ * that only cover a corner of the map.
  */
 export async function preservePrintedQuestionText(
   originalSrc: string,
@@ -434,6 +435,42 @@ export async function preservePrintedQuestionText(
   const editLumAt = (i: number) =>
     0.299 * out[i] + 0.587 * out[i + 1] + 0.114 * out[i + 2];
 
+  // Grow map masks from blocks that are mostly color, so a corner that only
+  // fills part of a block stays with the map instead of being cleared as a pen stroke.
+  const isColor = new Uint8Array(n);
+  const keepColor = new Uint8Array(n);
+  const queue: number[] = [];
+  for (let p = 0; p < n; p++) {
+    if (chroma[p] <= 46 || lum[p] >= 230) continue;
+    isColor[p] = 1;
+    const px = p % w;
+    const py = (p / w) | 0;
+    const bi =
+      Math.min(blocksY - 1, (py / block) | 0) * blocksX +
+      Math.min(blocksX - 1, (px / block) | 0);
+    if (colorN[bi] / Math.max(1, blockArea[bi]) < 0.35) continue;
+    keepColor[p] = 1;
+    queue.push(p);
+  }
+  for (let q = 0; q < queue.length; q++) {
+    const p = queue[q];
+    const px = p % w;
+    const py = (p / w) | 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      const ny = py + dy;
+      if (ny < 0 || ny >= h) continue;
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = px + dx;
+        if (nx < 0 || nx >= w) continue;
+        const np = ny * w + nx;
+        if (!isColor[np] || keepColor[np]) continue;
+        keepColor[np] = 1;
+        queue.push(np);
+      }
+    }
+  }
+
   for (let py = 0; py < h; py++) {
     const by = Math.min(blocksY - 1, (py / block) | 0);
     const rowProtected = protectRow[py] === 1;
@@ -451,8 +488,20 @@ export async function preservePrintedQuestionText(
         continue;
       }
 
-      const colorFrac = colorN[bi] / Math.max(1, blockArea[bi]);
-      if (!isPrinted && chroma[p] > 46 && lum[p] < 230 && colorFrac < 0.5) {
+      if (keepColor[p]) {
+        const er = out[i];
+        const eg = out[i + 1];
+        const eb = out[i + 2];
+        const eC = Math.max(er, eg, eb) - Math.min(er, eg, eb);
+        if (eC + 18 < chroma[p] || editLumAt(i) > lum[p] + 22) {
+          out[i] = od[i];
+          out[i + 1] = od[i + 1];
+          out[i + 2] = od[i + 2];
+        }
+        continue;
+      }
+
+      if (!isPrinted && isColor[p]) {
         const samples = paperN[bi];
         if (samples > 8) {
           out[i] = Math.round(paperR[bi] / samples);
