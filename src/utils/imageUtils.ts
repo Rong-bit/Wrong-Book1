@@ -597,16 +597,25 @@ export function compositeCleanExamPixels(
     if (protectRow[(p / w) | 0] && printCore[p]) continue;
 
     // Dark ink the model cleared (black pen circles, ticks, handwriting).
-    // Mid-gray paper / shadows are intentionally ignored — bleaching them
-    // imported AI ghosts and made the page look blotchy.
+    // Also mid-gray pencil answers (often lum 125–198) when the model
+    // clearly lightened them — but not flat shadow patches (need stronger lift).
     if (dark[p]) {
       remove[p] = 1;
       darkClearedByAi++;
+    } else if (
+      lum[p] < 200 &&
+      chroma[p] < 40 &&
+      eLum > lum[p] + 45 &&
+      !printCore[p]
+    ) {
+      remove[p] = 1;
     }
   }
 
-  // If the model washed most dark ink, trust only colored-pen removal — otherwise
-  // circuit lines and print get paper-filled and the page looks destroyed.
+  // If the model washed most dark ink, do NOT paper-fill print glyph cores /
+  // circuit strokes — but still keep handwriting the model actually lightened
+  // (black/pencil answers). Old behavior kept only colored pens and put all
+  // black handwriting back from the original.
   const aiWashout =
     darkTotal > 200 && darkClearedByAi / darkTotal > 0.28;
   if (aiWashout) {
@@ -614,6 +623,16 @@ export function compositeCleanExamPixels(
     for (let p = 0, i = 0; p < n; p++, i += 4) {
       if (keepColor[p]) continue;
       if (isColoredPenRgb(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])) {
+        remove[p] = 1;
+        continue;
+      }
+      const eLum = lumaAt(ed, i);
+      if (eLum <= lum[p] + 28) continue;
+      // Protect solid printed glyph cores the model over-erased.
+      if (printCore[p]) continue;
+      if (protectRow[(p / w) | 0] && dark[p] && chroma[p] < 34) continue;
+      // Handwriting / ticks / fill-ins the model cleared (incl. pencil gray).
+      if (dark[p] || (lum[p] < 200 && chroma[p] < 40 && eLum > lum[p] + 40)) {
         remove[p] = 1;
       }
     }
