@@ -38,7 +38,6 @@ import {
   rotateImage,
   normalizeImageSrc,
   compressImage,
-  preservePrintedQuestionText,
   removeShadowsAndBinarize,
   ShadowRemovalMode,
   detectNearWhitePaperCorners,
@@ -873,25 +872,16 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     }
   };
 
-  /** AI inpainting: blank student answer marks / handwriting; keep print & maps. */
+  /** Detect mark boxes with AI, then locally paper-fill (no full-page redraw). */
   const handleAiRemoveHandwriting = async () => {
     if (isProcessing) return;
     setIsProcessing(true);
-    setProcessingText("AI 正在挖空選答與手寫（約需數秒）...");
+    setProcessingText("AI 正在定位作答痕跡並挖空（約需數秒）...");
     try {
-      // Higher res helps thin pencil circles / ticks survive until the model sees them
-      const prepared = await compressImage(currentImage, 2048, 2048, 0.92);
+      const prepared = await compressImage(currentImage, 1600, 1600, 0.92);
       const cleaned = await removeHandwritingWithAI(prepared);
       if (cleaned) {
-        // Use AI only to locate cleared marks; fill from original paper so the
-        // model's ghosted/blurry redraw never lands on the page.
-        let kept = cleaned;
-        try {
-          kept = await preservePrintedQuestionText(prepared, cleaned);
-        } catch (preserveErr) {
-          console.warn("Printed-text restore failed, using AI image:", preserveErr);
-        }
-        pushHistory(kept);
+        pushHistory(cleaned);
       }
     } catch (err: any) {
       console.error("AI remove handwriting failed:", err);
@@ -1928,7 +1918,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               onClick={() => void handleAiRemoveHandwriting()}
               disabled={isProcessing}
               className="px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-bold text-violet-950 bg-violet-100 hover:bg-violet-200 active:scale-95 transition flex items-center gap-1 sm:gap-1.5 cursor-pointer whitespace-nowrap border border-violet-200 disabled:opacity-50"
-              title="AI 挖空學生選答與手寫；印刷字與地圖鎖在原圖位置避免重影。需 Gemini API Key"
+              title="AI 定位作答痕跡後以原圖紙色挖空（不重繪整頁，避免重影發糊）。需 Gemini API Key"
             >
               <Sparkles className="w-3.5 h-3.5 text-violet-700" />
               <span className="sm:hidden">AI挖空</span>

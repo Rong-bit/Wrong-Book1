@@ -4,18 +4,16 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import {
   buildAnalyzePrompt,
-  buildRemoveHandwritingPrompt,
+  buildDetectHandwritingRegionsPrompt,
   buildRewriteExplanationPrompt,
   buildSimilarPrompt,
   createGeminiClient,
-  extractInlineImageDataUrl,
   formatErrorMessage,
   generateContentWithRetry,
-  generateImageContentWithRetry,
   getAnalyzeResponseSchema,
+  getDetectHandwritingRegionsSchema,
   getRewriteExplanationResponseSchema,
   getSimilarResponseSchema,
-  IMAGE_EDIT_MODELS,
   parseJsonResponse,
   resolveModel,
 } from "./src/services/geminiCore";
@@ -315,10 +313,10 @@ app.post("/api/rewrite-explanation", async (req, res) => {
   }
 });
 
-// AI remove handwriting (image edit / inpainting)
+// AI detect handwriting / answer-mark boxes (client does local paper fill)
 app.post("/api/remove-handwriting", async (req, res) => {
   try {
-    const { imageBase64, mimeType = "image/jpeg", customApiKey } = req.body;
+    const { imageBase64, mimeType = "image/jpeg", customApiKey, model } = req.body;
 
     if (!imageBase64 || typeof imageBase64 !== "string") {
       return res.status(400).json({ error: "未提供題目圖片數據" });
@@ -347,11 +345,10 @@ app.post("/api/remove-handwriting", async (req, res) => {
       "image/jpeg";
 
     const { response, modelUsed, attempts, fallbackUsed } =
-      await generateImageContentWithRetry(ai, IMAGE_EDIT_MODELS[0], {
+      await generateContentWithRetry(ai, resolveModel(model), {
         contents: {
-          // Instruction first so the model prioritizes「挖空選答」over copying the photo.
           parts: [
-            { text: buildRemoveHandwritingPrompt() },
+            { text: buildDetectHandwritingRegionsPrompt() },
             {
               inlineData: {
                 mimeType: resolvedMime,
@@ -361,20 +358,17 @@ app.post("/api/remove-handwriting", async (req, res) => {
           ],
         },
         config: {
-          responseModalities: ["TEXT", "IMAGE"],
+          responseMimeType: "application/json",
+          responseSchema: getDetectHandwritingRegionsSchema(),
         },
       });
 
-    const outImage = extractInlineImageDataUrl(response);
-    if (!outImage) {
-      return res.status(502).json({
-        error: "AI 未回傳去手寫後的圖片，請再試一次。",
-      });
-    }
+    const parsed = parseJsonResponse(response.text || "{}");
+    const regions = Array.isArray(parsed?.regions) ? parsed.regions : [];
 
     return res.json({
       success: true,
-      imageBase64: outImage,
+      regions,
       keySource: isUsingCustomKey ? "custom_byok" : "server_default",
       modelUsed,
       attempts,

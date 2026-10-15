@@ -620,6 +620,254 @@ export async function preservePrintedQuestionText(
   return editCanvas.toDataURL("image/jpeg", 0.92);
 }
 
+export interface HandwritingMarkRegion {
+  /** Normalized [0,1] box */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  kind?: string;
+}
+
+function clamp01(v: number): number {
+  if (Number.isNaN(v)) return 0;
+  return Math.min(1, Math.max(0, v));
+}
+
+function normalizeMarkRegions(
+  regions: HandwritingMarkRegion[] | null | undefined
+): HandwritingMarkRegion[] {
+  if (!regions?.length) return [];
+  const out: HandwritingMarkRegion[] = [];
+  for (const r of regions) {
+    const x = clamp01(Number(r.x));
+    const y = clamp01(Number(r.y));
+    const width = clamp01(Number(r.width));
+    const height = clamp01(Number(r.height));
+    if (width < 0.004 || height < 0.004) continue;
+    if (width > 0.85 && height > 0.85) continue; // reject whole-page boxes
+    out.push({
+      x,
+      y,
+      width: Math.min(width, 1 - x),
+      height: Math.min(height, 1 - y),
+      kind: r.kind,
+    });
+  }
+  return out;
+}
+
+/**
+ * Pure pixel helper: bleach saturated pen marks (not large map color blocks)
+ * and clear ink inside detected handwriting boxes, filling with local paper.
+ * Never redraws the whole page — print/circuit geometry stays sharp.
+ */
+export function applyHandwritingBlankPixels(
+  rgba: Uint8ClampedArray | Uint8Array,
+  w: number,
+  h: number,
+  regions: HandwritingMarkRegion[] = []
+): Uint8ClampedArray {
+  const n = w * h;
+  const od = rgba;
+  const out = new Uint8ClampedArray(od);
+  const lum = new Uint16Array(n);
+  const chroma = new Uint8Array(n);
+  const dark = new Uint8Array(n);
+  const rowInk = new Uint32Array(h);
+
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const r = od[i];
+    const g = od[i + 1];
+    const b = od[i + 2];
+    const v = 0.299 * r + 0.587 * g + 0.114 * b;
+    const c = Math.max(r, g, b) - Math.min(r, g, b);
+    lum[p] = v;
+    chroma[p] = c;
+    if (v < 125 && c < 34) {
+      dark[p] = 1;
+      rowInk[(p / w) | 0]++;
+    }
+  }
+
+  const printCore = dilateDarkMask(erodeDarkMask(dark, w, h), w, h);
+  const rowMin = Math.max(8, Math.round(w * 0.01));
+  const protectRow = new Uint8Array(h);
+  for (let y = 0; y < h; ) {
+    if (rowInk[y] < rowMin) {
+      y++;
+      continue;
+    }
+    let y2 = y;
+    while (y2 < h && rowInk[y2] >= rowMin) y2++;
+    if (y2 - y >= 4) {
+      for (let yy = y; yy < y2; yy++) protectRow[yy] = 1;
+    }
+    y = y2;
+  }
+
+  const block = 48;
+  const blocksX = Math.ceil(w / block);
+  const blocksY = Math.ceil(h / block);
+  const paperR = new Float64Array(blocksX * blocksY);
+  const paperG = new Float64Array(blocksX * blocksY);
+  const paperB = new Float64Array(blocksX * blocksY);
+  const paperN = new Uint32Array(blocksX * blocksY);
+  const colorN = new Uint32Array(blocksX * blocksY);
+  const blockArea = new Uint32Array(blocksX * blocksY);
+
+  for (let py = 0; py < h; py++) {
+    const by = Math.min(blocksY - 1, (py / block) | 0);
+    for (let px = 0; px < w; px++) {
+      const bx = Math.min(blocksX - 1, (px / block) | 0);
+      const bi = by * blocksX + bx;
+      blockArea[bi]++;
+      const p = py * w + px;
+      if (chroma[p] > 48) colorN[bi]++;
+      if (lum[p] > 205 && chroma[p] < 28) {
+        const i = p * 4;
+        paperR[bi] += od[i];
+        paperG[bi] += od[i + 1];
+        paperB[bi] += od[i + 2];
+        paperN[bi]++;
+      }
+    }
+  }
+
+  const isColor = new Uint8Array(n);
+  const keepColor = new Uint8Array(n);
+  const queue: number[] = [];
+  for (let p = 0; p < n; p++) {
+    if (chroma[p] <= 46 || lum[p] >= 230) continue;
+    isColor[p] = 1;
+    const px = p % w;
+    const py = (p / w) | 0;
+    const bi =
+      Math.min(blocksY - 1, (py / block) | 0) * blocksX +
+      Math.min(blocksX - 1, (px / block) | 0);
+    if (colorN[bi] / Math.max(1, blockArea[bi]) < 0.35) continue;
+    keepColor[p] = 1;
+    queue.push(p);
+  }
+  for (let q = 0; q < queue.length; q++) {
+    const p = queue[q];
+    const px = p % w;
+    const py = (p / w) | 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      const ny = py + dy;
+      if (ny < 0 || ny >= h) continue;
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = px + dx;
+        if (nx < 0 || nx >= w) continue;
+        const np = ny * w + nx;
+        if (!isColor[np] || keepColor[np]) continue;
+        keepColor[np] = 1;
+        queue.push(np);
+      }
+    }
+  }
+
+  const inMark = new Uint8Array(n);
+  const norms = normalizeMarkRegions(regions);
+  for (const r of norms) {
+    // pad ~8% of box size
+    const padX = r.width * 0.08;
+    const padY = r.height * 0.08;
+    const x0 = Math.max(0, Math.floor((r.x - padX) * w));
+    const y0 = Math.max(0, Math.floor((r.y - padY) * h));
+    const x1 = Math.min(w, Math.ceil((r.x + r.width + padX) * w));
+    const y1 = Math.min(h, Math.ceil((r.y + r.height + padY) * h));
+    let darkIn = 0;
+    let protectDark = 0;
+    for (let py = y0; py < y1; py++) {
+      for (let px = x0; px < x1; px++) {
+        const p = py * w + px;
+        if (!dark[p]) continue;
+        darkIn++;
+        if (protectRow[py] && printCore[p]) protectDark++;
+      }
+    }
+    // Margin scribbles: little overlap with printed text bands → clear all ink in box.
+    const aggressive = darkIn < 12 || protectDark / Math.max(1, darkIn) < 0.35;
+    for (let py = y0; py < y1; py++) {
+      for (let px = x0; px < x1; px++) {
+        const p = py * w + px;
+        if (keepColor[p]) continue;
+        if (isColor[p]) {
+          inMark[p] = 1;
+          continue;
+        }
+        if (!dark[p] && !(chroma[p] < 28 && lum[p] >= 110 && lum[p] <= 200)) {
+          continue;
+        }
+        if (!aggressive && protectRow[py] && printCore[p]) continue;
+        inMark[p] = 1;
+      }
+    }
+  }
+
+  const remove = new Uint8Array(n);
+  for (let p = 0; p < n; p++) {
+    if (keepColor[p]) continue;
+    if (isColor[p] || inMark[p]) remove[p] = 1;
+  }
+  const removeGrown = dilateDarkMask(remove, w, h);
+  for (let p = 0; p < n; p++) {
+    if (!removeGrown[p] || keepColor[p]) continue;
+    // Growing must not eat solid print outside mark boxes.
+    if (!inMark[p] && protectRow[(p / w) | 0] && printCore[p]) continue;
+    if (!inMark[p] && dark[p] && !isColor[p]) continue;
+    remove[p] = 1;
+  }
+
+  for (let py = 0; py < h; py++) {
+    const by = Math.min(blocksY - 1, (py / block) | 0);
+    for (let px = 0; px < w; px++) {
+      const p = py * w + px;
+      if (!remove[p]) continue;
+      const i = p * 4;
+      const bx = Math.min(blocksX - 1, (px / block) | 0);
+      const bi = by * blocksX + bx;
+      const samples = paperN[bi];
+      if (samples > 8) {
+        out[i] = Math.round(paperR[bi] / samples);
+        out[i + 1] = Math.round(paperG[bi] / samples);
+        out[i + 2] = Math.round(paperB[bi] / samples);
+      } else {
+        out[i] = 255;
+        out[i + 1] = 255;
+        out[i + 2] = 255;
+      }
+    }
+  }
+
+  return out;
+}
+
+/** Local blanking: colored pens + AI-detected mark boxes, paper fill only. */
+export async function blankHandwritingMarks(
+  imageSrc: string,
+  regions: HandwritingMarkRegion[] = [],
+  quality = 0.92
+): Promise<string> {
+  const img = await loadImageElement(imageSrc);
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  if (w < 8 || h < 8) return normalizeImageSrc(imageSrc);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return normalizeImageSrc(imageSrc);
+  ctx.drawImage(img, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h);
+  data.data.set(applyHandwritingBlankPixels(data.data, w, h, regions));
+  ctx.putImageData(data, 0, 0);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
 export interface Point {
   x: number;
   y: number;
