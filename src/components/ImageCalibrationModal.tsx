@@ -877,12 +877,14 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
   const handleAiRemoveHandwriting = async () => {
     if (isProcessing) return;
     setIsProcessing(true);
-    setProcessingText("AI 正在清除作答痕跡，並保留印刷題目...");
+    setProcessingText("AI 正在挖空選答與手寫（約需數秒）...");
     try {
       // Higher res helps thin pencil circles / ticks survive until the model sees them
       const prepared = await compressImage(currentImage, 2048, 2048, 0.92);
       const cleaned = await removeHandwritingWithAI(prepared);
       if (cleaned) {
+        // Lock print/map to original geometry; only keep AI fills where marks were cleared.
+        // Avoids ghosting from pasting original text onto a slightly shifted model redraw.
         let kept = cleaned;
         try {
           kept = await preservePrintedQuestionText(prepared, cleaned);
@@ -1926,7 +1928,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               onClick={() => void handleAiRemoveHandwriting()}
               disabled={isProcessing}
               className="px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-bold text-violet-950 bg-violet-100 hover:bg-violet-200 active:scale-95 transition flex items-center gap-1 sm:gap-1.5 cursor-pointer whitespace-nowrap border border-violet-200 disabled:opacity-50"
-              title="清除圈選、打勾與彩色筆跡；若 AI 把印刷題幹擦掉，會把題目像素貼回。需 Gemini API Key"
+              title="AI 挖空學生選答與手寫；印刷字與地圖鎖在原圖位置避免重影。需 Gemini API Key"
             >
               <Sparkles className="w-3.5 h-3.5 text-violet-700" />
               <span className="sm:hidden">AI挖空</span>

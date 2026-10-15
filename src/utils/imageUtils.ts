@@ -319,48 +319,77 @@ function loadImageElement(src: string): Promise<HTMLImageElement> {
   });
 }
 
+function lumaAt(data: Uint8ClampedArray | Uint8Array, i: number): number {
+  return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+}
+
+/** One binary erosion (4-neighborhood). */
+function erodeDarkMask(
+  dark: Uint8Array,
+  w: number,
+  h: number
+): Uint8Array {
+  const out = new Uint8Array(dark.length);
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const p = y * w + x;
+      if (
+        dark[p] &&
+        dark[p - 1] &&
+        dark[p + 1] &&
+        dark[p - w] &&
+        dark[p + w]
+      ) {
+        out[p] = 1;
+      }
+    }
+  }
+  return out;
+}
+
+/** One binary dilation (4-neighborhood). */
+function dilateDarkMask(
+  dark: Uint8Array,
+  w: number,
+  h: number
+): Uint8Array {
+  const out = new Uint8Array(dark.length);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const p = y * w + x;
+      if (!dark[p]) continue;
+      out[p] = 1;
+      if (x > 0) out[p - 1] = 1;
+      if (x < w - 1) out[p + 1] = 1;
+      if (y > 0) out[p - w] = 1;
+      if (y < h - 1) out[p + w] = 1;
+    }
+  }
+  return out;
+}
+
 /**
- * After AI 去手寫, put printed question glyphs back from the original photo.
- * Colored pen strokes and marks that are not a printed text band stay cleared.
- * A color region large enough to be a map is kept whole, including edge blocks
- * that only cover a corner of the map.
+ * Composite AI 去手寫 onto the original photo geometry.
+ *
+ * Start from the original so printed text / maps never get a second, shifted copy
+ * from the model (the usual ghosting source). Only replace pixels that look like
+ * student marks — colored ink, pencil, thin strokes, or dark ink the model cleared
+ * that is not a solid printed glyph core.
  */
-export async function preservePrintedQuestionText(
-  originalSrc: string,
-  editedSrc: string
-): Promise<string> {
-  const [original, edited] = await Promise.all([
-    loadImageElement(originalSrc),
-    loadImageElement(editedSrc),
-  ]);
-  const w = original.naturalWidth || original.width;
-  const h = original.naturalHeight || original.height;
-  if (w < 8 || h < 8) return editedSrc;
-
-  const origCanvas = document.createElement("canvas");
-  origCanvas.width = w;
-  origCanvas.height = h;
-  const origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
-  const editCanvas = document.createElement("canvas");
-  editCanvas.width = w;
-  editCanvas.height = h;
-  const editCtx = editCanvas.getContext("2d", { willReadFrequently: true });
-  if (!origCtx || !editCtx) return editedSrc;
-
-  origCtx.drawImage(original, 0, 0, w, h);
-  editCtx.imageSmoothingEnabled = true;
-  editCtx.imageSmoothingQuality = "high";
-  editCtx.drawImage(edited, 0, 0, w, h);
-
-  const origData = origCtx.getImageData(0, 0, w, h);
-  const editData = editCtx.getImageData(0, 0, w, h);
-  const od = origData.data;
-  const out = editData.data;
-
+export function compositeCleanExamPixels(
+  originalRgba: Uint8ClampedArray | Uint8Array,
+  editedRgba: Uint8ClampedArray | Uint8Array,
+  w: number,
+  h: number
+): Uint8ClampedArray {
   const n = w * h;
+  const od = originalRgba;
+  const ed = editedRgba;
+  const out = new Uint8ClampedArray(od);
+
   const lum = new Uint16Array(n);
   const chroma = new Uint8Array(n);
-  const printed = new Uint8Array(n);
+  const dark = new Uint8Array(n);
   const rowInk = new Uint32Array(h);
   const rowLumSum = new Float64Array(h);
 
@@ -373,12 +402,15 @@ export async function preservePrintedQuestionText(
     lum[p] = v;
     chroma[p] = c;
     if (v < 125 && c < 34) {
-      printed[p] = 1;
+      dark[p] = 1;
       const y = (p / w) | 0;
       rowInk[y]++;
       rowLumSum[y] += v;
     }
   }
+
+  // Morphological opening: thin pen circles/ticks vanish; solid print glyphs remain.
+  const printCore = dilateDarkMask(erodeDarkMask(dark, w, h), w, h);
 
   const rowMin = Math.max(8, Math.round(w * 0.01));
   const protectRow = new Uint8Array(h);
@@ -421,9 +453,9 @@ export async function preservePrintedQuestionText(
       const bi = by * blocksX + bx;
       blockArea[bi]++;
       const p = py * w + px;
-      const i = p * 4;
       if (chroma[p] > 48) colorN[bi]++;
       if (lum[p] > 205 && chroma[p] < 28) {
+        const i = p * 4;
         paperR[bi] += od[i];
         paperG[bi] += od[i + 1];
         paperB[bi] += od[i + 2];
@@ -432,11 +464,6 @@ export async function preservePrintedQuestionText(
     }
   }
 
-  const editLumAt = (i: number) =>
-    0.299 * out[i] + 0.587 * out[i + 1] + 0.114 * out[i + 2];
-
-  // Grow map masks from blocks that are mostly color, so a corner that only
-  // fills part of a block stays with the map instead of being cleared as a pen stroke.
   const isColor = new Uint8Array(n);
   const keepColor = new Uint8Array(n);
   const queue: number[] = [];
@@ -471,51 +498,125 @@ export async function preservePrintedQuestionText(
     }
   }
 
+  const fillPaper = (i: number, bi: number) => {
+    const samples = paperN[bi];
+    if (samples > 8) {
+      out[i] = Math.round(paperR[bi] / samples);
+      out[i + 1] = Math.round(paperG[bi] / samples);
+      out[i + 2] = Math.round(paperB[bi] / samples);
+    } else {
+      out[i] = 255;
+      out[i + 1] = 255;
+      out[i + 2] = 255;
+    }
+  };
+
+  const takeEditOrPaper = (i: number, bi: number) => {
+    const eLum = lumaAt(ed, i);
+    if (eLum >= 185) {
+      out[i] = ed[i];
+      out[i + 1] = ed[i + 1];
+      out[i + 2] = ed[i + 2];
+    } else {
+      fillPaper(i, bi);
+    }
+  };
+
   for (let py = 0; py < h; py++) {
-    const by = Math.min(blocksY - 1, (py / block) | 0);
     const rowProtected = protectRow[py] === 1;
+    const by = Math.min(blocksY - 1, (py / block) | 0);
     for (let px = 0; px < w; px++) {
       const p = py * w + px;
       const i = p * 4;
       const bx = Math.min(blocksX - 1, (px / block) | 0);
       const bi = by * blocksX + bx;
-      const isPrinted = printed[p] === 1 && rowProtected;
 
-      if (isPrinted && editLumAt(i) > lum[p] + 22) {
-        out[i] = od[i];
-        out[i + 1] = od[i + 1];
-        out[i + 2] = od[i + 2];
+      // Maps stay on original geometry — never blend the model's redraw.
+      if (keepColor[p]) continue;
+
+      // Colored pen / marker (not part of a map).
+      if (isColor[p]) {
+        takeEditOrPaper(i, bi);
         continue;
       }
 
-      if (keepColor[p]) {
-        const er = out[i];
-        const eg = out[i + 1];
-        const eb = out[i + 2];
-        const eC = Math.max(er, eg, eb) - Math.min(er, eg, eb);
-        if (eC + 18 < chroma[p] || editLumAt(i) > lum[p] + 22) {
-          out[i] = od[i];
-          out[i + 1] = od[i + 1];
-          out[i + 2] = od[i + 2];
-        }
+      // Soft pencil: mid-gray, low chroma.
+      const isPencil =
+        !dark[p] &&
+        chroma[p] < 28 &&
+        lum[p] >= 105 &&
+        lum[p] <= 205;
+      if (isPencil) {
+        takeEditOrPaper(i, bi);
         continue;
       }
 
-      if (!isPrinted && isColor[p]) {
-        const samples = paperN[bi];
-        if (samples > 8) {
-          out[i] = Math.round(paperR[bi] / samples);
-          out[i + 1] = Math.round(paperG[bi] / samples);
-          out[i + 2] = Math.round(paperB[bi] / samples);
-        } else {
-          out[i] = 255;
-          out[i + 1] = 255;
-          out[i + 2] = 255;
-        }
+      if (!dark[p]) continue;
+
+      const eLum = lumaAt(ed, i);
+      const aiCleared = eLum > lum[p] + 28;
+      const isPrintGlyph = rowProtected && printCore[p] === 1;
+      const isThinStroke = dark[p] === 1 && printCore[p] === 0;
+
+      // Solid printed glyph in a text band: keep original even if the model erased it.
+      if (isPrintGlyph) continue;
+
+      // Thin strokes (circles, ticks, underlines) — clear even if the model missed them.
+      if (isThinStroke) {
+        takeEditOrPaper(i, bi);
+        continue;
+      }
+
+      // Dark handwriting outside print cores that the model lightened.
+      if (aiCleared) {
+        takeEditOrPaper(i, bi);
       }
     }
   }
 
+  return out;
+}
+
+/**
+ * After AI 去手寫, lock printed question / map pixels to the original photo
+ * and only keep the model's (or paper) fill where student marks were cleared.
+ */
+export async function preservePrintedQuestionText(
+  originalSrc: string,
+  editedSrc: string
+): Promise<string> {
+  const [original, edited] = await Promise.all([
+    loadImageElement(originalSrc),
+    loadImageElement(editedSrc),
+  ]);
+  const w = original.naturalWidth || original.width;
+  const h = original.naturalHeight || original.height;
+  if (w < 8 || h < 8) return editedSrc;
+
+  const origCanvas = document.createElement("canvas");
+  origCanvas.width = w;
+  origCanvas.height = h;
+  const origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
+  const editCanvas = document.createElement("canvas");
+  editCanvas.width = w;
+  editCanvas.height = h;
+  const editCtx = editCanvas.getContext("2d", { willReadFrequently: true });
+  if (!origCtx || !editCtx) return editedSrc;
+
+  origCtx.drawImage(original, 0, 0, w, h);
+  editCtx.imageSmoothingEnabled = true;
+  editCtx.imageSmoothingQuality = "high";
+  editCtx.drawImage(edited, 0, 0, w, h);
+
+  const origData = origCtx.getImageData(0, 0, w, h);
+  const editData = editCtx.getImageData(0, 0, w, h);
+  const composited = compositeCleanExamPixels(
+    origData.data,
+    editData.data,
+    w,
+    h
+  );
+  editData.data.set(composited);
   editCtx.putImageData(editData, 0, 0);
   return editCanvas.toDataURL("image/jpeg", 0.92);
 }
