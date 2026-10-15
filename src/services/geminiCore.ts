@@ -248,6 +248,51 @@ export function buildRemoveHandwritingPrompt(): string {
 - 輸出與原圖同構圖的單一清晰照片`;
 }
 
+/** Detect handwriting / answer-mark boxes (normalized 0–1). Used instead of full-image edit. */
+export function buildDetectHandwritingRegionsPrompt(): string {
+  return `找出這張考卷照片上「所有學生／老師手寫或作答痕跡」的位置，以矩形框回傳。
+
+【要框的痕跡】
+- 手繪圈選、框選 (A)(B)(C)(D) 的圓圈／方框
+- 打勾、打叉、箭頭、底線、螢光
+- 空白處或選項旁的手寫字母、數字、國字、分數、註記
+- 紅／藍／黑／鉛筆筆跡與塗改
+
+【不要框】
+- 印刷題幹、選項文字、題號、電路圖、地圖、印刷符號
+
+【座標】
+每個框用相對於整張圖的 0～1 比例：x,y 為左上角，width/height 為寬高。
+框可略大於筆跡（約 5～15% 邊距），但不要蓋住整題。
+若沒有任何手寫痕跡，regions 回傳空陣列。`;
+}
+
+export function getDetectHandwritingRegionsSchema() {
+  return {
+    type: Type.OBJECT,
+    properties: {
+      regions: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            x: { type: Type.NUMBER, description: "左上角 x，0～1" },
+            y: { type: Type.NUMBER, description: "左上角 y，0～1" },
+            width: { type: Type.NUMBER, description: "寬度 0～1" },
+            height: { type: Type.NUMBER, description: "高度 0～1" },
+            kind: {
+              type: Type.STRING,
+              description: "circle|tick|text|other",
+            },
+          },
+          required: ["x", "y", "width", "height"],
+        },
+      },
+    },
+    required: ["regions"],
+  };
+}
+
 export function formatErrorMessage(error: any): {
   message: string;
   isKeyProblem: boolean;
