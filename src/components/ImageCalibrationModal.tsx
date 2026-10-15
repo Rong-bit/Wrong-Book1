@@ -38,6 +38,8 @@ import {
   rotateImage,
   normalizeImageSrc,
   compressImage,
+  preservePrintedQuestionText,
+  blankHandwritingMarks,
   removeShadowsAndBinarize,
   ShadowRemovalMode,
   detectNearWhitePaperCorners,
@@ -872,16 +874,37 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     }
   };
 
-  /** AI image-edit only: no original-pixel paste-back (that reintroduced handwriting / misalignment). */
+  /**
+   * AI image-edit, then composite onto original pixels so hallucinated ink
+   * (invented circuits / symbols) cannot replace the page. Residual red/blue
+   * pens get a light local paper fill afterward.
+   */
   const handleAiRemoveHandwriting = async () => {
     if (isProcessing) return;
     setIsProcessing(true);
-    setProcessingText("AI 正在去除手寫、平整紙面與去陰影（約需數秒）...");
+    setProcessingText("AI 正在去除手寫（約需數秒）...");
     try {
-      const prepared = await compressImage(currentImage, 1600, 1600, 0.9);
+      const prepared = await compressImage(currentImage, 2048, 2048, 0.92);
       const cleaned = await removeHandwritingWithAI(prepared);
       if (cleaned) {
-        pushHistory(cleaned);
+        let kept = cleaned;
+        try {
+          kept = await preservePrintedQuestionText(prepared, cleaned);
+        } catch (composeErr) {
+          console.warn(
+            "AI hollow composite failed, using model image:",
+            composeErr
+          );
+        }
+        try {
+          kept = await blankHandwritingMarks(kept, []);
+        } catch (bleachErr) {
+          console.warn(
+            "Residual pen bleach failed, keeping composited image:",
+            bleachErr
+          );
+        }
+        pushHistory(kept);
       }
     } catch (err: any) {
       console.error("AI remove handwriting failed:", err);
@@ -1918,7 +1941,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               onClick={() => void handleAiRemoveHandwriting()}
               disabled={isProcessing}
               className="px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-bold text-violet-950 bg-violet-100 hover:bg-violet-200 active:scale-95 transition flex items-center gap-1 sm:gap-1.5 cursor-pointer whitespace-nowrap border border-violet-200 disabled:opacity-50"
-              title="AI 去除手寫，並平整紙面、去掉陰影／折痕；盡量保留電路圖。需 Gemini API Key"
+              title="AI 去除手寫；以原圖為底合成避免幻覺圖形，並清除殘留彩筆。需 Gemini API Key"
             >
               <Sparkles className="w-3.5 h-3.5 text-violet-700" />
               <span className="sm:hidden">AI挖空</span>
