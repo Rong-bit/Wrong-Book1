@@ -38,6 +38,7 @@ import {
   rotateImage,
   normalizeImageSrc,
   compressImage,
+  restoreWashedFiguresFromOriginal,
   removeShadowsAndBinarize,
   ShadowRemovalMode,
   detectNearWhitePaperCorners,
@@ -872,7 +873,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
     }
   };
 
-  /** AI image-edit: remove handwriting; keep print & maps (original approach). */
+  /** AI image-edit: remove handwriting; paste back washed maps/circuit figures. */
   const handleAiRemoveHandwriting = async () => {
     if (isProcessing) return;
     setIsProcessing(true);
@@ -881,7 +882,13 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
       const prepared = await compressImage(currentImage, 1600, 1600, 0.9);
       const cleaned = await removeHandwritingWithAI(prepared);
       if (cleaned) {
-        pushHistory(cleaned);
+        let kept = cleaned;
+        try {
+          kept = await restoreWashedFiguresFromOriginal(prepared, cleaned);
+        } catch (restoreErr) {
+          console.warn("Figure restore failed, using AI image:", restoreErr);
+        }
+        pushHistory(kept);
       }
     } catch (err: any) {
       console.error("AI remove handwriting failed:", err);
@@ -1918,7 +1925,7 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
               onClick={() => void handleAiRemoveHandwriting()}
               disabled={isProcessing}
               className="px-2 sm:px-2.5 py-1 rounded-md text-[11px] font-bold text-violet-950 bg-violet-100 hover:bg-violet-200 active:scale-95 transition flex items-center gap-1 sm:gap-1.5 cursor-pointer whitespace-nowrap border border-violet-200 disabled:opacity-50"
-              title="AI 去除手寫筆跡（圈選、打勾、紅藍鉛筆跡），保留印刷字與彩色地圖。需 Gemini API Key"
+              title="AI 去除手寫；若模型誤刪電路圖／地圖會從原圖貼回。需 Gemini API Key"
             >
               <Sparkles className="w-3.5 h-3.5 text-violet-700" />
               <span className="sm:hidden">AI挖空</span>
