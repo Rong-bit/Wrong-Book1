@@ -50,28 +50,33 @@ const prompt = buildRemoveHandwritingPrompt();
 assert(!prompt.includes("8Ω"), "prompt must not prime 8Ω");
 assert(!prompt.includes("$X_L$"), "prompt must not prime $X_L$");
 assert(
-  prompt.includes("禁止新增") || prompt.includes("嚴禁幻覺"),
-  "prompt must forbid inventing content"
-);
-assert(
   !prompt.includes("均勻光線下重拍"),
   "prompt must not encourage full-page re-photograph"
 );
 assert(
-  prompt.includes("陰影") && prompt.includes("折線"),
-  "prompt should address shadows and crease lines"
+  prompt.includes("擦除") || prompt.includes("Erase"),
+  "prompt must ask to erase handwriting"
 );
 assert(
-  prompt.includes("禁止") &&
-    (prompt.includes("發明圖形") || prompt.includes("不發明圖")),
-  "prompt must forbid inventing figures when cleaning shadows"
+  prompt.includes("藍筆") &&
+    prompt.includes("黑筆") &&
+    prompt.includes("紅筆") &&
+    prompt.includes("鉛筆"),
+  "prompt must list pen colors to erase"
 );
 assert(
-  prompt.includes("重繪印刷字") && !prompt.includes("不重繪印刷字"),
-  "prompt must require redrawing print (not forbid it)"
+  prompt.includes("請勿修改") || prompt.includes("重新生成"),
+  "prompt must forbid modifying/regenerating printed content"
 );
-assert(prompt.includes("不發明圖"), "prompt must forbid inventing figures");
-assert(prompt.includes("不位移構圖"), "prompt must forbid shifting layout");
+assert(
+  prompt.includes("完全相同") &&
+    (prompt.includes("內容") || prompt.includes("排版")),
+  "prompt must keep printed content and layout identical"
+);
+assert(
+  prompt.includes("紙張") || prompt.includes("背景"),
+  "prompt must restore handwriting areas to paper background"
+);
 
 const W = 120;
 const H = 80;
@@ -178,14 +183,18 @@ const out = compositeCleanExamPixels(orig, edit, W, H);
   );
 }
 assert(
-  buildRemoveHandwritingPrompt().includes("圖一") ||
-    buildRemoveHandwritingPrompt().includes("貼圖"),
-  "prompt should mention sticker removal"
+  buildRemoveHandwritingPrompt().includes("鉛筆"),
+  "prompt should require clearing pencil handwriting"
 );
 assert(
-  buildRemoveHandwritingPrompt().includes("鉛筆") ||
-    buildRemoveHandwritingPrompt().includes("括號"),
-  "prompt should require clearing pencil / paren answers"
+  buildRemoveHandwritingPrompt().includes("打勾") ||
+    buildRemoveHandwritingPrompt().includes("Ticks"),
+  "prompt should require clearing ticks"
+);
+assert(
+  buildRemoveHandwritingPrompt().includes("叉叉") ||
+    buildRemoveHandwritingPrompt().includes("分數"),
+  "prompt should require clearing crosses / scores"
 );
 
 // Washout case: model lightens lots of dark ink (incl. print) + handwriting.
