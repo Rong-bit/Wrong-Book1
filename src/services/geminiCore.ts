@@ -228,69 +228,22 @@ export function extractInlineImageDataUrl(response: any): string | null {
 }
 
 export function buildRemoveHandwritingPrompt(): string {
-  return `你是考卷影像修復專家。任務：只擦掉作答筆跡，輸出一張清晰、無重影的未作答試卷。
+  return `你是考卷影像修復專家。請編輯這張考卷／習作照片：
 
-【必須徹底清除】
-- 黑／藍／紅／鉛筆手繪的圈、框、打勾、打叉、底線、箭頭、螢光
-- 選項 (A)(B)(C)(D) 外圍的手畫圓圈線（圈內印刷代號要留著）
-- 空白處手寫答案、分數、註記、塗改液
-→ 筆跡要擦乾淨，不可留殘影、半透明痕或雙重疊影。
+【必須去除】
+- 所有手寫筆跡：紅筆、藍筆、黑原子筆、鉛筆、螢光筆
+- 手寫答案字母／數字、圈選、打叉、劃線、註記、塗改痕跡
 
-【絕對保留（勿重畫、勿平移、勿模糊）】
-- 印刷題幹、選項文字、題號、電路圖線條與符號
-- 彩色地圖／圖表整塊
-- 紙張紋理與清晰度；禁止整頁重繪成模糊或雙影
+【必須完整保留】
+- 印刷黑字題幹與選項
+- 印刷彩色地圖、圖表、插圖、色塊（地理／科學圖不可漂白或改畫）
+- 題號、排版、紙張比例與構圖
 
-【做法】
-- 只在有筆跡的局部 inpaint 成周圍紙色
+【輸出要求】
+- 以自然紙張底色與印刷紋理填補被移除的手寫區域（inpainting）
 - 不要裁切、旋轉、縮放或改變構圖
-- 不要新增文字、圖案、答案或浮水印
-- 輸出與原圖同構圖的單一清晰照片`;
-}
-
-/** Detect handwriting / answer-mark boxes (normalized 0–1). Used instead of full-image edit. */
-export function buildDetectHandwritingRegionsPrompt(): string {
-  return `找出這張考卷照片上「所有學生／老師手寫或作答痕跡」的位置，以矩形框回傳。
-
-【要框的痕跡】
-- 手繪圈選、框選 (A)(B)(C)(D) 的圓圈／方框（含黑筆）
-- 打勾、打叉、箭頭、底線、螢光
-- 空白處或選項旁的手寫字母、數字、國字、分數、註記
-- 紅／藍／黑／鉛筆筆跡與塗改（紅藍鉛筆本機也會清，仍請一併框出）
-
-【不要框】
-- 印刷題幹、選項文字、題號、電路圖、地圖、印刷符號
-
-【座標】
-每個框用相對於整張圖的 0～1 比例：x,y 為左上角，width/height 為寬高。
-框可略大於筆跡（約 5～15% 邊距），但不要蓋住整題。
-若沒有任何手寫痕跡，regions 回傳空陣列。`;
-}
-
-export function getDetectHandwritingRegionsSchema() {
-  return {
-    type: Type.OBJECT,
-    properties: {
-      regions: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            x: { type: Type.NUMBER, description: "左上角 x，0～1" },
-            y: { type: Type.NUMBER, description: "左上角 y，0～1" },
-            width: { type: Type.NUMBER, description: "寬度 0～1" },
-            height: { type: Type.NUMBER, description: "高度 0～1" },
-            kind: {
-              type: Type.STRING,
-              description: "circle|tick|text|other",
-            },
-          },
-          required: ["x", "y", "width", "height"],
-        },
-      },
-    },
-    required: ["regions"],
-  };
+- 不要新增任何文字、圖案或浮水印
+- 輸出一張與原圖相同構圖的清晰照片`;
 }
 
 export function formatErrorMessage(error: any): {

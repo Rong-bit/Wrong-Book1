@@ -4,16 +4,18 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import {
   buildAnalyzePrompt,
-  buildDetectHandwritingRegionsPrompt,
+  buildRemoveHandwritingPrompt,
   buildRewriteExplanationPrompt,
   buildSimilarPrompt,
   createGeminiClient,
+  extractInlineImageDataUrl,
   formatErrorMessage,
   generateContentWithRetry,
+  generateImageContentWithRetry,
   getAnalyzeResponseSchema,
-  getDetectHandwritingRegionsSchema,
   getRewriteExplanationResponseSchema,
   getSimilarResponseSchema,
+  IMAGE_EDIT_MODELS,
   parseJsonResponse,
   resolveModel,
 } from "./src/services/geminiCore";
@@ -313,10 +315,10 @@ app.post("/api/rewrite-explanation", async (req, res) => {
   }
 });
 
-// AI detect handwriting / answer-mark boxes (client does local paper fill)
+// AI remove handwriting (Gemini image edit / inpainting) — original approach
 app.post("/api/remove-handwriting", async (req, res) => {
   try {
-    const { imageBase64, mimeType = "image/jpeg", customApiKey, model } = req.body;
+    const { imageBase64, mimeType = "image/jpeg", customApiKey } = req.body;
 
     if (!imageBase64 || typeof imageBase64 !== "string") {
       return res.status(400).json({ error: "未提供題目圖片數據" });
@@ -345,10 +347,10 @@ app.post("/api/remove-handwriting", async (req, res) => {
       "image/jpeg";
 
     const { response, modelUsed, attempts, fallbackUsed } =
-      await generateContentWithRetry(ai, resolveModel(model), {
+      await generateImageContentWithRetry(ai, IMAGE_EDIT_MODELS[0], {
         contents: {
           parts: [
-            { text: buildDetectHandwritingRegionsPrompt() },
+            { text: buildRemoveHandwritingPrompt() },
             {
               inlineData: {
                 mimeType: resolvedMime,
@@ -358,17 +360,20 @@ app.post("/api/remove-handwriting", async (req, res) => {
           ],
         },
         config: {
-          responseMimeType: "application/json",
-          responseSchema: getDetectHandwritingRegionsSchema(),
+          responseModalities: ["TEXT", "IMAGE"],
         },
       });
 
-    const parsed = parseJsonResponse(response.text || "{}");
-    const regions = Array.isArray(parsed?.regions) ? parsed.regions : [];
+    const outImage = extractInlineImageDataUrl(response);
+    if (!outImage) {
+      return res.status(502).json({
+        error: "AI 未回傳去手寫後的圖片，請再試一次。",
+      });
+    }
 
     return res.json({
       success: true,
-      regions,
+      imageBase64: outImage,
       keySource: isUsingCustomKey ? "custom_byok" : "server_default",
       modelUsed,
       attempts,
