@@ -368,6 +368,55 @@ function dilateDarkMask(
   return out;
 }
 
+/** Red ballpoint / marker / solid red sticker (hue-aware). */
+function isRedPenPixel(r: number, g: number, b: number, lum: number, chroma: number): boolean {
+  if (lum >= 232 || lum <= 35) return false;
+  return (
+    r >= g + 12 &&
+    r >= b + 12 &&
+    chroma >= 18 &&
+    r / (g + 1) >= 1.12 &&
+    r / (b + 1) >= 1.12
+  );
+}
+
+/** Blue / cyan ballpoint. */
+function isBluePenPixel(r: number, g: number, b: number, lum: number, chroma: number): boolean {
+  if (lum >= 232 || lum <= 35) return false;
+  return (
+    b >= r + 10 &&
+    b >= g + 6 &&
+    chroma >= 16 &&
+    b / (r + 1) >= 1.08
+  );
+}
+
+/** Soft graphite pencil: mid-gray, low chroma (not near-black print). */
+function isPencilPixel(lum: number, chroma: number): boolean {
+  return chroma < 26 && lum >= 108 && lum <= 198;
+}
+
+function isColoredPenRgb(r: number, g: number, b: number, lum: number, chroma: number): boolean {
+  return (
+    isRedPenPixel(r, g, b, lum, chroma) || isBluePenPixel(r, g, b, lum, chroma)
+  );
+}
+
+/**
+ * Maps / charts keep multi-hue color; red/blue pens and solid「圖」stickers must not.
+ */
+function isProtectedMapColorPixel(
+  r: number,
+  g: number,
+  b: number,
+  lum: number,
+  chroma: number
+): boolean {
+  if (chroma <= 46 || lum >= 230) return false;
+  if (isColoredPenRgb(r, g, b, lum, chroma)) return false;
+  return true;
+}
+
 /**
  * Composite AI 去手寫 onto the original photo geometry.
  *
@@ -467,9 +516,14 @@ export function compositeCleanExamPixels(
   const isColor = new Uint8Array(n);
   const keepColor = new Uint8Array(n);
   const queue: number[] = [];
-  for (let p = 0; p < n; p++) {
-    if (chroma[p] <= 46 || lum[p] >= 230) continue;
-    isColor[p] = 1;
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const r = od[i];
+    const g = od[i + 1];
+    const b = od[i + 2];
+    // Count all saturated ink as "color" so red stickers/pens are removable,
+    // but only protect map-like (non red/blue pen) hues as keepColor.
+    if (chroma[p] > 46 && lum[p] < 230) isColor[p] = 1;
+    if (!isProtectedMapColorPixel(r, g, b, lum[p], chroma[p])) continue;
     const px = p % w;
     const py = (p / w) | 0;
     const bi =
@@ -491,7 +545,19 @@ export function compositeCleanExamPixels(
         const nx = px + dx;
         if (nx < 0 || nx >= w) continue;
         const np = ny * w + nx;
-        if (!isColor[np] || keepColor[np]) continue;
+        if (keepColor[np]) continue;
+        const ni = np * 4;
+        if (
+          !isProtectedMapColorPixel(
+            od[ni],
+            od[ni + 1],
+            od[ni + 2],
+            lum[np],
+            chroma[np]
+          )
+        ) {
+          continue;
+        }
         keepColor[np] = 1;
         queue.push(np);
       }
@@ -508,7 +574,8 @@ export function compositeCleanExamPixels(
     if (dark[p]) darkTotal++;
     if (keepColor[p]) continue;
 
-    if (isColor[p]) {
+    // Red/blue pens, highlighters, and solid「圖」stickers (not map greens).
+    if (isColor[p] || isColoredPenRgb(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])) {
       remove[p] = 1;
       continue;
     }
@@ -620,13 +687,6 @@ export async function preservePrintedQuestionText(
   return editCanvas.toDataURL("image/jpeg", 0.92);
 }
 
-function isColoredPenRgb(r: number, g: number, b: number, lum: number, chroma: number): boolean {
-  if (lum >= 235 || chroma < 16) return false;
-  const red = r >= g + 12 && r >= b + 12 && r / (g + 1) >= 1.1;
-  const blue = b >= r + 10 && b >= g + 6 && b / (r + 1) >= 1.08;
-  return red || blue;
-}
-
 /**
  * After AI image-edit, paste back washed printed figures from the original:
  * color maps and sparse line drawings (circuit diagrams).
@@ -705,9 +765,13 @@ export function restoreWashedFiguresPixels(
   const isColor = new Uint8Array(n);
   const keepColor = new Uint8Array(n);
   const qColor: number[] = [];
-  for (let p = 0; p < n; p++) {
-    if (chroma[p] <= 46 || lum[p] >= 230) continue;
-    isColor[p] = 1;
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    if (chroma[p] > 46 && lum[p] < 230) isColor[p] = 1;
+    if (
+      !isProtectedMapColorPixel(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])
+    ) {
+      continue;
+    }
     const px = p % w;
     const py = (p / w) | 0;
     const bi =
@@ -729,7 +793,19 @@ export function restoreWashedFiguresPixels(
         const nx = px + dx;
         if (nx < 0 || nx >= w) continue;
         const np = ny * w + nx;
-        if (!isColor[np] || keepColor[np]) continue;
+        if (keepColor[np]) continue;
+        const ni = np * 4;
+        if (
+          !isProtectedMapColorPixel(
+            od[ni],
+            od[ni + 1],
+            od[ni + 2],
+            lum[np],
+            chroma[np]
+          )
+        ) {
+          continue;
+        }
         keepColor[np] = 1;
         qColor.push(np);
       }
@@ -908,38 +984,11 @@ function normalizeMarkRegions(
   return out;
 }
 
-/** Red ballpoint / marker (hue-aware; catches faded red better than chroma-only). */
-function isRedPenPixel(r: number, g: number, b: number, lum: number, chroma: number): boolean {
-  if (lum >= 232 || lum <= 35) return false;
-  return (
-    r >= g + 12 &&
-    r >= b + 12 &&
-    chroma >= 18 &&
-    r / (g + 1) >= 1.12 &&
-    r / (b + 1) >= 1.12
-  );
-}
-
-/** Blue / cyan ballpoint. */
-function isBluePenPixel(r: number, g: number, b: number, lum: number, chroma: number): boolean {
-  if (lum >= 232 || lum <= 35) return false;
-  return (
-    b >= r + 10 &&
-    b >= g + 6 &&
-    chroma >= 16 &&
-    b / (r + 1) >= 1.08
-  );
-}
-
-/** Soft graphite pencil: mid-gray, low chroma (not near-black print). */
-function isPencilPixel(lum: number, chroma: number): boolean {
-  return chroma < 26 && lum >= 108 && lum <= 198;
-}
-
 /**
  * Pure pixel helper: bleach red/blue pens and pencil (not large map color blocks)
  * and clear ink inside detected handwriting boxes, filling with local paper.
  * Never redraws the whole page — print/circuit geometry stays sharp.
+ * Solid red「圖」stickers are treated as pen marks, not protected map color.
  */
 export function applyHandwritingBlankPixels(
   rgba: Uint8ClampedArray | Uint8Array,
@@ -1022,12 +1071,17 @@ export function applyHandwritingBlankPixels(
   }
 
   // Large chromatic regions = maps / diagrams — keep (do not bleach as pen).
+  // Red/blue pens and solid「圖」stickers are never protected as map color.
   const isColor = new Uint8Array(n);
   const keepColor = new Uint8Array(n);
   const queue: number[] = [];
-  for (let p = 0; p < n; p++) {
-    if (chroma[p] <= 46 || lum[p] >= 230) continue;
-    isColor[p] = 1;
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    if (chroma[p] > 46 && lum[p] < 230) isColor[p] = 1;
+    if (
+      !isProtectedMapColorPixel(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])
+    ) {
+      continue;
+    }
     const px = p % w;
     const py = (p / w) | 0;
     const bi =
@@ -1049,7 +1103,19 @@ export function applyHandwritingBlankPixels(
         const nx = px + dx;
         if (nx < 0 || nx >= w) continue;
         const np = ny * w + nx;
-        if (!isColor[np] || keepColor[np]) continue;
+        if (keepColor[np]) continue;
+        const ni = np * 4;
+        if (
+          !isProtectedMapColorPixel(
+            od[ni],
+            od[ni + 1],
+            od[ni + 2],
+            lum[np],
+            chroma[np]
+          )
+        ) {
+          continue;
+        }
         keepColor[np] = 1;
         queue.push(np);
       }

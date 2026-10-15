@@ -75,16 +75,24 @@ for (let y = 18; y < 28; y++) {
 // Colored pens to clear
 for (let x = 10; x < 40; x++) setPx(orig, W, x, 8, red);
 for (let x = 50; x < 80; x++) setPx(orig, W, x, 8, blue);
+// Solid red「圖」sticker (large enough that old keepColor treated it as a map)
+for (let y = 50; y < 78; y++) {
+  for (let x = 70; x < 110; x++) setPx(orig, W, x, y, red);
+}
+// Green map patch must stay
+for (let y = 50; y < 75; y++) {
+  for (let x = 8; x < 40; x++) setPx(orig, W, x, y, [60, 140, 90]);
+}
 
 // Model invents a circuit where the original was blank paper
 const edit = new Uint8ClampedArray(orig);
-for (let x = 60; x < 110; x++) setPx(edit, W, x, 45, print);
-for (let y = 40; y < 55; y++) setPx(edit, W, 85, y, print);
-// Fake "8Ω" blob
-for (let y = 48; y < 56; y++) {
-  for (let x = 92; x < 108; x++) setPx(edit, W, x, y, print);
+for (let x = 55; x < 68; x++) setPx(edit, W, x, 35, print);
+for (let y = 30; y < 45; y++) setPx(edit, W, 60, y, print);
+// Fake "8Ω" blob on blank paper
+for (let y = 32; y < 40; y++) {
+  for (let x = 48; x < 58; x++) setPx(edit, W, x, y, print);
 }
-// Model successfully lightened colored pens to paper
+// Model successfully lightened colored pens to paper (sticker left untouched)
 for (let x = 10; x < 40; x++) setPx(edit, W, x, 8, paper);
 for (let x = 50; x < 80; x++) setPx(edit, W, x, 8, paper);
 
@@ -95,14 +103,14 @@ const out = compositeCleanExamPixels(orig, edit, W, H);
   assert(luma(r, g, b) < 80, "printed glyph must remain from original");
 }
 {
-  const [r, g, b] = getPx(out, W, 90, 45);
+  const [r, g, b] = getPx(out, W, 60, 35);
   assert(
     luma(r, g, b) > 210,
     `hallucinated circuit stroke must not survive, lum=${luma(r, g, b)}`
   );
 }
 {
-  const [r, g, b] = getPx(out, W, 100, 52);
+  const [r, g, b] = getPx(out, W, 52, 35);
   assert(
     luma(r, g, b) > 210,
     `hallucinated 8Ω blob must not survive, lum=${luma(r, g, b)}`
@@ -118,7 +126,24 @@ const out = compositeCleanExamPixels(orig, edit, W, H);
   const chroma = Math.max(r, g, b) - Math.min(r, g, b);
   assert(chroma < 35, `blue pen must clear via AI lighten, chroma=${chroma}`);
 }
+{
+  const [r, g, b] = getPx(out, W, 90, 60);
+  const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+  assert(
+    chroma < 40 && luma(r, g, b) > 200,
+    `red「圖」sticker must clear, rgb=${[r, g, b]}`
+  );
+}
+{
+  const [r, g, b] = getPx(out, W, 20, 60);
+  assert(g > 100 && g > r, `green map must stay, got ${[r, g, b]}`);
+}
+assert(
+  buildRemoveHandwritingPrompt().includes("圖一") ||
+    buildRemoveHandwritingPrompt().includes("貼圖"),
+  "prompt should mention sticker removal"
+);
 
 console.log(
-  "OK: hallucinated circuit rejected; print kept; red/blue cleared"
+  "OK: hallucinated circuit rejected; print/map kept; red sticker + pens cleared"
 );

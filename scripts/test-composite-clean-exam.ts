@@ -79,6 +79,12 @@ for (let y = 55; y < 75; y++) {
   for (let x = 10; x < 45; x++) setPx(orig, W, x, y, [60, 140, 90]);
 }
 
+// Solid red「圖」sticker — must clear, not be kept as a map
+// Keep clear of the uniform shadow patch sampled at (80,65).
+for (let y = 32; y < 52; y++) {
+  for (let x = 78; x < 118; x++) setPx(orig, W, x, y, red);
+}
+
 // Black tick cleared only via region
 for (let k = 0; k < 10; k++) setPx(orig, W, 90 + k, 20 + k, print);
 
@@ -125,6 +131,15 @@ const out = applyHandwritingBlankPixels(orig, W, H, [
   assert(g > 100 && g > r, `map must stay, got ${[r, g, b]}`);
 }
 {
+  const [r, g, b] = getPx(out, W, 95, 40);
+  const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  assert(
+    chroma < 40 && lum > 200,
+    `red「圖」sticker must clear, rgb=${[r, g, b]}`
+  );
+}
+{
   const [r, g, b] = getPx(out, W, 95, 25);
   assert(
     0.299 * r + 0.587 * g + 0.114 * b >= 80,
@@ -133,5 +148,5 @@ const out = applyHandwritingBlankPixels(orig, W, H, [
 }
 
 console.log(
-  "OK: red/blue/pencil cleared; print/circuit/map/shadow kept"
+  "OK: red/blue/pencil/sticker cleared; print/circuit/map/shadow kept"
 );
