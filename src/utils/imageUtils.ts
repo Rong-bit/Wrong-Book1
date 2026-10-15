@@ -620,6 +620,257 @@ export async function preservePrintedQuestionText(
   return editCanvas.toDataURL("image/jpeg", 0.92);
 }
 
+function isColoredPenRgb(r: number, g: number, b: number, lum: number, chroma: number): boolean {
+  if (lum >= 235 || chroma < 16) return false;
+  const red = r >= g + 12 && r >= b + 12 && r / (g + 1) >= 1.1;
+  const blue = b >= r + 10 && b >= g + 6 && b / (r + 1) >= 1.08;
+  return red || blue;
+}
+
+/**
+ * After AI image-edit, paste back washed printed figures from the original:
+ * color maps and sparse line drawings (circuit diagrams).
+ * Skips red/blue pen pixels so handwriting on/near figures is not restored.
+ */
+export function restoreWashedFiguresPixels(
+  originalRgba: Uint8ClampedArray | Uint8Array,
+  editedRgba: Uint8ClampedArray | Uint8Array,
+  w: number,
+  h: number
+): Uint8ClampedArray {
+  const n = w * h;
+  const od = originalRgba;
+  const ed = editedRgba;
+  const out = new Uint8ClampedArray(ed);
+
+  const lum = new Uint16Array(n);
+  const chroma = new Uint8Array(n);
+  const dark = new Uint8Array(n);
+  const rowInk = new Uint32Array(h);
+
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const r = od[i];
+    const g = od[i + 1];
+    const b = od[i + 2];
+    const v = 0.299 * r + 0.587 * g + 0.114 * b;
+    const c = Math.max(r, g, b) - Math.min(r, g, b);
+    lum[p] = v;
+    chroma[p] = c;
+    // Include slightly lighter print ink used in thin circuit strokes
+    if (v < 155 && c < 45) {
+      dark[p] = 1;
+      rowInk[(p / w) | 0]++;
+    }
+  }
+
+  const rowMin = Math.max(10, Math.round(w * 0.014));
+  const textRow = new Uint8Array(h);
+  for (let y = 0; y < h; ) {
+    if (rowInk[y] < rowMin) {
+      y++;
+      continue;
+    }
+    let y2 = y;
+    while (y2 < h && rowInk[y2] >= rowMin) y2++;
+    const bandH = y2 - y;
+    // Typical printed text line height band
+    if (bandH >= 3 && bandH <= Math.max(12, Math.round(h * 0.035))) {
+      for (let yy = y; yy < y2; yy++) textRow[yy] = 1;
+    }
+    y = y2;
+  }
+
+  const block = 24;
+  const blocksX = Math.ceil(w / block);
+  const blocksY = Math.ceil(h / block);
+  const colorN = new Uint32Array(blocksX * blocksY);
+  const darkN = new Uint32Array(blocksX * blocksY);
+  const solidN = new Uint32Array(blocksX * blocksY);
+  const blockArea = new Uint32Array(blocksX * blocksY);
+  const eroded = erodeDarkMask(dark, w, h);
+
+  for (let py = 0; py < h; py++) {
+    const by = Math.min(blocksY - 1, (py / block) | 0);
+    for (let px = 0; px < w; px++) {
+      const bx = Math.min(blocksX - 1, (px / block) | 0);
+      const bi = by * blocksX + bx;
+      blockArea[bi]++;
+      const p = py * w + px;
+      if (chroma[p] > 48 && lum[p] < 230) colorN[bi]++;
+      if (dark[p]) darkN[bi]++;
+      if (eroded[p]) solidN[bi]++;
+    }
+  }
+
+  const isColor = new Uint8Array(n);
+  const keepColor = new Uint8Array(n);
+  const qColor: number[] = [];
+  for (let p = 0; p < n; p++) {
+    if (chroma[p] <= 46 || lum[p] >= 230) continue;
+    isColor[p] = 1;
+    const px = p % w;
+    const py = (p / w) | 0;
+    const bi =
+      Math.min(blocksY - 1, (py / block) | 0) * blocksX +
+      Math.min(blocksX - 1, (px / block) | 0);
+    if (colorN[bi] / Math.max(1, blockArea[bi]) < 0.3) continue;
+    keepColor[p] = 1;
+    qColor.push(p);
+  }
+  for (let qi = 0; qi < qColor.length; qi++) {
+    const p = qColor[qi];
+    const px = p % w;
+    const py = (p / w) | 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      const ny = py + dy;
+      if (ny < 0 || ny >= h) continue;
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = px + dx;
+        if (nx < 0 || nx >= w) continue;
+        const np = ny * w + nx;
+        if (!isColor[np] || keepColor[np]) continue;
+        keepColor[np] = 1;
+        qColor.push(np);
+      }
+    }
+  }
+
+  const seedBlock = new Uint8Array(blocksX * blocksY);
+  for (let bi = 0; bi < blocksX * blocksY; bi++) {
+    const area = Math.max(1, blockArea[bi]);
+    const darkFrac = darkN[bi] / area;
+    const solidFrac = solidN[bi] / Math.max(1, darkN[bi]);
+    // Sparse wire diagrams: some ink, mostly not solid glyph cores
+    if (darkN[bi] < 10 || darkFrac < 0.02 || darkFrac > 0.62) continue;
+    if (solidFrac > 0.5) continue;
+
+    const bx0 = (bi % blocksX) * block;
+    const by0 = ((bi / blocksX) | 0) * block;
+    let washed = 0;
+    let darkSeen = 0;
+    let textDark = 0;
+    let penDark = 0;
+    for (let py = by0; py < Math.min(h, by0 + block); py++) {
+      for (let px = bx0; px < Math.min(w, bx0 + block); px++) {
+        const p = py * w + px;
+        if (!dark[p]) continue;
+        const i = p * 4;
+        if (isColoredPenRgb(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])) {
+          penDark++;
+          continue;
+        }
+        darkSeen++;
+        if (textRow[py]) textDark++;
+        if (lumaAt(ed, i) > lum[p] + 30) washed++;
+      }
+    }
+    if (darkSeen < 10) continue;
+    // Reject blocks that are mostly colored pen
+    if (penDark > darkSeen) continue;
+    // Reject pure text lines (allow circuit labels mixed in)
+    if (textDark / darkSeen > 0.78) continue;
+    if (washed / darkSeen < 0.28) continue;
+    seedBlock[bi] = 1;
+  }
+
+  // Grow figure seeds so a whole circuit island is restored together
+  const restoreBlock = new Uint8Array(seedBlock);
+  const bq: number[] = [];
+  for (let bi = 0; bi < seedBlock.length; bi++) {
+    if (seedBlock[bi]) bq.push(bi);
+  }
+  for (let i = 0; i < bq.length; i++) {
+    const bi = bq[i];
+    const bx = bi % blocksX;
+    const by = (bi / blocksX) | 0;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const nx = bx + dx;
+        const ny = by + dy;
+        if (nx < 0 || ny < 0 || nx >= blocksX || ny >= blocksY) continue;
+        const nbi = ny * blocksX + nx;
+        if (restoreBlock[nbi]) continue;
+        const area = Math.max(1, blockArea[nbi]);
+        const darkFrac = darkN[nbi] / area;
+        if (darkN[nbi] < 8 || darkFrac < 0.015 || darkFrac > 0.7) continue;
+        restoreBlock[nbi] = 1;
+        bq.push(nbi);
+      }
+    }
+  }
+
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    if (keepColor[p]) {
+      const eC =
+        Math.max(ed[i], ed[i + 1], ed[i + 2]) -
+        Math.min(ed[i], ed[i + 1], ed[i + 2]);
+      if (eC + 16 < chroma[p] || lumaAt(ed, i) > lum[p] + 18) {
+        out[i] = od[i];
+        out[i + 1] = od[i + 1];
+        out[i + 2] = od[i + 2];
+      }
+      continue;
+    }
+
+    if (!dark[p]) continue;
+    if (isColoredPenRgb(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])) {
+      continue; // do not bring blue/red handwriting back
+    }
+    const py = (p / w) | 0;
+    const px = p % w;
+    const bi =
+      Math.min(blocksY - 1, (py / block) | 0) * blocksX +
+      Math.min(blocksX - 1, (px / block) | 0);
+    if (!restoreBlock[bi]) continue;
+    if (lumaAt(ed, i) <= lum[p] + 24) continue;
+    out[i] = od[i];
+    out[i + 1] = od[i + 1];
+    out[i + 2] = od[i + 2];
+  }
+
+  return out;
+}
+
+/** Restore maps / circuit figures the image-edit model washed out. */
+export async function restoreWashedFiguresFromOriginal(
+  originalSrc: string,
+  editedSrc: string,
+  quality = 0.92
+): Promise<string> {
+  const [original, edited] = await Promise.all([
+    loadImageElement(originalSrc),
+    loadImageElement(editedSrc),
+  ]);
+  const w = original.naturalWidth || original.width;
+  const h = original.naturalHeight || original.height;
+  if (w < 8 || h < 8) return editedSrc;
+
+  const origCanvas = document.createElement("canvas");
+  origCanvas.width = w;
+  origCanvas.height = h;
+  const origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
+  const editCanvas = document.createElement("canvas");
+  editCanvas.width = w;
+  editCanvas.height = h;
+  const editCtx = editCanvas.getContext("2d", { willReadFrequently: true });
+  if (!origCtx || !editCtx) return editedSrc;
+
+  origCtx.drawImage(original, 0, 0, w, h);
+  editCtx.imageSmoothingEnabled = true;
+  editCtx.imageSmoothingQuality = "high";
+  editCtx.drawImage(edited, 0, 0, w, h);
+
+  const origData = origCtx.getImageData(0, 0, w, h);
+  const editData = editCtx.getImageData(0, 0, w, h);
+  editData.data.set(
+    restoreWashedFiguresPixels(origData.data, editData.data, w, h)
+  );
+  editCtx.putImageData(editData, 0, 0);
+  return editCanvas.toDataURL("image/jpeg", quality);
+}
+
 export interface HandwritingMarkRegion {
   /** Normalized [0,1] box */
   x: number;
