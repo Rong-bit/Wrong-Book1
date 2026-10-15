@@ -1839,10 +1839,10 @@ export interface InkLineBounds {
 }
 
 /**
- * Snap a finger stroke to the text lines it actually crosses.
- * Each crossed line is boxed edge to edge (character gaps are bridged).
- * A neighboring line that only falls inside the search radius is dropped, so
- * one horizontal swipe stays on that row instead of the whole passage.
+ * Snap a finger stroke to the text it actually crosses.
+ * Horizontal extent follows the stroke: halfway across a line boxes that half,
+ * and two characters stay two characters. Vertical extent is the glyph height
+ * of those characters, so the rows above and below stay outside the box.
  * Pixel coords, inclusive.
  */
 export function textLineRectFromInk(
@@ -1857,8 +1857,9 @@ export function textLineRectFromInk(
   const radius2 = radius * radius;
   // Bridge character side-bearings, but not a wide column gutter.
   const gapTol = Math.max(4, Math.round(w * 0.028));
-  // Finish the glyph from a stroke through its middle. Kept under one extra line.
-  const maxExtra = Math.max(8, Math.round(Math.min(w, h) * 0.022));
+  // Finish a glyph the finger crosses through the middle. The weak-row stop,
+  // not this cap, is what keeps the next line out.
+  const maxExtra = Math.max(12, Math.round(Math.min(w, h) * 0.05));
 
   const decimated: Point[] = [];
   for (const p of stroke) {
@@ -1945,13 +1946,17 @@ export function textLineRectFromInk(
     return false;
   };
 
-  /** Walk the line using the whole glyph height, so a sparse stroke row cannot stop early. */
-  const expandLineX = (
+  /**
+   * Finish the glyphs under the stroke ends. Stop at the first real gap so the
+   * next character, and the rest of the line, stay outside the box.
+   */
+  const finishSwipedGlyphs = (
     left: number,
     right: number,
     top: number,
     bot: number
   ): [number, number] => {
+    const glyphGap = 1;
     let xMin = left;
     let xMax = right;
     let gap = 0;
@@ -1959,15 +1964,19 @@ export function textLineRectFromInk(
       if (columnHasInk(x, top, bot)) {
         xMin = x;
         gap = 0;
-      } else if (++gap > gapTol) break;
+      } else if (++gap > glyphGap) break;
     }
     gap = 0;
     for (let x = right + 1; x < w; x++) {
       if (columnHasInk(x, top, bot)) {
         xMax = x;
         gap = 0;
-      } else if (++gap > gapTol) break;
+      } else if (++gap > glyphGap) break;
     }
+    const glyph = Math.max(6, bot - top + 1);
+    const cap = Math.round(glyph * 0.55);
+    xMin = Math.max(xMin, left - cap);
+    xMax = Math.min(xMax, right + cap);
     return [xMin, xMax];
   };
 
@@ -2046,13 +2055,22 @@ export function textLineRectFromInk(
       continue;
     }
 
-    // Glyph height of the characters under the finger, then extend across the line.
-    const localL = Math.max(0, seedL - gapTol);
-    const localR = Math.min(w - 1, seedR + gapTol);
+    const localL = Math.max(0, seedL - 2);
+    const localR = Math.min(w - 1, seedR + 2);
     let [top, bot] = growVertically(y0, y1, localL, localR, y0, y1);
-    let [xMin, xMax] = expandLineX(seedL, seedR, top, bot);
+
+    const spanPts = decimated.filter((p) => p.y >= y0 - radius && p.y <= y1 + radius);
+    const span = spanPts.length ? spanPts : decimated;
+    let xMin = Math.max(0, Math.floor(Math.min(...span.map((p) => p.x))));
+    let xMax = Math.min(w - 1, Math.ceil(Math.max(...span.map((p) => p.x))));
+    while (xMin < xMax && !columnHasInk(xMin, top, bot)) xMin++;
+    while (xMax > xMin && !columnHasInk(xMax, top, bot)) xMax--;
+    if (!columnHasInk(xMin, top, bot) && !columnHasInk(xMax, top, bot)) {
+      xMin = seedL;
+      xMax = seedR;
+    }
+    [xMin, xMax] = finishSwipedGlyphs(xMin, xMax, top, bot);
     [top, bot] = growVertically(top, bot, xMin, xMax, y0, y1);
-    [xMin, xMax] = expandLineX(xMin, xMax, top, bot);
 
     bands.push({ x0: xMin, y0: top, x1: xMax, y1: bot });
     y = Math.max(y1 + 1, bot + 1);
@@ -2097,8 +2115,8 @@ export function textLineRectFromInk(
 }
 
 /**
- * 選文字：手指滑過的那一行框成整行（含完整字高）。
- * 行間空白會停住，沒滑過的上下行不會併成整篇。沒掃到墨跡時退回筆畫外框。
+ * 選文字：滑到哪就框到哪。橫向只包住手指經過的字，直向只含那些字的字高。
+ * 沒掃到墨跡時退回筆畫外框。
  */
 export function textLineCropAlongStroke(
   img: HTMLImageElement,
@@ -2143,7 +2161,7 @@ export function textLineCropAlongStroke(
   const bounds = textLineRectFromInk(ink, w, h, pts, searchR);
   if (!bounds) return fallback;
 
-  const padX = Math.max(2, Math.round(w * 0.012));
+  const padX = Math.max(1, Math.round(Math.min(w, h) * 0.003));
   // Keep vertical padding inside the line gap so the box does not cover the next row.
   const padY = Math.max(1, Math.round(Math.min(w, h) * 0.003));
   const rx0 = Math.max(0, bounds.x0 - padX);
@@ -2160,7 +2178,7 @@ export function textLineCropAlongStroke(
 
 /**
  * Build tight content-aware rects from paint strokes (text one island, diagram another).
- * 選文字 snaps to whole text lines the finger crosses; 選圖形 stays a tight ink corridor.
+ * 選文字 boxes only the glyphs the finger crosses; 選圖形 stays a tight ink corridor.
  * Prefer explicit per-stroke kinds (UI 選文字／選圖形); otherwise auto-classify.
  * Different kinds never merge, and final rects are separated so they do not overlap.
  */
