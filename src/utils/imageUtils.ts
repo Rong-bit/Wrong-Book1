@@ -574,8 +574,9 @@ export function compositeCleanExamPixels(
     if (dark[p]) darkTotal++;
     if (keepColor[p]) continue;
 
-    // Red/blue pens, highlighters, and solid「圖」stickers (not map greens).
-    if (isColor[p] || isColoredPenRgb(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])) {
+    // Only red/blue pens and solid「圖」stickers — not all saturated pixels
+    // (photo color-cast on print must not be paper-filled).
+    if (isColoredPenRgb(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])) {
       remove[p] = 1;
       continue;
     }
@@ -602,8 +603,11 @@ export function compositeCleanExamPixels(
     darkTotal > 200 && darkClearedByAi / darkTotal > 0.28;
   if (aiWashout) {
     remove.fill(0);
-    for (let p = 0; p < n; p++) {
-      if (isColor[p] && !keepColor[p]) remove[p] = 1;
+    for (let p = 0, i = 0; p < n; p++, i += 4) {
+      if (keepColor[p]) continue;
+      if (isColoredPenRgb(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])) {
+        remove[p] = 1;
+      }
     }
   } else {
     // Grow the clear mask slightly so circle edges the model half-erased get filled.
@@ -1247,6 +1251,110 @@ export async function blankHandwritingMarks(
   ctx.drawImage(img, 0, 0, w, h);
   const data = ctx.getImageData(0, 0, w, h);
   data.data.set(applyHandwritingBlankPixels(data.data, w, h, regions));
+  ctx.putImageData(data, 0, 0);
+  return canvas.toDataURL("image/jpeg", quality);
+}
+
+/**
+ * Residual cleanup after AI挖空: remove only red/blue pens and solid red
+ * stickers. Does NOT clear pencil/mid-gray — photographed print often sits in
+ * that band and must stay.
+ */
+export function bleachColoredPensOnlyPixels(
+  rgba: Uint8ClampedArray | Uint8Array,
+  w: number,
+  h: number
+): Uint8ClampedArray {
+  const n = w * h;
+  const od = rgba;
+  const out = new Uint8ClampedArray(od);
+  const lum = new Uint16Array(n);
+  const chroma = new Uint8Array(n);
+  const pen = new Uint8Array(n);
+
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const r = od[i];
+    const g = od[i + 1];
+    const b = od[i + 2];
+    const v = 0.299 * r + 0.587 * g + 0.114 * b;
+    const c = Math.max(r, g, b) - Math.min(r, g, b);
+    lum[p] = v;
+    chroma[p] = c;
+    if (isColoredPenRgb(r, g, b, v, c)) pen[p] = 1;
+  }
+
+  // One dilation only — enough for pen edges, not enough to swallow glyphs.
+  const remove = dilateDarkMask(pen, w, h);
+  for (let p = 0; p < n; p++) {
+    if (!remove[p]) continue;
+    // Never paper-fill dark low-chroma print cores the dilation touched.
+    if (lum[p] < 125 && chroma[p] < 34 && !pen[p]) {
+      remove[p] = 0;
+    }
+  }
+
+  const block = 48;
+  const blocksX = Math.ceil(w / block);
+  const blocksY = Math.ceil(h / block);
+  const paperR = new Float64Array(blocksX * blocksY);
+  const paperG = new Float64Array(blocksX * blocksY);
+  const paperB = new Float64Array(blocksX * blocksY);
+  const paperN = new Uint32Array(blocksX * blocksY);
+  for (let py = 0; py < h; py++) {
+    const by = Math.min(blocksY - 1, (py / block) | 0);
+    for (let px = 0; px < w; px++) {
+      const p = py * w + px;
+      if (lum[p] > 205 && chroma[p] < 28) {
+        const i = p * 4;
+        const bi = by * blocksX + Math.min(blocksX - 1, (px / block) | 0);
+        paperR[bi] += od[i];
+        paperG[bi] += od[i + 1];
+        paperB[bi] += od[i + 2];
+        paperN[bi]++;
+      }
+    }
+  }
+
+  for (let py = 0; py < h; py++) {
+    const by = Math.min(blocksY - 1, (py / block) | 0);
+    for (let px = 0; px < w; px++) {
+      const p = py * w + px;
+      if (!remove[p]) continue;
+      const i = p * 4;
+      const bi = by * blocksX + Math.min(blocksX - 1, (px / block) | 0);
+      const samples = paperN[bi];
+      if (samples > 8) {
+        out[i] = Math.round(paperR[bi] / samples);
+        out[i + 1] = Math.round(paperG[bi] / samples);
+        out[i + 2] = Math.round(paperB[bi] / samples);
+      } else {
+        out[i] = 255;
+        out[i + 1] = 255;
+        out[i + 2] = 255;
+      }
+    }
+  }
+  return out;
+}
+
+/** Async wrapper: residual red/blue pen + sticker bleach (keeps print). */
+export async function bleachColoredPensOnly(
+  imageSrc: string,
+  quality = 0.92
+): Promise<string> {
+  const img = await loadImageElement(imageSrc);
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  if (w < 8 || h < 8) return normalizeImageSrc(imageSrc);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return normalizeImageSrc(imageSrc);
+  ctx.drawImage(img, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h);
+  data.data.set(bleachColoredPensOnlyPixels(data.data, w, h));
   ctx.putImageData(data, 0, 0);
   return canvas.toDataURL("image/jpeg", quality);
 }

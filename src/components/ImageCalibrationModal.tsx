@@ -39,7 +39,7 @@ import {
   normalizeImageSrc,
   compressImage,
   preservePrintedQuestionText,
-  blankHandwritingMarks,
+  bleachColoredPensOnly,
   removeShadowsAndBinarize,
   ShadowRemovalMode,
   detectNearWhitePaperCorners,
@@ -897,7 +897,9 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
           );
         }
         try {
-          kept = await blankHandwritingMarks(kept, []);
+          // Red/blue pens +「圖」stickers only — never pencil/mid-gray (that
+          // wiped photographed print / 注音 on real exam photos).
+          kept = await bleachColoredPensOnly(kept);
         } catch (bleachErr) {
           console.warn(
             "Residual pen bleach failed, keeping composited image:",
