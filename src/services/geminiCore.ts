@@ -230,11 +230,12 @@ export function extractInlineImageDataUrl(response: any): string | null {
 export function buildRemoveHandwritingPrompt(): string {
   return `你是考卷影像修復專家。請編輯這張考卷／習作照片。
 
-【首要任務＝徹底去掉手寫】
-必須清除所有學生／老師筆跡，不可殘留：
+【首要任務＝徹底去掉手寫與貼圖】
+必須清除所有學生／老師筆跡與非印刷疊加物，不可殘留：
 - 藍筆／紅筆／黑筆／鉛筆的圈選、打叉、劃線、註記、分數
 - 空白處手寫字母、數字（如 A、C、D）與塗鴉
 - 選項旁或題號旁的手畫圓圈
+- 社群／截圖上的紅色「圖」「圖一」方塊貼圖、數位浮水印與非印刷標籤
 
 【作法＝局部清除，禁止整頁重畫】
 - 只把手寫／陰影處用紙色填補；不要重繪印刷字、線條或整頁版面
