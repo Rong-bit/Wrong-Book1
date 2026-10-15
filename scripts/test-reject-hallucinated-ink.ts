@@ -57,6 +57,14 @@ assert(
   !prompt.includes("均勻光線下重拍"),
   "prompt must not encourage full-page re-photograph"
 );
+assert(
+  prompt.includes("陰影") && prompt.includes("折線"),
+  "prompt should address shadows and crease lines"
+);
+assert(
+  prompt.includes("禁止") && prompt.includes("整頁重畫"),
+  "prompt must forbid full-page redraw when cleaning shadows"
+);
 
 const W = 120;
 const H = 80;
