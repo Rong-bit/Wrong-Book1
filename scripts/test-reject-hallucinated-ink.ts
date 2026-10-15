@@ -62,9 +62,16 @@ assert(
   "prompt should address shadows and crease lines"
 );
 assert(
-  prompt.includes("禁止") && prompt.includes("整頁重畫"),
-  "prompt must forbid full-page redraw when cleaning shadows"
+  prompt.includes("禁止") &&
+    (prompt.includes("發明圖形") || prompt.includes("不發明圖")),
+  "prompt must forbid inventing figures when cleaning shadows"
 );
+assert(
+  prompt.includes("重繪印刷字") && !prompt.includes("不重繪印刷字"),
+  "prompt must require redrawing print (not forbid it)"
+);
+assert(prompt.includes("不發明圖"), "prompt must forbid inventing figures");
+assert(prompt.includes("不位移構圖"), "prompt must forbid shifting layout");
 
 const W = 120;
 const H = 80;
@@ -108,7 +115,7 @@ const out = compositeCleanExamPixels(orig, edit, W, H);
 
 {
   const [r, g, b] = getPx(out, W, 12, 22);
-  assert(luma(r, g, b) < 80, "printed glyph must remain from original");
+  assert(luma(r, g, b) < 80, "printed glyph must remain");
 }
 {
   const [r, g, b] = getPx(out, W, 60, 35);
@@ -146,12 +153,85 @@ const out = compositeCleanExamPixels(orig, edit, W, H);
   const [r, g, b] = getPx(out, W, 20, 60);
   assert(g > 100 && g > r, `green map must stay, got ${[r, g, b]}`);
 }
+
+// Redrawn print: model replaces speckled print with solid black in-place.
+// Composite must keep AI redraw, not discard it for the original photo.
+{
+  const W3 = 80;
+  const H3 = 40;
+  const page = rgba(W3, H3, paper);
+  for (let y = 12; y < 24; y++) {
+    for (let x = 8; x < 50; x++) {
+      if ((x + y) % 3 !== 0) setPx(page, W3, x, y, [40, 40, 40]);
+    }
+  }
+  const redrawn: [number, number, number] = [8, 8, 8];
+  const edited = new Uint8ClampedArray(page);
+  for (let y = 12; y < 24; y++) {
+    for (let x = 8; x < 50; x++) setPx(edited, W3, x, y, redrawn);
+  }
+  const outRedraw = compositeCleanExamPixels(page, edited, W3, H3);
+  const [r, g, b] = getPx(outRedraw, W3, 20, 16);
+  assert(
+    r === 8 && g === 8 && b === 8,
+    `AI redrawn print must be kept, got ${[r, g, b]}`
+  );
+}
 assert(
   buildRemoveHandwritingPrompt().includes("圖一") ||
     buildRemoveHandwritingPrompt().includes("貼圖"),
   "prompt should mention sticker removal"
 );
+assert(
+  buildRemoveHandwritingPrompt().includes("鉛筆") ||
+    buildRemoveHandwritingPrompt().includes("括號"),
+  "prompt should require clearing pencil / paren answers"
+);
+
+// Washout case: model lightens lots of dark ink (incl. print) + handwriting.
+// Print glyph cores must stay; black/pencil handwriting the model cleared must go.
+{
+  const W2 = 100;
+  const H2 = 60;
+  const page = rgba(W2, H2, paper);
+  const pencil: [number, number, number] = [150, 148, 145];
+  // Printed band (solid enough to form printCore)
+  for (let y = 10; y < 22; y++) {
+    for (let x = 8; x < 55; x++) setPx(page, W2, x, y, print);
+  }
+  // Handwriting away from print band
+  for (let x = 10; x < 35; x++) setPx(page, W2, x, 40, pencil);
+  for (let x = 40; x < 70; x++) setPx(page, W2, x, 48, print); // black tick
+
+  const washed = new Uint8ClampedArray(page);
+  // Model washes almost everything to paper (triggers aiWashout)
+  for (let y = 0; y < H2; y++) {
+    for (let x = 0; x < W2; x++) setPx(washed, W2, x, y, paper);
+  }
+  const outWash = compositeCleanExamPixels(page, washed, W2, H2);
+  {
+    const [r, g, b] = getPx(outWash, W2, 20, 14);
+    assert(
+      luma(r, g, b) < 80,
+      `washout must keep print core, lum=${luma(r, g, b)}`
+    );
+  }
+  {
+    const [r, g, b] = getPx(outWash, W2, 20, 40);
+    assert(
+      luma(r, g, b) > 200,
+      `washout must still clear pencil handwriting, lum=${luma(r, g, b)}`
+    );
+  }
+  {
+    const [r, g, b] = getPx(outWash, W2, 50, 48);
+    assert(
+      luma(r, g, b) > 200,
+      `washout must still clear black tick handwriting, lum=${luma(r, g, b)}`
+    );
+  }
+}
 
 console.log(
-  "OK: hallucinated circuit rejected; print/map kept; red sticker + pens cleared"
+  "OK: hallucinated circuit rejected; AI redrawn print kept; map kept; red sticker + pens cleared; washout keeps handwriting clears"
 );

@@ -876,8 +876,8 @@ export const ImageCalibrationModal: React.FC<ImageCalibrationModalProps> = ({
 
   /**
    * AI image-edit, then composite onto original pixels so hallucinated ink
-   * (invented circuits / symbols) cannot replace the page. Residual red/blue
-   * pens get a light local paper fill afterward.
+   * cannot replace the page — while still applying the model's handwriting
+   * clears (incl. black/pencil). Residual red/blue pens + contrast after.
    */
   const handleAiRemoveHandwriting = async () => {
     if (isProcessing) return;
