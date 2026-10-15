@@ -657,8 +657,36 @@ function normalizeMarkRegions(
   return out;
 }
 
+/** Red ballpoint / marker (hue-aware; catches faded red better than chroma-only). */
+function isRedPenPixel(r: number, g: number, b: number, lum: number, chroma: number): boolean {
+  if (lum >= 232 || lum <= 35) return false;
+  return (
+    r >= g + 12 &&
+    r >= b + 12 &&
+    chroma >= 18 &&
+    r / (g + 1) >= 1.12 &&
+    r / (b + 1) >= 1.12
+  );
+}
+
+/** Blue / cyan ballpoint. */
+function isBluePenPixel(r: number, g: number, b: number, lum: number, chroma: number): boolean {
+  if (lum >= 232 || lum <= 35) return false;
+  return (
+    b >= r + 10 &&
+    b >= g + 6 &&
+    chroma >= 16 &&
+    b / (r + 1) >= 1.08
+  );
+}
+
+/** Soft graphite pencil: mid-gray, low chroma (not near-black print). */
+function isPencilPixel(lum: number, chroma: number): boolean {
+  return chroma < 26 && lum >= 108 && lum <= 198;
+}
+
 /**
- * Pure pixel helper: bleach saturated pen marks (not large map color blocks)
+ * Pure pixel helper: bleach red/blue pens and pencil (not large map color blocks)
  * and clear ink inside detected handwriting boxes, filling with local paper.
  * Never redraws the whole page — print/circuit geometry stays sharp.
  */
@@ -674,6 +702,7 @@ export function applyHandwritingBlankPixels(
   const lum = new Uint16Array(n);
   const chroma = new Uint8Array(n);
   const dark = new Uint8Array(n);
+  const penTone = new Uint8Array(n); // red / blue / pencil — clear globally
   const rowInk = new Uint32Array(h);
 
   for (let p = 0, i = 0; p < n; p++, i += 4) {
@@ -687,6 +716,13 @@ export function applyHandwritingBlankPixels(
     if (v < 125 && c < 34) {
       dark[p] = 1;
       rowInk[(p / w) | 0]++;
+    }
+    if (
+      isRedPenPixel(r, g, b, v, c) ||
+      isBluePenPixel(r, g, b, v, c) ||
+      isPencilPixel(v, c)
+    ) {
+      penTone[p] = 1;
     }
   }
 
@@ -734,6 +770,7 @@ export function applyHandwritingBlankPixels(
     }
   }
 
+  // Large chromatic regions = maps / diagrams — keep (do not bleach as pen).
   const isColor = new Uint8Array(n);
   const keepColor = new Uint8Array(n);
   const queue: number[] = [];
@@ -768,6 +805,34 @@ export function applyHandwritingBlankPixels(
     }
   }
 
+  // Pencil on large uniform gray patches (shadows) — skip to avoid blotches.
+  // Keep pencil only where it looks stroke-like: local contrast vs neighbors.
+  const pencilStroke = new Uint8Array(n);
+  for (let py = 1; py < h - 1; py++) {
+    for (let px = 1; px < w - 1; px++) {
+      const p = py * w + px;
+      if (!penTone[p] || keepColor[p]) continue;
+      const i = p * 4;
+      // Red/blue always count; pencil needs local contrast.
+      if (
+        isRedPenPixel(od[i], od[i + 1], od[i + 2], lum[p], chroma[p]) ||
+        isBluePenPixel(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])
+      ) {
+        pencilStroke[p] = 1;
+        continue;
+      }
+      if (!isPencilPixel(lum[p], chroma[p])) continue;
+      let brighter = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          if (lum[p] + 10 < lum[(py + dy) * w + (px + dx)]) brighter++;
+        }
+      }
+      if (brighter >= 2) pencilStroke[p] = 1;
+    }
+  }
+
   const inMark = new Uint8Array(n);
   const norms = normalizeMarkRegions(regions);
   for (const r of norms) {
@@ -794,13 +859,11 @@ export function applyHandwritingBlankPixels(
       for (let px = x0; px < x1; px++) {
         const p = py * w + px;
         if (keepColor[p]) continue;
-        if (isColor[p]) {
+        if (pencilStroke[p] || isColor[p]) {
           inMark[p] = 1;
           continue;
         }
-        if (!dark[p] && !(chroma[p] < 28 && lum[p] >= 110 && lum[p] <= 200)) {
-          continue;
-        }
+        if (!dark[p] && !isPencilPixel(lum[p], chroma[p])) continue;
         if (!aggressive && protectRow[py] && printCore[p]) continue;
         inMark[p] = 1;
       }
@@ -810,14 +873,17 @@ export function applyHandwritingBlankPixels(
   const remove = new Uint8Array(n);
   for (let p = 0; p < n; p++) {
     if (keepColor[p]) continue;
-    if (isColor[p] || inMark[p]) remove[p] = 1;
+    // Always clear red / blue / stroke-like pencil, plus AI mark boxes.
+    if (pencilStroke[p] || inMark[p]) remove[p] = 1;
+    // Other saturated ink (green highlighter etc.) outside maps.
+    else if (isColor[p] && chroma[p] >= 40) remove[p] = 1;
   }
   const removeGrown = dilateDarkMask(remove, w, h);
   for (let p = 0; p < n; p++) {
     if (!removeGrown[p] || keepColor[p]) continue;
     // Growing must not eat solid print outside mark boxes.
     if (!inMark[p] && protectRow[(p / w) | 0] && printCore[p]) continue;
-    if (!inMark[p] && dark[p] && !isColor[p]) continue;
+    if (!inMark[p] && dark[p] && !pencilStroke[p] && !isColor[p]) continue;
     remove[p] = 1;
   }
 
