@@ -368,69 +368,13 @@ function dilateDarkMask(
   return out;
 }
 
-/** Red ballpoint / marker / solid red sticker (hue-aware). */
-function isRedPenPixel(r: number, g: number, b: number, lum: number, chroma: number): boolean {
-  // Photographed red pen is often muted pink/maroon (low chroma, r/g≈1.05).
-  if (lum >= 236 || lum <= 18) return false;
-  const warm =
-    r >= g + 6 &&
-    r >= b + 6 &&
-    chroma >= 10 &&
-    r / (g + 1) >= 1.05 &&
-    r / (b + 1) >= 1.05;
-  // Stronger classic red (stickers, fresh ink)
-  const vivid =
-    r >= g + 12 &&
-    r >= b + 12 &&
-    chroma >= 18 &&
-    r / (g + 1) >= 1.12 &&
-    r / (b + 1) >= 1.12;
-  return warm || vivid;
-}
-
-/** Blue / cyan ballpoint. */
-function isBluePenPixel(r: number, g: number, b: number, lum: number, chroma: number): boolean {
-  if (lum >= 232 || lum <= 35) return false;
-  return (
-    b >= r + 10 &&
-    b >= g + 6 &&
-    chroma >= 16 &&
-    b / (r + 1) >= 1.08
-  );
-}
-
-/** Soft graphite pencil: mid-gray, low chroma (not near-black print). */
-function isPencilPixel(lum: number, chroma: number): boolean {
-  return chroma < 26 && lum >= 108 && lum <= 198;
-}
-
-function isColoredPenRgb(r: number, g: number, b: number, lum: number, chroma: number): boolean {
-  return (
-    isRedPenPixel(r, g, b, lum, chroma) || isBluePenPixel(r, g, b, lum, chroma)
-  );
-}
-
 /**
- * Maps / charts keep multi-hue color; red/blue pens and solid「圖」stickers must not.
- */
-function isProtectedMapColorPixel(
-  r: number,
-  g: number,
-  b: number,
-  lum: number,
-  chroma: number
-): boolean {
-  if (chroma <= 46 || lum >= 230) return false;
-  if (isColoredPenRgb(r, g, b, lum, chroma)) return false;
-  return true;
-}
-
-/**
- * Composite AI 去手寫 with original geometry guards.
+ * Composite AI 去手寫 onto the original photo geometry.
  *
- * Base = AI edit so redrawn print and cleared handwriting stay visible.
- * Then: reject invented dark ink, paper-fill colored pens/stickers, restore
- * protected map colors, and restore solid print cores the model over-erased.
+ * The model image is used only as a *detector* of what was cleared — replacement
+ * pixels always come from local paper color on the original. That avoids importing
+ * the model's ghosted / low-res redraw (which made the page look blurry), and
+ * avoids bleaching mid-gray paper or circuit lines as "pencil" / "thin strokes".
  */
 export function compositeCleanExamPixels(
   originalRgba: Uint8ClampedArray | Uint8Array,
@@ -441,8 +385,7 @@ export function compositeCleanExamPixels(
   const n = w * h;
   const od = originalRgba;
   const ed = editedRgba;
-  // Prefer the model image so 重繪印刷字 is not discarded.
-  const out = new Uint8ClampedArray(ed);
+  const out = new Uint8ClampedArray(od);
 
   const lum = new Uint16Array(n);
   const chroma = new Uint8Array(n);
@@ -466,7 +409,7 @@ export function compositeCleanExamPixels(
     }
   }
 
-  // Solid printed glyph cores — restore from original if the model washed them.
+  // Solid printed glyph cores (opening). Used only to protect print the model erased.
   const printCore = dilateDarkMask(erodeDarkMask(dark, w, h), w, h);
 
   const rowMin = Math.max(8, Math.round(w * 0.01));
@@ -521,31 +464,12 @@ export function compositeCleanExamPixels(
     }
   }
 
-  const fillPaper = (i: number, p: number) => {
-    const px = p % w;
-    const py = (p / w) | 0;
-    const bi =
-      Math.min(blocksY - 1, (py / block) | 0) * blocksX +
-      Math.min(blocksX - 1, (px / block) | 0);
-    const samples = paperN[bi];
-    if (samples > 8) {
-      out[i] = Math.round(paperR[bi] / samples);
-      out[i + 1] = Math.round(paperG[bi] / samples);
-      out[i + 2] = Math.round(paperB[bi] / samples);
-    } else {
-      out[i] = 255;
-      out[i + 1] = 255;
-      out[i + 2] = 255;
-    }
-  };
-
+  const isColor = new Uint8Array(n);
   const keepColor = new Uint8Array(n);
   const queue: number[] = [];
-  for (let p = 0, i = 0; p < n; p++, i += 4) {
-    const r = od[i];
-    const g = od[i + 1];
-    const b = od[i + 2];
-    if (!isProtectedMapColorPixel(r, g, b, lum[p], chroma[p])) continue;
+  for (let p = 0; p < n; p++) {
+    if (chroma[p] <= 46 || lum[p] >= 230) continue;
+    isColor[p] = 1;
     const px = p % w;
     const py = (p / w) | 0;
     const bi =
@@ -567,81 +491,85 @@ export function compositeCleanExamPixels(
         const nx = px + dx;
         if (nx < 0 || nx >= w) continue;
         const np = ny * w + nx;
-        if (keepColor[np]) continue;
-        const ni = np * 4;
-        if (
-          !isProtectedMapColorPixel(
-            od[ni],
-            od[ni + 1],
-            od[ni + 2],
-            lum[np],
-            chroma[np]
-          )
-        ) {
-          continue;
-        }
+        if (!isColor[np] || keepColor[np]) continue;
         keepColor[np] = 1;
         queue.push(np);
       }
     }
   }
 
-  // Dilate original dark so redrawn print strokes near originals are allowed.
-  const nearOrigDark = dilateDarkMask(
-    dilateDarkMask(dilateDarkMask(dark, w, h), w, h),
-    w,
-    h
-  );
-
+  // Mark mask: colored pens + places the model lightened (handwriting / circles).
+  // Do NOT treat mid-gray paper or all thin dark lines as marks — that washes
+  // shadows into blotches and erases circuit diagram strokes.
+  const remove = new Uint8Array(n);
+  let darkTotal = 0;
+  let darkClearedByAi = 0;
   for (let p = 0, i = 0; p < n; p++, i += 4) {
-    // Protected map / chart colors always come from the photo.
-    if (keepColor[p]) {
-      out[i] = od[i];
-      out[i + 1] = od[i + 1];
-      out[i + 2] = od[i + 2];
+    if (dark[p]) darkTotal++;
+    if (keepColor[p]) continue;
+
+    if (isColor[p]) {
+      remove[p] = 1;
       continue;
     }
 
-    // Force-clear red/blue pens and solid「圖」stickers.
-    if (isColoredPenRgb(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])) {
-      fillPaper(i, p);
-      continue;
-    }
+    const eLum = lumaAt(ed, i);
+    const lifted = eLum > lum[p] + 32;
+    if (!lifted) continue;
 
-    const eR = ed[i];
-    const eG = ed[i + 1];
-    const eB = ed[i + 2];
-    const eLum = 0.299 * eR + 0.587 * eG + 0.114 * eB;
-    const eChroma = Math.max(eR, eG, eB) - Math.min(eR, eG, eB);
-    const eDark = eLum < 125 && eChroma < 34;
+    // Protect solid printed glyphs the model accidentally erased.
+    if (protectRow[(p / w) | 0] && printCore[p]) continue;
 
-    // Reject invented ink: model drew dark where the photo was blank paper.
-    if (eDark && !nearOrigDark[p] && lum[p] > 190 && chroma[p] < 40) {
-      fillPaper(i, p);
-      continue;
+    // Dark ink the model cleared (black pen circles, ticks, handwriting).
+    // Mid-gray paper / shadows are intentionally ignored — bleaching them
+    // imported AI ghosts and made the page look blotchy.
+    if (dark[p]) {
+      remove[p] = 1;
+      darkClearedByAi++;
     }
-    // Also reject invented mid-gray strokes on blank paper.
-    if (
-      !nearOrigDark[p] &&
-      lum[p] > 200 &&
-      chroma[p] < 36 &&
-      eLum < 180 &&
-      eChroma < 40 &&
-      eLum < lum[p] - 40
-    ) {
-      fillPaper(i, p);
-      continue;
-    }
+  }
 
-    // Restore solid print cores the model over-erased (washout safety).
-    if (
-      printCore[p] &&
-      (protectRow[(p / w) | 0] || dark[p]) &&
-      eLum > lum[p] + 36
-    ) {
-      out[i] = od[i];
-      out[i + 1] = od[i + 1];
-      out[i + 2] = od[i + 2];
+  // If the model washed most dark ink, trust only colored-pen removal — otherwise
+  // circuit lines and print get paper-filled and the page looks destroyed.
+  const aiWashout =
+    darkTotal > 200 && darkClearedByAi / darkTotal > 0.28;
+  if (aiWashout) {
+    remove.fill(0);
+    for (let p = 0; p < n; p++) {
+      if (isColor[p] && !keepColor[p]) remove[p] = 1;
+    }
+  } else {
+    // Grow the clear mask slightly so circle edges the model half-erased get filled.
+    const removeGrown = dilateDarkMask(dilateDarkMask(remove, w, h), w, h);
+    for (let p = 0; p < n; p++) {
+      if (!removeGrown[p]) continue;
+      if (keepColor[p]) continue;
+      if (protectRow[(p / w) | 0] && printCore[p]) continue;
+      // Never punch holes in dark ink the model still kept (circuit lines, print).
+      const i = p * 4;
+      if (dark[p] && lumaAt(ed, i) <= lum[p] + 18) continue;
+      remove[p] = 1;
+    }
+  }
+
+  for (let py = 0; py < h; py++) {
+    const by = Math.min(blocksY - 1, (py / block) | 0);
+    for (let px = 0; px < w; px++) {
+      const p = py * w + px;
+      if (!remove[p]) continue;
+      const i = p * 4;
+      const bx = Math.min(blocksX - 1, (px / block) | 0);
+      const bi = by * blocksX + bx;
+      const samples = paperN[bi];
+      if (samples > 8) {
+        out[i] = Math.round(paperR[bi] / samples);
+        out[i + 1] = Math.round(paperG[bi] / samples);
+        out[i + 2] = Math.round(paperB[bi] / samples);
+      } else {
+        out[i] = 255;
+        out[i + 1] = 255;
+        out[i + 2] = 255;
+      }
     }
   }
 
@@ -649,8 +577,8 @@ export function compositeCleanExamPixels(
 }
 
 /**
- * After AI 去手寫, keep redrawn print from the model while rejecting invented
- * ink and clearing colored pens; restore maps / over-erased print cores.
+ * After AI 去手寫, lock printed question / map pixels to the original photo
+ * and only keep the model's (or paper) fill where student marks were cleared.
  */
 export async function preservePrintedQuestionText(
   originalSrc: string,
@@ -690,6 +618,13 @@ export async function preservePrintedQuestionText(
   editData.data.set(composited);
   editCtx.putImageData(editData, 0, 0);
   return editCanvas.toDataURL("image/jpeg", 0.92);
+}
+
+function isColoredPenRgb(r: number, g: number, b: number, lum: number, chroma: number): boolean {
+  if (lum >= 235 || chroma < 16) return false;
+  const red = r >= g + 12 && r >= b + 12 && r / (g + 1) >= 1.1;
+  const blue = b >= r + 10 && b >= g + 6 && b / (r + 1) >= 1.08;
+  return red || blue;
 }
 
 /**
@@ -770,13 +705,9 @@ export function restoreWashedFiguresPixels(
   const isColor = new Uint8Array(n);
   const keepColor = new Uint8Array(n);
   const qColor: number[] = [];
-  for (let p = 0, i = 0; p < n; p++, i += 4) {
-    if (chroma[p] > 46 && lum[p] < 230) isColor[p] = 1;
-    if (
-      !isProtectedMapColorPixel(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])
-    ) {
-      continue;
-    }
+  for (let p = 0; p < n; p++) {
+    if (chroma[p] <= 46 || lum[p] >= 230) continue;
+    isColor[p] = 1;
     const px = p % w;
     const py = (p / w) | 0;
     const bi =
@@ -798,19 +729,7 @@ export function restoreWashedFiguresPixels(
         const nx = px + dx;
         if (nx < 0 || nx >= w) continue;
         const np = ny * w + nx;
-        if (keepColor[np]) continue;
-        const ni = np * 4;
-        if (
-          !isProtectedMapColorPixel(
-            od[ni],
-            od[ni + 1],
-            od[ni + 2],
-            lum[np],
-            chroma[np]
-          )
-        ) {
-          continue;
-        }
+        if (!isColor[np] || keepColor[np]) continue;
         keepColor[np] = 1;
         qColor.push(np);
       }
@@ -989,11 +908,38 @@ function normalizeMarkRegions(
   return out;
 }
 
+/** Red ballpoint / marker (hue-aware; catches faded red better than chroma-only). */
+function isRedPenPixel(r: number, g: number, b: number, lum: number, chroma: number): boolean {
+  if (lum >= 232 || lum <= 35) return false;
+  return (
+    r >= g + 12 &&
+    r >= b + 12 &&
+    chroma >= 18 &&
+    r / (g + 1) >= 1.12 &&
+    r / (b + 1) >= 1.12
+  );
+}
+
+/** Blue / cyan ballpoint. */
+function isBluePenPixel(r: number, g: number, b: number, lum: number, chroma: number): boolean {
+  if (lum >= 232 || lum <= 35) return false;
+  return (
+    b >= r + 10 &&
+    b >= g + 6 &&
+    chroma >= 16 &&
+    b / (r + 1) >= 1.08
+  );
+}
+
+/** Soft graphite pencil: mid-gray, low chroma (not near-black print). */
+function isPencilPixel(lum: number, chroma: number): boolean {
+  return chroma < 26 && lum >= 108 && lum <= 198;
+}
+
 /**
  * Pure pixel helper: bleach red/blue pens and pencil (not large map color blocks)
  * and clear ink inside detected handwriting boxes, filling with local paper.
  * Never redraws the whole page — print/circuit geometry stays sharp.
- * Solid red「圖」stickers are treated as pen marks, not protected map color.
  */
 export function applyHandwritingBlankPixels(
   rgba: Uint8ClampedArray | Uint8Array,
@@ -1076,17 +1022,12 @@ export function applyHandwritingBlankPixels(
   }
 
   // Large chromatic regions = maps / diagrams — keep (do not bleach as pen).
-  // Red/blue pens and solid「圖」stickers are never protected as map color.
   const isColor = new Uint8Array(n);
   const keepColor = new Uint8Array(n);
   const queue: number[] = [];
-  for (let p = 0, i = 0; p < n; p++, i += 4) {
-    if (chroma[p] > 46 && lum[p] < 230) isColor[p] = 1;
-    if (
-      !isProtectedMapColorPixel(od[i], od[i + 1], od[i + 2], lum[p], chroma[p])
-    ) {
-      continue;
-    }
+  for (let p = 0; p < n; p++) {
+    if (chroma[p] <= 46 || lum[p] >= 230) continue;
+    isColor[p] = 1;
     const px = p % w;
     const py = (p / w) | 0;
     const bi =
@@ -1108,19 +1049,7 @@ export function applyHandwritingBlankPixels(
         const nx = px + dx;
         if (nx < 0 || nx >= w) continue;
         const np = ny * w + nx;
-        if (keepColor[np]) continue;
-        const ni = np * 4;
-        if (
-          !isProtectedMapColorPixel(
-            od[ni],
-            od[ni + 1],
-            od[ni + 2],
-            lum[np],
-            chroma[np]
-          )
-        ) {
-          continue;
-        }
+        if (!isColor[np] || keepColor[np]) continue;
         keepColor[np] = 1;
         queue.push(np);
       }
@@ -1252,127 +1181,6 @@ export async function blankHandwritingMarks(
   ctx.drawImage(img, 0, 0, w, h);
   const data = ctx.getImageData(0, 0, w, h);
   data.data.set(applyHandwritingBlankPixels(data.data, w, h, regions));
-  ctx.putImageData(data, 0, 0);
-  return canvas.toDataURL("image/jpeg", quality);
-}
-
-/**
- * Residual cleanup after AI挖空: remove red/blue pens and solid red stickers.
- * Does NOT clear pencil/mid-gray print.
- *
- * Red ballpoint O/X often has a near-black core. Dilate the colored-pen mask,
- * then also wipe dark pixels that fall inside that neighborhood — so black
- * remnants of red corrections go away without flooding into printed stems.
- */
-export function bleachColoredPensOnlyPixels(
-  rgba: Uint8ClampedArray | Uint8Array,
-  w: number,
-  h: number
-): Uint8ClampedArray {
-  const n = w * h;
-  const od = rgba;
-  const out = new Uint8ClampedArray(od);
-  const lum = new Uint16Array(n);
-  const chroma = new Uint8Array(n);
-  const pen = new Uint8Array(n);
-
-  for (let p = 0, i = 0; p < n; p++, i += 4) {
-    const r = od[i];
-    const g = od[i + 1];
-    const b = od[i + 2];
-    const v = 0.299 * r + 0.587 * g + 0.114 * b;
-    const c = Math.max(r, g, b) - Math.min(r, g, b);
-    lum[p] = v;
-    chroma[p] = c;
-    if (isColoredPenRgb(r, g, b, v, c)) pen[p] = 1;
-  }
-
-  // Neighborhood around colored pen (~stroke width); dark cores inside are wiped.
-  let nearPen = pen;
-  for (let k = 0; k < 3; k++) nearPen = dilateDarkMask(nearPen, w, h);
-
-  const remove = new Uint8Array(n);
-  for (let p = 0; p < n; p++) {
-    if (pen[p]) {
-      remove[p] = 1;
-      continue;
-    }
-    if (!nearPen[p]) continue;
-    // Dark / maroon remnant of the same stroke
-    if (lum[p] <= 170 && chroma[p] < 60) remove[p] = 1;
-  }
-
-  // One more soft edge; refuse to eat very dark low-chroma print outside pen
-  const removeGrown = dilateDarkMask(remove, w, h);
-  for (let p = 0; p < n; p++) {
-    if (!removeGrown[p] || remove[p]) continue;
-    if (lum[p] < 95 && chroma[p] < 28 && !nearPen[p]) continue;
-    if (lum[p] < 95 && chroma[p] < 28 && !pen[p]) continue;
-    remove[p] = 1;
-  }
-
-  const block = 48;
-  const blocksX = Math.ceil(w / block);
-  const blocksY = Math.ceil(h / block);
-  const paperR = new Float64Array(blocksX * blocksY);
-  const paperG = new Float64Array(blocksX * blocksY);
-  const paperB = new Float64Array(blocksX * blocksY);
-  const paperN = new Uint32Array(blocksX * blocksY);
-  for (let py = 0; py < h; py++) {
-    const by = Math.min(blocksY - 1, (py / block) | 0);
-    for (let px = 0; px < w; px++) {
-      const p = py * w + px;
-      if (lum[p] > 205 && chroma[p] < 28) {
-        const i = p * 4;
-        const bi = by * blocksX + Math.min(blocksX - 1, (px / block) | 0);
-        paperR[bi] += od[i];
-        paperG[bi] += od[i + 1];
-        paperB[bi] += od[i + 2];
-        paperN[bi]++;
-      }
-    }
-  }
-
-  for (let py = 0; py < h; py++) {
-    const by = Math.min(blocksY - 1, (py / block) | 0);
-    for (let px = 0; px < w; px++) {
-      const p = py * w + px;
-      if (!remove[p]) continue;
-      const i = p * 4;
-      const bi = by * blocksX + Math.min(blocksX - 1, (px / block) | 0);
-      const samples = paperN[bi];
-      if (samples > 8) {
-        out[i] = Math.round(paperR[bi] / samples);
-        out[i + 1] = Math.round(paperG[bi] / samples);
-        out[i + 2] = Math.round(paperB[bi] / samples);
-      } else {
-        out[i] = 255;
-        out[i + 1] = 255;
-        out[i + 2] = 255;
-      }
-    }
-  }
-  return out;
-}
-
-/** Async wrapper: residual red/blue pen + sticker bleach (keeps print). */
-export async function bleachColoredPensOnly(
-  imageSrc: string,
-  quality = 0.92
-): Promise<string> {
-  const img = await loadImageElement(imageSrc);
-  const w = img.naturalWidth || img.width;
-  const h = img.naturalHeight || img.height;
-  if (w < 8 || h < 8) return normalizeImageSrc(imageSrc);
-
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return normalizeImageSrc(imageSrc);
-  ctx.drawImage(img, 0, 0, w, h);
-  const data = ctx.getImageData(0, 0, w, h);
-  data.data.set(bleachColoredPensOnlyPixels(data.data, w, h));
   ctx.putImageData(data, 0, 0);
   return canvas.toDataURL("image/jpeg", quality);
 }

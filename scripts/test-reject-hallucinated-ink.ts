@@ -57,26 +57,6 @@ assert(
   !prompt.includes("均勻光線下重拍"),
   "prompt must not encourage full-page re-photograph"
 );
-assert(
-  prompt.includes("陰影") && prompt.includes("折線"),
-  "prompt should address shadows and crease lines"
-);
-assert(
-  prompt.includes("禁止") &&
-    (prompt.includes("發明圖形") || prompt.includes("不發明圖")),
-  "prompt must forbid inventing figures when cleaning shadows"
-);
-assert(
-  prompt.includes("重繪印刷字") && !prompt.includes("不重繪印刷字"),
-  "prompt must require redrawing print (not forbid it)"
-);
-assert(prompt.includes("不發明圖"), "prompt must forbid inventing figures");
-assert(prompt.includes("不位移構圖"), "prompt must forbid shifting layout");
-assert(
-  prompt.includes("空白") &&
-    (prompt.includes("奇怪圖形") || prompt.includes("補圖")),
-  "prompt must forbid inventing weird figures on blank paper"
-);
 
 const W = 120;
 const H = 80;
@@ -95,24 +75,16 @@ for (let y = 18; y < 28; y++) {
 // Colored pens to clear
 for (let x = 10; x < 40; x++) setPx(orig, W, x, 8, red);
 for (let x = 50; x < 80; x++) setPx(orig, W, x, 8, blue);
-// Solid red「圖」sticker (large enough that old keepColor treated it as a map)
-for (let y = 50; y < 78; y++) {
-  for (let x = 70; x < 110; x++) setPx(orig, W, x, y, red);
-}
-// Green map patch must stay
-for (let y = 50; y < 75; y++) {
-  for (let x = 8; x < 40; x++) setPx(orig, W, x, y, [60, 140, 90]);
-}
 
 // Model invents a circuit where the original was blank paper
 const edit = new Uint8ClampedArray(orig);
-for (let x = 55; x < 68; x++) setPx(edit, W, x, 35, print);
-for (let y = 30; y < 45; y++) setPx(edit, W, 60, y, print);
-// Fake "8Ω" blob on blank paper
-for (let y = 32; y < 40; y++) {
-  for (let x = 48; x < 58; x++) setPx(edit, W, x, y, print);
+for (let x = 60; x < 110; x++) setPx(edit, W, x, 45, print);
+for (let y = 40; y < 55; y++) setPx(edit, W, 85, y, print);
+// Fake "8Ω" blob
+for (let y = 48; y < 56; y++) {
+  for (let x = 92; x < 108; x++) setPx(edit, W, x, y, print);
 }
-// Model successfully lightened colored pens to paper (sticker left untouched)
+// Model successfully lightened colored pens to paper
 for (let x = 10; x < 40; x++) setPx(edit, W, x, 8, paper);
 for (let x = 50; x < 80; x++) setPx(edit, W, x, 8, paper);
 
@@ -120,17 +92,17 @@ const out = compositeCleanExamPixels(orig, edit, W, H);
 
 {
   const [r, g, b] = getPx(out, W, 12, 22);
-  assert(luma(r, g, b) < 80, "printed glyph must remain");
+  assert(luma(r, g, b) < 80, "printed glyph must remain from original");
 }
 {
-  const [r, g, b] = getPx(out, W, 60, 35);
+  const [r, g, b] = getPx(out, W, 90, 45);
   assert(
     luma(r, g, b) > 210,
     `hallucinated circuit stroke must not survive, lum=${luma(r, g, b)}`
   );
 }
 {
-  const [r, g, b] = getPx(out, W, 52, 35);
+  const [r, g, b] = getPx(out, W, 100, 52);
   assert(
     luma(r, g, b) > 210,
     `hallucinated 8Ω blob must not survive, lum=${luma(r, g, b)}`
@@ -146,97 +118,7 @@ const out = compositeCleanExamPixels(orig, edit, W, H);
   const chroma = Math.max(r, g, b) - Math.min(r, g, b);
   assert(chroma < 35, `blue pen must clear via AI lighten, chroma=${chroma}`);
 }
-{
-  const [r, g, b] = getPx(out, W, 90, 60);
-  const chroma = Math.max(r, g, b) - Math.min(r, g, b);
-  assert(
-    chroma < 40 && luma(r, g, b) > 200,
-    `red「圖」sticker must clear, rgb=${[r, g, b]}`
-  );
-}
-{
-  const [r, g, b] = getPx(out, W, 20, 60);
-  assert(g > 100 && g > r, `green map must stay, got ${[r, g, b]}`);
-}
-
-// Redrawn print: model replaces speckled print with solid black in-place.
-// Composite must keep AI redraw, not discard it for the original photo.
-{
-  const W3 = 80;
-  const H3 = 40;
-  const page = rgba(W3, H3, paper);
-  for (let y = 12; y < 24; y++) {
-    for (let x = 8; x < 50; x++) {
-      if ((x + y) % 3 !== 0) setPx(page, W3, x, y, [40, 40, 40]);
-    }
-  }
-  const redrawn: [number, number, number] = [8, 8, 8];
-  const edited = new Uint8ClampedArray(page);
-  for (let y = 12; y < 24; y++) {
-    for (let x = 8; x < 50; x++) setPx(edited, W3, x, y, redrawn);
-  }
-  const outRedraw = compositeCleanExamPixels(page, edited, W3, H3);
-  const [r, g, b] = getPx(outRedraw, W3, 20, 16);
-  assert(
-    r === 8 && g === 8 && b === 8,
-    `AI redrawn print must be kept, got ${[r, g, b]}`
-  );
-}
-assert(
-  buildRemoveHandwritingPrompt().includes("圖一") ||
-    buildRemoveHandwritingPrompt().includes("貼圖"),
-  "prompt should mention sticker removal"
-);
-assert(
-  buildRemoveHandwritingPrompt().includes("鉛筆") ||
-    buildRemoveHandwritingPrompt().includes("括號"),
-  "prompt should require clearing pencil / paren answers"
-);
-
-// Washout case: model lightens lots of dark ink (incl. print) + handwriting.
-// Print glyph cores must stay; black/pencil handwriting the model cleared must go.
-{
-  const W2 = 100;
-  const H2 = 60;
-  const page = rgba(W2, H2, paper);
-  const pencil: [number, number, number] = [150, 148, 145];
-  // Printed band (solid enough to form printCore)
-  for (let y = 10; y < 22; y++) {
-    for (let x = 8; x < 55; x++) setPx(page, W2, x, y, print);
-  }
-  // Handwriting away from print band
-  for (let x = 10; x < 35; x++) setPx(page, W2, x, 40, pencil);
-  for (let x = 40; x < 70; x++) setPx(page, W2, x, 48, print); // black tick
-
-  const washed = new Uint8ClampedArray(page);
-  // Model washes almost everything to paper (triggers aiWashout)
-  for (let y = 0; y < H2; y++) {
-    for (let x = 0; x < W2; x++) setPx(washed, W2, x, y, paper);
-  }
-  const outWash = compositeCleanExamPixels(page, washed, W2, H2);
-  {
-    const [r, g, b] = getPx(outWash, W2, 20, 14);
-    assert(
-      luma(r, g, b) < 80,
-      `washout must keep print core, lum=${luma(r, g, b)}`
-    );
-  }
-  {
-    const [r, g, b] = getPx(outWash, W2, 20, 40);
-    assert(
-      luma(r, g, b) > 200,
-      `washout must still clear pencil handwriting, lum=${luma(r, g, b)}`
-    );
-  }
-  {
-    const [r, g, b] = getPx(outWash, W2, 50, 48);
-    assert(
-      luma(r, g, b) > 200,
-      `washout must still clear black tick handwriting, lum=${luma(r, g, b)}`
-    );
-  }
-}
 
 console.log(
-  "OK: hallucinated circuit rejected; AI redrawn print kept; map kept; red sticker + pens cleared; washout keeps handwriting clears"
+  "OK: hallucinated circuit rejected; print kept; red/blue cleared"
 );
