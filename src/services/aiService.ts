@@ -1,15 +1,17 @@
 import {
   buildAnalyzePrompt,
-  buildDetectHandwritingRegionsPrompt,
+  buildRemoveHandwritingPrompt,
   buildRewriteExplanationPrompt,
   buildSimilarPrompt,
   createGeminiClient,
+  extractInlineImageDataUrl,
   formatErrorMessage,
   generateContentWithRetry,
+  generateImageContentWithRetry,
   getAnalyzeResponseSchema,
-  getDetectHandwritingRegionsSchema,
   getRewriteExplanationResponseSchema,
   getSimilarResponseSchema,
+  IMAGE_EDIT_MODELS,
   parseJsonResponse,
   resolveModel,
   type RewriteExplanationParams,
@@ -19,10 +21,6 @@ import {
   CurriculumLabel,
   formatExistingLabelsForPrompt,
 } from "../utils/curriculumLabels";
-import {
-  blankHandwritingMarks,
-  type HandwritingMarkRegion,
-} from "../utils/imageUtils";
 
 export interface AIAnalysisResult {
   科目: string;
@@ -458,33 +456,11 @@ async function rewriteExplanationFromAnswerOnClient(
   }
 }
 
-function parseHandwritingRegions(payload: any): HandwritingMarkRegion[] {
-  const list = payload?.regions;
-  if (!Array.isArray(list)) return [];
-  return list
-    .map((r: any) => ({
-      x: Number(r?.x),
-      y: Number(r?.y),
-      width: Number(r?.width),
-      height: Number(r?.height),
-      kind: typeof r?.kind === "string" ? r.kind : undefined,
-    }))
-    .filter(
-      (r: HandwritingMarkRegion) =>
-        Number.isFinite(r.x) &&
-        Number.isFinite(r.y) &&
-        Number.isFinite(r.width) &&
-        Number.isFinite(r.height)
-    );
-}
-
 /**
- * Detect answer-mark boxes with a text/vision model (no full-image redraw).
- * GitHub Pages uses this client path; avoids image-edit ghosting.
+ * AI inpainting: remove handwriting via Gemini image-edit (original approach).
+ * Returns the model image as-is — no local paper-fill / compositing.
  */
-async function detectHandwritingRegionsOnClient(
-  imageBase64: string
-): Promise<HandwritingMarkRegion[]> {
+async function removeHandwritingOnClient(imageBase64: string): Promise<string> {
   const customApiKey = getStoredApiKey();
   if (!customApiKey) {
     throwNeedKey();
@@ -496,10 +472,10 @@ async function detectHandwritingRegionsOnClient(
 
   try {
     const ai = createGeminiClient(customApiKey);
-    const { response } = await generateContentWithRetry(ai, getStoredModel(), {
+    const { response } = await generateImageContentWithRetry(ai, IMAGE_EDIT_MODELS[0], {
       contents: {
         parts: [
-          { text: buildDetectHandwritingRegionsPrompt() },
+          { text: buildRemoveHandwritingPrompt() },
           {
             inlineData: {
               mimeType,
@@ -509,21 +485,22 @@ async function detectHandwritingRegionsOnClient(
         ],
       },
       config: {
-        responseMimeType: "application/json",
-        responseSchema: getDetectHandwritingRegionsSchema(),
+        responseModalities: ["TEXT", "IMAGE"],
       },
     });
 
-    return parseHandwritingRegions(parseJsonResponse(response.text || "{}"));
+    const out = extractInlineImageDataUrl(response);
+    if (!out) {
+      throw new Error("AI 未回傳去手寫後的圖片，請再試一次。");
+    }
+    return out;
   } catch (error: any) {
     if (error?.needKey) throw error;
     throwFormatted(error);
   }
 }
 
-async function detectHandwritingRegions(
-  imageBase64: string
-): Promise<HandwritingMarkRegion[]> {
+export async function removeHandwritingWithAI(imageBase64: string): Promise<string> {
   const customApiKey = getStoredApiKey();
 
   try {
@@ -535,12 +512,11 @@ async function detectHandwritingRegions(
       body: JSON.stringify({
         imageBase64,
         customApiKey,
-        model: getStoredModel(),
       }),
     });
 
     if (isBackendUnavailable(response)) {
-      return detectHandwritingRegionsOnClient(imageBase64);
+      return removeHandwritingOnClient(imageBase64);
     }
 
     if (!response.ok) {
@@ -549,14 +525,10 @@ async function detectHandwritingRegions(
     }
 
     const result = await response.json();
-    if (!result.success) {
+    if (!result.success || !result.imageBase64) {
       throw new Error("AI 去手寫回傳格式異常，請再試一次。");
     }
-    if (Array.isArray(result.regions)) {
-      return parseHandwritingRegions(result);
-    }
-    // Legacy server that still returns an edited image — ignore and detect on client.
-    return detectHandwritingRegionsOnClient(imageBase64);
+    return result.imageBase64 as string;
   } catch (error: any) {
     if (error?.needKey || error?.isKeyProblem || error?.isTransient) {
       throw error;
@@ -564,16 +536,8 @@ async function detectHandwritingRegions(
     if (error instanceof Error && error.message.includes("AI 去手寫")) {
       throw error;
     }
-    return detectHandwritingRegionsOnClient(imageBase64);
+    return removeHandwritingOnClient(imageBase64);
   }
-}
-
-/**
- * AI 挖空: detect mark boxes, then locally paper-fill (no full-page image edit).
- */
-export async function removeHandwritingWithAI(imageBase64: string): Promise<string> {
-  const regions = await detectHandwritingRegions(imageBase64);
-  return blankHandwritingMarks(imageBase64, regions);
 }
 
 export async function rewriteExplanationFromAnswer(
