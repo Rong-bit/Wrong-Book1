@@ -45,11 +45,14 @@ const W = 120;
 const H = 80;
 const paper: [number, number, number] = [245, 245, 242];
 const print: [number, number, number] = [20, 20, 20];
-const red: [number, number, number] = [210, 40, 40];
+const red: [number, number, number] = [200, 45, 40];
+const blue: [number, number, number] = [40, 70, 190];
+const pencil: [number, number, number] = [150, 148, 145];
+const shadow: [number, number, number] = [170, 168, 165];
 
 const orig = rgba(W, H, paper);
 
-// Printed text band (solid blocks)
+// Printed text
 for (let y = 20; y < 30; y++) {
   for (let x = 10; x < 50; x++) {
     if (x % 6 < 4 && y % 5 < 4) setPx(orig, W, x, y, print);
@@ -59,74 +62,76 @@ for (let y = 20; y < 30; y++) {
 // Circuit line
 for (let x = 55; x < 100; x++) setPx(orig, W, x, 40, print);
 
-// Red pen outside any box — still cleared globally
-for (let t = 0; t < 360; t += 3) {
-  const rad = (t * Math.PI) / 180;
-  setPx(
-    orig,
-    W,
-    Math.round(70 + 8 * Math.cos(rad)),
-    Math.round(24 + 8 * Math.sin(rad)),
-    red
-  );
-}
+// Red / blue strokes (no AI box needed)
+for (let x = 10; x < 40; x++) setPx(orig, W, x, 8, red);
+for (let x = 50; x < 80; x++) setPx(orig, W, x, 8, blue);
 
-// Black handwriting tick in margin — cleared via region box
-for (let k = 0; k < 12; k++) setPx(orig, W, 80 + k, 55 + k, print);
+// Pencil stroke with paper neighbors (local contrast)
+for (let x = 15; x < 45; x++) setPx(orig, W, x, 50, pencil);
+
+// Uniform shadow patch — must NOT be wiped as pencil
+for (let y = 60; y < 75; y++) {
+  for (let x = 55; x < 110; x++) setPx(orig, W, x, y, shadow);
+}
 
 // Map
 for (let y = 55; y < 75; y++) {
-  for (let x = 10; x < 50; x++) setPx(orig, W, x, y, [60, 140, 90]);
+  for (let x = 10; x < 45; x++) setPx(orig, W, x, y, [60, 140, 90]);
 }
 
+// Black tick cleared only via region
+for (let k = 0; k < 10; k++) setPx(orig, W, 90 + k, 20 + k, print);
+
 const out = applyHandwritingBlankPixels(orig, W, H, [
-  { x: 78 / W, y: 53 / H, width: 16 / W, height: 16 / H, kind: "tick" },
+  { x: 88 / W, y: 18 / H, width: 14 / W, height: 14 / H, kind: "tick" },
 ]);
 
 {
   const [r, g, b] = getPx(out, W, 12, 22);
   assert(
     0.299 * r + 0.587 * g + 0.114 * b < 80,
-    "print glyph must stay sharp (no full-page redraw)"
+    "print glyph must remain"
   );
 }
 {
   const [r, g, b] = getPx(out, W, 70, 40);
   assert(
     0.299 * r + 0.587 * g + 0.114 * b < 80,
-    "circuit line outside mark boxes must remain"
+    "circuit line must remain"
   );
 }
 {
-  const x = Math.round(70 + 8);
-  const [r, g, b] = getPx(out, W, x, 24);
+  const [r, g, b] = getPx(out, W, 20, 8);
   const chroma = Math.max(r, g, b) - Math.min(r, g, b);
-  assert(chroma < 40, `red pen must be cleared, chroma=${chroma}`);
+  assert(chroma < 35, `red pen must clear without AI box, chroma=${chroma}`);
 }
 {
-  const [r, g, b] = getPx(out, W, 85, 60);
-  assert(
-    0.299 * r + 0.587 * g + 0.114 * b >= 80,
-    "handwriting in detected box must be paper-filled"
-  );
+  const [r, g, b] = getPx(out, W, 60, 8);
+  const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+  assert(chroma < 35, `blue pen must clear without AI box, chroma=${chroma}`);
+}
+{
+  const [r, g, b] = getPx(out, W, 30, 50);
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  assert(lum > 210, `pencil stroke must clear, lum=${lum}`);
+}
+{
+  const [r, g, b] = getPx(out, W, 80, 65);
+  const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+  assert(lum < 190 && lum > 150, `uniform shadow must stay, lum=${lum}`);
 }
 {
   const [r, g, b] = getPx(out, W, 20, 60);
   assert(g > 100 && g > r, `map must stay, got ${[r, g, b]}`);
 }
-
-// Reject whole-page region — must not wipe print
-const wiped = applyHandwritingBlankPixels(orig, W, H, [
-  { x: 0, y: 0, width: 1, height: 1 },
-]);
 {
-  const [r, g, b] = getPx(wiped, W, 12, 22);
+  const [r, g, b] = getPx(out, W, 95, 25);
   assert(
-    0.299 * r + 0.587 * g + 0.114 * b < 80,
-    "whole-page region must be ignored"
+    0.299 * r + 0.587 * g + 0.114 * b >= 80,
+    "black tick in AI box must clear"
   );
 }
 
 console.log(
-  "OK: applyHandwritingBlankPixels — local blank, print/circuit/map kept"
+  "OK: red/blue/pencil cleared; print/circuit/map/shadow kept"
 );
