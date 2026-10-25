@@ -35,31 +35,50 @@ export function isTransientError(error: any): boolean {
   const msg = (error?.message || "").toLowerCase();
   const status = String(error?.status || "");
   const code = String(error?.code || "");
+  const httpStatus = String(error?.httpStatusCode || error?.statusCode || "");
   return (
     status === "UNAVAILABLE" ||
+    status === "RESOURCE_EXHAUSTED" ||
     code === "503" ||
+    code === "429" ||
+    httpStatus === "503" ||
+    httpStatus === "429" ||
     msg.includes("503") ||
+    msg.includes("429") ||
     msg.includes("high demand") ||
     msg.includes("temporarily unavailable") ||
     msg.includes("spikes in demand") ||
     msg.includes("overloaded") ||
     msg.includes("resource_exhausted") ||
     msg.includes("rate limit") ||
-    code === "429"
+    msg.includes("quota exceeded") ||
+    msg.includes("try again later") ||
+    msg.includes("service unavailable")
   );
 }
 
+/** Prefer current model, then flash-lite (peak-resistant), then remaining models. */
+export function buildModelRotation(preferred?: string): string[] {
+  const primary = resolveModel(preferred);
+  const rest = VALID_MODELS.filter((m) => m !== primary);
+  rest.sort((a, b) => {
+    if (a === "gemini-3.1-flash-lite") return -1;
+    if (b === "gemini-3.1-flash-lite") return 1;
+    return 0;
+  });
+  return [primary, ...rest];
+}
+
 export function getFallbackModel(currentModel: string): string {
-  if (currentModel === "gemini-3.8-flash") {
-    return "gemini-3.1-flash-lite";
-  }
-  if (currentModel === "gemini-3.1-flash-lite") {
-    return "gemini-3.8-flash";
-  }
-  if (currentModel === "gemini-3.1-pro-preview") {
-    return "gemini-3.1-flash-lite";
-  }
-  return "gemini-3.1-flash-lite";
+  const rotation = buildModelRotation(currentModel);
+  return rotation[1] || "gemini-3.1-flash-lite";
+}
+
+/** Exponential backoff with jitter for Gemini 503 / high-demand spikes. */
+export function peakBackoffMs(attemptIndex: number): number {
+  const base = Math.min(800 * Math.pow(2, Math.max(0, attemptIndex - 1)), 8000);
+  const jitter = Math.floor(Math.random() * 400);
+  return base + jitter;
 }
 
 export function getImageEditFallbackModel(currentModel: string): string {
@@ -92,10 +111,14 @@ export async function generateContentWithRetry(
     config?: any;
   }
 ): Promise<GenerateResult> {
-  let modelToUse = initialModel;
+  const rotation = buildModelRotation(initialModel);
+  let rotationIndex = 0;
+  let modelToUse = rotation[0];
   let attempts = 0;
-  const maxAttempts = 3;
+  /** Enough to retry preferred model once, then walk remaining models. */
+  const maxAttempts = Math.max(5, rotation.length + 2);
   let fallbackUsed = false;
+  let sameModelRetries = 0;
 
   while (attempts < maxAttempts) {
     attempts++;
@@ -110,19 +133,37 @@ export async function generateContentWithRetry(
       const isTransient = isTransientError(error);
 
       if (isTransient && attempts < maxAttempts) {
-        const fallback = getFallbackModel(modelToUse);
-        if (fallback !== modelToUse) {
+        const waitMs = peakBackoffMs(attempts);
+        // First transient hit: retry same model once with backoff.
+        // Later hits: rotate to next peak-resistant fallback.
+        if (sameModelRetries < 1) {
+          sameModelRetries += 1;
           console.log(
-            `[Gemini API] Switching from ${modelToUse} to fallback model ${fallback} due to demand spike`
+            `[Gemini API] Transient 503/peak on ${modelToUse}, retry #${sameModelRetries} after ${waitMs}ms`
           );
-          modelToUse = fallback;
-          fallbackUsed = true;
-          await sleep(500);
-          continue;
-        } else {
-          await sleep(1000);
+          await sleep(waitMs);
           continue;
         }
+
+        const nextIndex = Math.min(rotationIndex + 1, rotation.length - 1);
+        const fallback = rotation[nextIndex];
+        if (fallback !== modelToUse) {
+          console.log(
+            `[Gemini API] Switching from ${modelToUse} to fallback ${fallback} due to demand spike (wait ${waitMs}ms)`
+          );
+          modelToUse = fallback;
+          rotationIndex = nextIndex;
+          fallbackUsed = true;
+          sameModelRetries = 0;
+          await sleep(waitMs);
+          continue;
+        }
+
+        console.log(
+          `[Gemini API] Peak load persists on ${modelToUse}, waiting ${waitMs}ms before retry`
+        );
+        await sleep(waitMs);
+        continue;
       }
 
       console.warn(
@@ -154,9 +195,10 @@ export async function generateImageContentWithRetry(
     ? initialModel
     : IMAGE_EDIT_MODELS[0];
   let attempts = 0;
-  const maxAttempts = 4;
+  const maxAttempts = Math.max(6, IMAGE_EDIT_MODELS.length + 2);
   let fallbackUsed = false;
   const tried = new Set<string>();
+  let sameModelRetries = 0;
 
   while (attempts < maxAttempts) {
     attempts++;
@@ -178,6 +220,16 @@ export async function generateImageContentWithRetry(
       const isTransient = isTransientError(error);
 
       if ((isTransient || notFound) && attempts < maxAttempts) {
+        if (isTransient && sameModelRetries < 1 && !notFound) {
+          sameModelRetries += 1;
+          const waitMs = peakBackoffMs(attempts);
+          console.log(
+            `[Gemini Image] Transient 503/peak on ${modelToUse}, retry after ${waitMs}ms`
+          );
+          await sleep(waitMs);
+          continue;
+        }
+
         let next = getImageEditFallbackModel(modelToUse);
         // Prefer an untried model
         for (let i = 0; i < IMAGE_EDIT_MODELS.length; i++) {
@@ -186,16 +238,18 @@ export async function generateImageContentWithRetry(
             break;
           }
         }
+        const waitMs = notFound ? 200 : peakBackoffMs(attempts);
         if (next !== modelToUse) {
           console.log(
-            `[Gemini Image] Switching from ${modelToUse} to ${next}`
+            `[Gemini Image] Switching from ${modelToUse} to ${next} (wait ${waitMs}ms)`
           );
           modelToUse = next;
           fallbackUsed = true;
-          await sleep(notFound ? 200 : 600);
+          sameModelRetries = 0;
+          await sleep(waitMs);
           continue;
         }
-        await sleep(800);
+        await sleep(waitMs);
         continue;
       }
 
@@ -276,7 +330,7 @@ export function formatErrorMessage(error: any): {
   let friendlyMessage = errMsg;
   if (isTransient) {
     friendlyMessage =
-      "Google AI 雲端模型目前正處於瞬間全球流量尖峰 (503 / High Demand)，系統已嘗試自動重試。請稍候 5~10 秒後再次點擊即可！";
+      "Google AI 雲端模型目前正處於全球流量尖峰 (503 / High Demand)。系統已自動重試並切換備援模型仍繁忙，請稍候約 5~15 秒後再點「重新辨識」；尖峰時可改選 Gemini 3.1 Flash Lite。";
   } else if (isKeyProblem) {
     friendlyMessage =
       "Gemini API 金鑰無效或尚未開通 (403/API_KEY_INVALID)，請檢查右上角「自備金鑰 BYOK」設定。";

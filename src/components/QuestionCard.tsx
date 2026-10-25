@@ -670,6 +670,14 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
               <div className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
                 {question.errorMessage || "伺服器暫時忙碌或未取得完整回傳，請點擊下方重新辨識。"}
               </div>
+              {(question.errorMessage?.includes("503") ||
+                question.errorMessage?.includes("尖峰") ||
+                question.errorMessage?.includes("高負載")) && (
+                <div className="text-[11px] text-amber-700/90 mt-1.5 leading-relaxed">
+                  建議：稍候數秒再按「重新辨識」；尖峰時段可到右上角 BYOK 改選
+                  Gemini 3.1 Flash Lite。
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-2 pt-1 border-t border-amber-200/60 flex-wrap">
@@ -678,7 +686,7 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
                 type="button"
                 onClick={() => onRetryAnalysis(question.id)}
                 className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold text-xs flex items-center gap-1.5 shadow-2xs transition cursor-pointer"
-                title="再次呼叫 AI 辨識（自動帶入重試與備援模型）"
+                title="再次呼叫 AI 辨識（自動重試與備援模型）"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
                 重新辨識 (Retry)
@@ -695,13 +703,18 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             {onOpenByokModal &&
               (question.errorMessage?.includes("金鑰") ||
                 question.errorMessage?.includes("Key") ||
-                question.errorMessage?.includes("403")) && (
+                question.errorMessage?.includes("403") ||
+                question.errorMessage?.includes("503") ||
+                question.errorMessage?.includes("尖峰")) && (
                 <button
                   type="button"
                   onClick={onOpenByokModal}
                   className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-300 rounded-lg text-xs font-medium flex items-center gap-1 transition cursor-pointer"
                 >
-                  檢查 API Key
+                  {question.errorMessage?.includes("503") ||
+                  question.errorMessage?.includes("尖峰")
+                    ? "改選穩定模型"
+                    : "檢查 API Key"}
                 </button>
               )}
           </div>
