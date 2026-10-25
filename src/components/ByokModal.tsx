@@ -405,57 +405,32 @@ export const ByokModal: React.FC<ByokModalProps> = ({
                 </div>
 
                 {/* Test Feedback banner */}
-                {testResult && (() => {
-                  const isPeak =
-                    !testResult.valid &&
-                    (testResult.message?.includes("503") ||
-                      testResult.message?.includes("尖峰") ||
-                      testResult.message?.includes("高負載") ||
-                      testResult.error?.includes("503") ||
-                      testResult.error?.includes("尖峰"));
-                  return (
+                {testResult && (
                   <div
                     className={`mt-2.5 p-2.5 rounded-xl border text-xs flex items-start gap-2 ${
                       testResult.valid
                         ? "bg-emerald-50 border-emerald-300 text-emerald-800"
-                        : isPeak
-                        ? "bg-amber-50 border-amber-300 text-amber-900"
                         : "bg-rose-50 border-rose-300 text-rose-800"
                     }`}
                   >
                     {testResult.valid ? (
                       <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                     ) : (
-                      <AlertTriangle
-                        className={`w-4 h-4 shrink-0 mt-0.5 ${
-                          isPeak ? "text-amber-600" : "text-rose-600"
-                        }`}
-                      />
+                      <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
                     )}
                     <div className="flex-1">
                       <div className="font-bold">
-                        {testResult.valid
-                          ? "連線測試成功！"
-                          : isPeak
-                          ? "雲端模型尖峰負載 (503) — 金鑰多半仍有效"
-                          : "連線測試未通過"}
+                        {testResult.valid ? "連線測試成功！" : "連線測試未通過"}
                       </div>
                       <div className="text-[11px] mt-0.5 opacity-90">{testResult.message}</div>
-                      {isPeak && (
-                        <div className="text-[11px] mt-1 text-amber-800/90">
-                          建議改選「Gemini 3.1 Flash Lite」後再測一次，或稍候數秒重試。
-                        </div>
-                      )}
-                      {testResult.latencyMs != null && testResult.latencyMs > 0 && (
+                      {testResult.latencyMs && (
                         <div className="text-[10px] text-slate-500 mt-0.5">
-                          響應延遲：{testResult.latencyMs} ms
-                          {testResult.model ? ` · 模型：${testResult.model}` : ""}
+                          響應延遲：{testResult.latencyMs} ms · 模型：{testResult.model}
                         </div>
                       )}
                     </div>
                   </div>
-                  );
-                })()}
+                )}
               </div>
             </>
           )}

@@ -13,7 +13,6 @@ import {
   getSimilarResponseSchema,
   IMAGE_EDIT_MODELS,
   parseJsonResponse,
-  peakBackoffMs,
   resolveModel,
   type RewriteExplanationParams,
 } from "./geminiCore";
@@ -46,24 +45,22 @@ export const AVAILABLE_MODELS = [
   {
     id: "gemini-3.1-flash-lite",
     name: "Gemini 3.1 Flash Lite (穩定首選)",
-    badge: "尖峰時段首選",
-    description: "輕量高吞吐多模態模型；503 全球尖峰時較不易塞車，建議作為預設",
+    badge: "極致響應與尖峰抗塞",
+    description: "輕量高吞吐多模態模型，連線極速穩定，不受雲端尖峰負載影響",
   },
   {
     id: "gemini-3.8-flash",
     name: "Gemini 3.8 Flash",
     badge: "速度與多模態平衡",
-    description: "適合絕大多數中學與高中各學科考題；尖峰時系統會自動備援至 Flash Lite",
+    description: "適合絕大多數中學與高中各學科考題，速度極快，考點歸納精準",
   },
   {
     id: "gemini-3.1-pro-preview",
     name: "Gemini 3.1 Pro Preview",
     badge: "深層推導與高等數理",
-    description: "適合難度較高之奧數、競賽題；尖峰 503 較常見，失敗時會自動切換備援模型",
+    description: "適合難度較高之奧數、競賽題、多重步驟物理幾何推導",
   },
 ];
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export function getStoredApiKey(): string {
   if (typeof window === "undefined") return "";
@@ -217,17 +214,12 @@ function parseServerError(errData: any, fallback: string, status: number) {
   const isTransient =
     Boolean(errData.isTransient) ||
     status === 503 ||
-    status === 429 ||
     message.includes("503") ||
-    message.includes("429") ||
     message.includes("high demand") ||
-    message.includes("Spikes in demand") ||
-    message.includes("尖峰");
+    message.includes("Spikes in demand");
 
-  if (isTransient && (!errData.error || !String(errData.error).includes("尖峰"))) {
-    message =
-      errData.error ||
-      "Google AI 雲端服務目前處於尖峰高負載 (503)，系統將自動再試；若仍失敗請稍候 5~15 秒後手動重試，或改選 Flash Lite。";
+  if (isTransient && !errData.error) {
+    message = "Google AI 雲端服務目前處於尖峰高負載 (503)，請稍候 5~10 秒後再次嘗試。";
   }
 
   const error: any = new Error(message);
@@ -235,29 +227,6 @@ function parseServerError(errData: any, fallback: string, status: number) {
   error.needKey = errData.needKey;
   error.isTransient = isTransient;
   return error;
-}
-
-/**
- * After server-side retries still return 503, wait briefly and try once more
- * via direct client (BYOK) — peaks often clear within a few seconds.
- * Only runs when the user has a stored API key (client can call Gemini).
- */
-async function recoverFromPeakOrThrow<T>(
-  error: any,
-  clientFallback: () => Promise<T>
-): Promise<T> {
-  if (error?.needKey || error?.isKeyProblem) {
-    throw error;
-  }
-  if (error?.isTransient && getStoredApiKey()) {
-    const waitMs = peakBackoffMs(3);
-    console.log(
-      `[AI Service] Server reported peak 503; waiting ${waitMs}ms then BYOK client retry`
-    );
-    await sleep(waitMs);
-    return clientFallback();
-  }
-  throw error;
 }
 
 async function analyzeQuestionImageOnClient(
@@ -351,15 +320,11 @@ export async function analyzeQuestionImage(
 
     return alignResult(result.data as AIAnalysisResult);
   } catch (error: any) {
-    if (error instanceof Error && error.message.includes("AI 分析回傳格式異常")) {
+    if (error?.needKey || error?.isKeyProblem || error?.isTransient) {
       throw error;
     }
-    if (error?.needKey || error?.isKeyProblem || error?.isTransient) {
-      return alignResult(
-        await recoverFromPeakOrThrow(error, () =>
-          analyzeQuestionImageOnClient(imageBase64, subjectHint, existingLabelsText)
-        )
-      );
+    if (error instanceof Error && error.message.includes("AI 分析回傳格式異常")) {
+      throw error;
     }
     return alignResult(await analyzeQuestionImageOnClient(imageBase64, subjectHint, existingLabelsText));
   }
@@ -447,11 +412,11 @@ export async function generateSimilarQuestion(
 
     return result.data as AISimilarQuestionResult;
   } catch (error: any) {
-    if (error instanceof Error && error.message.includes("AI 生成格式異常")) {
+    if (error?.needKey || error?.isKeyProblem || error?.isTransient) {
       throw error;
     }
-    if (error?.needKey || error?.isKeyProblem || error?.isTransient) {
-      return recoverFromPeakOrThrow(error, () => generateSimilarQuestionOnClient(params));
+    if (error instanceof Error && error.message.includes("AI 生成格式異常")) {
+      throw error;
     }
     return generateSimilarQuestionOnClient(params);
   }
@@ -565,11 +530,11 @@ export async function removeHandwritingWithAI(imageBase64: string): Promise<stri
     }
     return result.imageBase64 as string;
   } catch (error: any) {
-    if (error instanceof Error && error.message.includes("AI 去手寫")) {
+    if (error?.needKey || error?.isKeyProblem || error?.isTransient) {
       throw error;
     }
-    if (error?.needKey || error?.isKeyProblem || error?.isTransient) {
-      return recoverFromPeakOrThrow(error, () => removeHandwritingOnClient(imageBase64));
+    if (error instanceof Error && error.message.includes("AI 去手寫")) {
+      throw error;
     }
     return removeHandwritingOnClient(imageBase64);
   }
@@ -610,11 +575,11 @@ export async function rewriteExplanationFromAnswer(
 
     return result.data as AIRewriteExplanationResult;
   } catch (error: any) {
-    if (error instanceof Error && error.message.includes("AI 重寫詳解格式異常")) {
+    if (error?.needKey || error?.isKeyProblem || error?.isTransient) {
       throw error;
     }
-    if (error?.needKey || error?.isKeyProblem || error?.isTransient) {
-      return recoverFromPeakOrThrow(error, () => rewriteExplanationFromAnswerOnClient(params));
+    if (error instanceof Error && error.message.includes("AI 重寫詳解格式異常")) {
+      throw error;
     }
     return rewriteExplanationFromAnswerOnClient(params);
   }
