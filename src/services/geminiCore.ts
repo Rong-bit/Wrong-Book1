@@ -129,11 +129,29 @@ export async function generateContentWithRetry(
         `[Gemini API] Attempt ${attempts}/${maxAttempts} failed on model ${modelToUse}:`,
         error?.message || error
       );
-      throw error;
+      throw annotateModelUsed(error, modelToUse);
     }
   }
 
-  throw new Error("無法取得 AI 回應，請稍候重試。");
+  throw annotateModelUsed(
+    new Error("無法取得 AI 回應，請稍候重試。"),
+    modelToUse
+  );
+}
+
+/** Keep the model that actually failed so verify-key can show it. */
+export function annotateModelUsed(error: any, modelUsed: string): any {
+  if (error && typeof error === "object") {
+    error.modelUsed = modelUsed;
+  }
+  return error;
+}
+
+/** Model id to display after a failed key test. */
+export function failedVerificationModel(error: any, requestedModel?: string): string {
+  const used = error?.modelUsed;
+  if (typeof used === "string" && used.trim()) return used.trim();
+  return resolveModel(requestedModel);
 }
 
 /**

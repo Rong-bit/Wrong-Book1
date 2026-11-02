@@ -5,6 +5,7 @@ import {
   buildSimilarPrompt,
   createGeminiClient,
   extractInlineImageDataUrl,
+  failedVerificationModel,
   formatErrorMessage,
   generateContentWithRetry,
   generateImageContentWithRetry,
@@ -166,6 +167,7 @@ async function verifyApiKeyOnClient(
       valid: false,
       message,
       latencyMs: Date.now() - startTime,
+      model: failedVerificationModel(error, model),
       error: message,
     };
   }
@@ -202,6 +204,7 @@ export async function verifyApiKey(
       valid: false,
       message: data.error || "金鑰驗證未通過",
       latencyMs: data.latencyMs,
+      model: data.model || failedVerificationModel(undefined, model),
       error: data.error,
     };
   } catch (err: any) {

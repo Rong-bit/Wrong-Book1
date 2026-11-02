@@ -9,6 +9,7 @@ import {
   buildSimilarPrompt,
   createGeminiClient,
   extractInlineImageDataUrl,
+  failedVerificationModel,
   formatErrorMessage,
   generateContentWithRetry,
   generateImageContentWithRetry,
@@ -79,6 +80,7 @@ app.post("/api/verify-key", async (req, res) => {
     return res.status(400).json({
       valid: false,
       latencyMs,
+      model: failedVerificationModel(error, req.body?.model),
       error: friendlyMessage,
       rawError: error?.message,
     });

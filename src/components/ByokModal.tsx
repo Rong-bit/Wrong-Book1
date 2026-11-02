@@ -425,7 +425,7 @@ export const ByokModal: React.FC<ByokModalProps> = ({
                       <div className="text-[11px] mt-0.5 opacity-90">{testResult.message}</div>
                       {testResult.latencyMs && (
                         <div className="text-[10px] text-slate-500 mt-0.5">
-                          響應延遲：{testResult.latencyMs} ms · 模型：{testResult.model}
+                          響應延遲：{testResult.latencyMs} ms · 模型：{testResult.model || selectedModel}
                         </div>
                       )}
                     </div>
