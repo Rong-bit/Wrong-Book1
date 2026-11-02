@@ -75,9 +75,9 @@ app.post("/api/verify-key", async (req, res) => {
     });
   } catch (error: any) {
     const latencyMs = Date.now() - startTime;
-    const { message: friendlyMessage } = formatErrorMessage(error);
+    const { message: friendlyMessage, isBillingProblem } = formatErrorMessage(error);
 
-    return res.status(400).json({
+    return res.status(isBillingProblem ? 402 : 400).json({
       valid: false,
       latencyMs,
       model: failedVerificationModel(error, req.body?.model),
@@ -148,11 +148,13 @@ app.post("/api/analyze-question", async (req, res) => {
     });
   } catch (error: any) {
     console.error("AI Analysis error:", error);
-    const { message: friendlyMessage, isKeyProblem, isTransient } = formatErrorMessage(error);
-    return res.status(isTransient ? 503 : 500).json({
+    const { message: friendlyMessage, isKeyProblem, isTransient, isBillingProblem } =
+      formatErrorMessage(error);
+    return res.status(isBillingProblem ? 402 : isTransient ? 503 : 500).json({
       error: friendlyMessage,
       isKeyProblem,
       isTransient,
+      isBillingProblem,
       rawError: error?.message,
     });
   }
@@ -227,11 +229,13 @@ app.post("/api/generate-similar-questions", async (req, res) => {
     });
   } catch (error: any) {
     console.error("Generate similar question error:", error);
-    const { message: friendlyMessage, isKeyProblem, isTransient } = formatErrorMessage(error);
-    return res.status(isTransient ? 503 : 500).json({
+    const { message: friendlyMessage, isKeyProblem, isTransient, isBillingProblem } =
+      formatErrorMessage(error);
+    return res.status(isBillingProblem ? 402 : isTransient ? 503 : 500).json({
       error: friendlyMessage,
       isKeyProblem,
       isTransient,
+      isBillingProblem,
       rawError: error?.message,
     });
   }
@@ -307,11 +311,13 @@ app.post("/api/rewrite-explanation", async (req, res) => {
     });
   } catch (error: any) {
     console.error("Rewrite explanation error:", error);
-    const { message: friendlyMessage, isKeyProblem, isTransient } = formatErrorMessage(error);
-    return res.status(isTransient ? 503 : 500).json({
+    const { message: friendlyMessage, isKeyProblem, isTransient, isBillingProblem } =
+      formatErrorMessage(error);
+    return res.status(isBillingProblem ? 402 : isTransient ? 503 : 500).json({
       error: friendlyMessage,
       isKeyProblem,
       isTransient,
+      isBillingProblem,
       rawError: error?.message,
     });
   }
@@ -383,11 +389,13 @@ app.post("/api/remove-handwriting", async (req, res) => {
     });
   } catch (error: any) {
     console.error("AI remove handwriting error:", error);
-    const { message: friendlyMessage, isKeyProblem, isTransient } = formatErrorMessage(error);
-    return res.status(isTransient ? 503 : 500).json({
+    const { message: friendlyMessage, isKeyProblem, isTransient, isBillingProblem } =
+      formatErrorMessage(error);
+    return res.status(isBillingProblem ? 402 : isTransient ? 503 : 500).json({
       error: friendlyMessage,
       isKeyProblem,
       isTransient,
+      isBillingProblem,
       rawError: error?.message,
     });
   }

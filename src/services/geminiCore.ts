@@ -31,12 +31,30 @@ export function createGeminiClient(apiKey: string): GoogleGenAI {
   });
 }
 
+/** 402 means the key's prepay balance is empty. Retrying cannot succeed. */
+export function isBillingError(error: any): boolean {
+  const msg = (error?.message || "").toLowerCase();
+  const status = String(error?.status ?? "");
+  const code = String(error?.code ?? "");
+  return (
+    status === "402" ||
+    code === "402" ||
+    /["']code["']\s*:\s*402/.test(msg) ||
+    msg.includes("payment required") ||
+    msg.includes("prepay") ||
+    msg.includes("credits are depleted") ||
+    msg.includes("credit balance is depleted")
+  );
+}
+
 export function isTransientError(error: any): boolean {
+  if (isBillingError(error)) return false;
   const msg = (error?.message || "").toLowerCase();
   const status = String(error?.status || "");
   const code = String(error?.code || "");
   return (
     status === "UNAVAILABLE" ||
+    status === "503" ||
     code === "503" ||
     msg.includes("503") ||
     msg.includes("high demand") ||
@@ -45,6 +63,7 @@ export function isTransientError(error: any): boolean {
     msg.includes("overloaded") ||
     msg.includes("resource_exhausted") ||
     msg.includes("rate limit") ||
+    status === "429" ||
     code === "429"
   );
 }
@@ -282,17 +301,23 @@ export function formatErrorMessage(error: any): {
   message: string;
   isKeyProblem: boolean;
   isTransient: boolean;
+  isBillingProblem: boolean;
 } {
   const errMsg = error?.message || "AI 服務暫時無法回應";
+  const isBillingProblem = isBillingError(error);
   const isKeyProblem =
-    errMsg.includes("API_KEY_INVALID") ||
-    errMsg.includes("invalid API key") ||
-    errMsg.includes("403") ||
-    errMsg.includes("PERMISSION_DENIED");
+    !isBillingProblem &&
+    (errMsg.includes("API_KEY_INVALID") ||
+      errMsg.includes("invalid API key") ||
+      errMsg.includes("403") ||
+      errMsg.includes("PERMISSION_DENIED"));
   const isTransient = isTransientError(error);
 
   let friendlyMessage = errMsg;
-  if (isTransient) {
+  if (isBillingProblem) {
+    friendlyMessage =
+      "此 API 金鑰所屬專案的預付點數已用完 (402)。請到 Google AI Studio 的專案與帳單頁面加值後再試。再次點擊不會成功。";
+  } else if (isTransient) {
     friendlyMessage =
       "Google AI 雲端模型目前正處於瞬間全球流量尖峰 (503 / High Demand)，系統已嘗試自動重試。請稍候 5~10 秒後再次點擊即可！";
   } else if (isKeyProblem) {
@@ -300,7 +325,7 @@ export function formatErrorMessage(error: any): {
       "Gemini API 金鑰無效或尚未開通 (403/API_KEY_INVALID)，請檢查右上角「自備金鑰 BYOK」設定。";
   }
 
-  return { message: friendlyMessage, isKeyProblem, isTransient };
+  return { message: friendlyMessage, isKeyProblem, isTransient, isBillingProblem };
 }
 
 export function parseJsonResponse(responseText: string): any {

@@ -661,11 +661,14 @@ export const QuestionCard: React.FC<QuestionCardProps> = ({
             <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
             <div>
               <div className="font-bold text-amber-950">
-                {question.errorMessage?.includes("503") ||
-                question.errorMessage?.includes("尖峰") ||
-                question.errorMessage?.includes("高負載")
-                  ? "Google AI 雲端模型目前正處於全球尖峰負載 (503)"
-                  : "考題辨識未完全成功"}
+                {question.errorMessage?.includes("402") ||
+                question.errorMessage?.includes("預付點數")
+                  ? "API 金鑰的預付點數已用完 (402)"
+                  : question.errorMessage?.includes("503") ||
+                      question.errorMessage?.includes("尖峰") ||
+                      question.errorMessage?.includes("高負載")
+                    ? "Google AI 雲端模型目前正處於全球尖峰負載 (503)"
+                    : "考題辨識未完全成功"}
               </div>
               <div className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
                 {question.errorMessage || "伺服器暫時忙碌或未取得完整回傳，請點擊下方重新辨識。"}
