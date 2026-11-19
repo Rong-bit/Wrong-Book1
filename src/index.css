@@ -149,9 +149,12 @@
     zoom: normal !important;
   }
 
-  html.printing-exam #exam-print-root #printable-paper-container {
+  html.printing-exam #exam-print-root #printable-paper-container,
+  html.printing-exam #exam-print-root .print-preview-scale,
+  html.printing-exam #exam-print-root .print-preview-fit {
     width: 100% !important;
     max-width: none !important;
+    height: auto !important;
     transform: none !important;
     zoom: normal !important;
   }

@@ -165,10 +165,20 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   const [exportError, setExportError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [exportSubject, setExportSubject] = useState(initialSubjectFilter);
-  /** Scale factor so full A4/B5 fits the phone preview width (not cloned into print). */
+  /**
+   * Phone preview: transform-scale the full A4/B5 sheet to fit the modal width.
+   * Do NOT use CSS `zoom` — Safari iOS reflows mm/flex at the zoomed width and
+   * crushes the Cornell header into vertical one-character columns.
+   * Scale wrapper is outside previewRef so print clone stays full size.
+   */
   const [previewScale, setPreviewScale] = useState(1);
+  const [previewLayout, setPreviewLayout] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
   const previewRef = useRef<HTMLDivElement>(null);
   const previewCanvasRef = useRef<HTMLDivElement>(null);
+  const previewScaleRef = useRef<HTMLDivElement>(null);
 
   const isCornellCompact = settings.questionsPerPage === "compact";
   /** 背科精簡固定 4 題；圖形縮進每格剩餘高度。每頁 1／2 題也固定題數。 */
@@ -243,28 +253,37 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     return pages;
   }, [exportQuestions, cornellPageSize]);
 
-  // Fit the on-screen preview to the phone width. Applied on a wrapper outside
-  // previewRef so cloneNode(print) never inherits zoom/transform.
+  // Fit the on-screen preview to the phone width via transform:scale + a
+  // reserved layout box (transform alone would leave a huge empty scroll area).
   useEffect(() => {
     if (!isOpen || !showPreview) {
       setPreviewScale(1);
+      setPreviewLayout({ width: 0, height: 0 });
       return;
     }
     const canvas = previewCanvasRef.current;
-    if (!canvas) return;
+    const inner = previewRef.current;
+    const scaleEl = previewScaleRef.current;
+    if (!canvas || !inner || !scaleEl) return;
 
     const update = () => {
       const paperMm = settings.paperSize === "B5" ? 182 : 210;
       const paperPx = paperMm * (96 / 25.4);
       const available = Math.max(0, canvas.clientWidth - 8);
       const next = available > 0 ? Math.min(1, available / paperPx) : 1;
-      setPreviewScale(Number.isFinite(next) && next > 0 ? next : 1);
+      const scale = Number.isFinite(next) && next > 0 ? next : 1;
+      // Measure unscaled layout size (offset* ignores ancestor transforms).
+      const rawW = Math.max(inner.scrollWidth, paperPx);
+      const rawH = Math.max(inner.scrollHeight, 1);
+      setPreviewScale(scale);
+      setPreviewLayout({ width: rawW * scale, height: rawH * scale });
     };
     update();
     const ro = new ResizeObserver(update);
     ro.observe(canvas);
+    ro.observe(inner);
     return () => ro.disconnect();
-  }, [isOpen, showPreview, settings.paperSize]);
+  }, [isOpen, showPreview, settings.paperSize, cornellPages.length]);
 
   if (!isOpen) return null;
 
@@ -296,9 +315,12 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     pageStyle.id = "exam-print-page-size";
     pageStyle.textContent = `
       @page { size: ${isB5 ? "182mm 257mm" : "A4 portrait"}; margin: 0; }
-      #exam-print-root #printable-paper-container {
+      #exam-print-root #printable-paper-container,
+      #exam-print-root .print-preview-scale,
+      #exam-print-root .print-preview-fit {
         width: 100% !important;
         max-width: none !important;
+        height: auto !important;
         transform: none !important;
         zoom: normal !important;
       }
@@ -789,18 +811,43 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
         ) : (
           <div
             ref={previewCanvasRef}
-            className="print-preview-canvas flex-1 min-h-0 bg-slate-300/80 p-4 md:p-8 overflow-y-auto overflow-x-auto flex flex-col items-center"
+            className="print-preview-canvas flex-1 min-h-0 bg-slate-300/80 p-4 md:p-8 overflow-y-auto overflow-x-hidden flex flex-col items-center"
           >
-            {/* zoom lives here — outside previewRef — so print clone stays full A4/B5 */}
+            {/* Transform scale (not zoom) lives outside previewRef so print stays full A4/B5. */}
             <div
-              className="print-preview-fit flex flex-col items-center"
+              className="print-preview-fit"
               style={
-                previewScale < 0.999
-                  ? ({ zoom: previewScale } as React.CSSProperties)
+                previewScale < 0.999 && previewLayout.width > 0
+                  ? {
+                      width: previewLayout.width,
+                      height: previewLayout.height,
+                      overflow: "hidden",
+                      flexShrink: 0,
+                    }
                   : undefined
               }
             >
-            <div ref={previewRef} id="printable-paper-container" className="w-full flex flex-col items-center">
+              <div
+                ref={previewScaleRef}
+                className="print-preview-scale"
+                style={
+                  previewScale < 0.999
+                    ? {
+                        transform: `scale(${previewScale})`,
+                        transformOrigin: "top left",
+                        width: settings.paperSize === "B5" ? "182mm" : "210mm",
+                      }
+                    : undefined
+                }
+              >
+            <div
+              ref={previewRef}
+              id="printable-paper-container"
+              className="flex flex-col items-center"
+              style={{
+                width: settings.paperSize === "B5" ? "182mm" : "210mm",
+              }}
+            >
               {/* CORNELL MODE RENDERING */}
               {settings.mode === "cornell" ? (
                 <>
@@ -1273,6 +1320,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 </div>
               )}
             </div>
+              </div>
             </div>
           </div>
         )}
