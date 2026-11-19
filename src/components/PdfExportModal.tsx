@@ -84,12 +84,18 @@ function ExportFigure({
     );
   }
   return (
-    <div className={`print-figure flex w-full justify-end items-start ${fit ? "h-full min-h-0" : ""}`}>
+    <div
+      className={`print-figure flex w-full ${
+        fit ? "h-full min-h-0 items-center justify-center" : "justify-end items-start"
+      }`}
+    >
       <img
         src={normalizeImageSrc(src)}
         alt="題目附圖（地圖／圖示）"
-        className={`print-figure-img block w-auto max-w-full object-contain object-right-top border border-slate-300 bg-white rounded-sm ${
-          fit ? "h-auto max-h-full min-h-0" : "h-auto"
+        className={`print-figure-img block w-auto max-w-full object-contain border border-slate-300 bg-white rounded-sm ${
+          fit
+            ? "h-auto max-h-full min-h-0 object-center"
+            : "h-auto object-right-top"
         }`}
         style={fit ? undefined : { maxHeight }}
       />
@@ -132,7 +138,7 @@ function CornellReview({
   return (
     <div
       className={`${
-        sharePage ? "row-start-3 min-h-[22mm] h-full" : "flex-1 min-h-[28mm]"
+        sharePage ? "shrink-0 min-h-[22mm]" : "flex-1 min-h-[28mm]"
       } p-2 flex flex-col justify-between relative ${showGrid ? "math-grid-bg" : "bg-white"}`}
     >
       <div className="text-[10px] text-slate-400 font-sans tracking-wider pointer-events-none select-none">
@@ -597,7 +603,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                     </p>
                   ) : (
                     <p className="mt-1.5 text-[10px] text-amber-800/90 leading-snug">
-                      固定每頁 2 題，每一題占半頁。圖形依該題範圍縮放（寬圖偏扁、高圖偏窄），緊接在題幹下，剩下的高度留給演算複習。
+                      固定每頁 2 題，每一題占半頁。題幹在上、圖形縮進中間剩餘高度、複習區固定貼底，避免高圖／寬圖把版面擠歪。
                     </p>
                   )}
                 </div>
@@ -900,13 +906,11 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
                             {/* RIGHT MAIN AREA: Question text + Math grid notebook workspace */}
                             <div
-                              className={`flex-1 min-w-0 bg-white ${
-                                isTwoUp
-                                  ? "min-h-0 grid grid-rows-[auto_minmax(0,max-content)_minmax(22mm,1fr)]"
-                                  : `flex flex-col ${scaleFigure ? "min-h-0" : "min-h-min"}`
+                              className={`flex-1 min-w-0 bg-white flex flex-col ${
+                                scaleFigure ? "min-h-0" : "min-h-min"
                               }`}
                             >
-                              {/* Top Question Body — natural height (no max-h clip); page fit shrinks density instead */}
+                              {/* Top Question Body — natural height; 2-up keeps review pinned under a flex figure slot */}
                               <div
                                 data-cornell-question
                                 className={`border-b border-slate-200 shrink-0 ${
@@ -942,20 +946,28 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
                               {(() => {
                                 const figureSrc = getTextOnlyFigureSrc(q);
+                                // 每頁 2 題：即使沒有圖也留 flex 空槽，讓兩題的複習區都貼在卡片底部對齊
+                                if (isTwoUp) {
+                                  return (
+                                    <div className="flex-1 min-h-0 min-w-0 overflow-hidden border-b border-slate-200 bg-white px-1.5 py-1 flex items-center justify-center">
+                                      {figureSrc ? (
+                                        <ExportFigure src={figureSrc} fit />
+                                      ) : null}
+                                    </div>
+                                  );
+                                }
                                 if (!figureSrc) return null;
                                 return (
                                   <div
                                     className={`border-b border-slate-200 bg-white ${
-                                      isTwoUp
-                                        ? "min-h-0 min-w-0 overflow-hidden px-1.5 py-1 flex justify-end items-start"
-                                        : scaleFigure
-                                          ? "flex-1 min-h-0 overflow-hidden px-1.5 py-1"
-                                          : "shrink-0 px-2 py-1.5"
+                                      scaleFigure
+                                        ? "flex-1 min-h-0 overflow-hidden px-1.5 py-1"
+                                        : "shrink-0 px-2 py-1.5"
                                     }`}
                                   >
                                     <ExportFigure
                                       src={figureSrc}
-                                      fit={isTwoUp ? "range" : scaleFigure}
+                                      fit={scaleFigure}
                                       maxHeight={FIGURE_MAX_HEIGHT.cornell}
                                     />
                                   </div>
