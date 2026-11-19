@@ -4,7 +4,6 @@ import {
   Upload,
   ClipboardPaste,
   Sparkles,
-  BookOpen,
   Image as ImageIcon,
   CheckCircle2,
   Key,
@@ -14,22 +13,18 @@ import { compressImage, isSupportedImageFile, isHeic } from "../utils/imageUtils
 
 interface CaptureZoneProps {
   onImageSelected: (base64: string, subjectHint?: string) => void;
-  onLoadSamples: () => void;
   onOpenByok?: () => void;
   hasCustomKey?: boolean;
   isAnalyzing: boolean;
-  questionCount: number;
   autoCalibrate?: boolean;
   onToggleAutoCalibrate?: (val: boolean) => void;
 }
 
 export const CaptureZone: React.FC<CaptureZoneProps> = ({
   onImageSelected,
-  onLoadSamples,
   onOpenByok,
   hasCustomKey = false,
   isAnalyzing,
-  questionCount,
   autoCalibrate = true,
   onToggleAutoCalibrate,
 }) => {
@@ -228,18 +223,6 @@ export const CaptureZone: React.FC<CaptureZoneProps> = ({
             選取圖檔
           </button>
 
-          {/* Load Sample Questions */}
-          {questionCount === 0 && (
-            <button
-              id="load-samples-btn"
-              type="button"
-              onClick={onLoadSamples}
-              className="px-3.5 py-2.5 rounded-xl text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 active:scale-95 border border-amber-200 transition flex items-center gap-1.5"
-            >
-              <BookOpen className="w-4 h-4" />
-              載入示範錯題
-            </button>
-          )}
         </div>
       </div>
 
