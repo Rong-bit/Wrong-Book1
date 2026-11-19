@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   X,
-  Printer,
   Download,
   Loader2,
   FileText,
@@ -25,14 +24,6 @@ import {
   matchesSubjectFilter,
   normalizeSubjectKey,
 } from "../utils/curriculumLabels";
-
-function isMobileClient(): boolean {
-  if (typeof window === "undefined") return false;
-  return (
-    window.matchMedia("(pointer: coarse)").matches ||
-    /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-  );
-}
 
 interface PdfExportModalProps {
   isOpen: boolean;
@@ -331,144 +322,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     }
   };
 
-  const handlePrint = () => {
-    const source =
-      previewRef.current ||
-      document.getElementById("printable-paper-container");
-    if (!source) return;
-
-    const root = document.documentElement;
-    const isB5 = settings.paperSize === "B5";
-    // Mobile Safari "Save as PDF" still reserves a thin printable chrome even with
-    // @page margin:0. A full 297mm sheet then spills (footer appears on the next
-    // PDF page, cards split). Keep on-screen preview at full A4/B5; only shrink
-    // the print clone slightly so each sheet fits one PDF page. Avoid the old
-    // ~248mm height that crushed 每頁 2 題 flex.
-    const isMobilePrint =
-      window.matchMedia("(pointer: coarse)").matches ||
-      /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    const sheetWidth = isB5 ? "182mm" : "210mm";
-    const sheetHeight = isB5
-      ? isMobilePrint
-        ? "248mm"
-        : "257mm"
-      : isMobilePrint
-        ? "285mm"
-        : "297mm";
-    const canvas = previewCanvasRef.current;
-    const scrollLeft = canvas?.scrollLeft ?? 0;
-    const scrollTop = canvas?.scrollTop ?? 0;
-
-    document.getElementById("exam-print-root")?.remove();
-    document.getElementById("exam-print-page-size")?.remove();
-
-    const printRoot = document.createElement("div");
-    printRoot.id = "exam-print-root";
-    printRoot.appendChild(source.cloneNode(true));
-    // Belt-and-suspenders for WebKit print: strip preview spacing and pin size
-    // on the cloned nodes themselves (not only via stylesheet).
-    printRoot.querySelectorAll<HTMLElement>(".paper-sheet").forEach((el) => {
-      el.classList.remove("mb-8", "shadow-xl", "border", "border-slate-300");
-      el.style.setProperty("margin", "0", "important");
-      el.style.setProperty("margin-bottom", "0", "important");
-      el.style.setProperty("box-shadow", "none", "important");
-      el.style.setProperty("border", "none", "important");
-      if (el.classList.contains("paper-sheet-fit")) {
-        el.style.setProperty("width", sheetWidth, "important");
-        el.style.setProperty("max-width", sheetWidth, "important");
-        el.style.setProperty("height", sheetHeight, "important");
-        el.style.setProperty("max-height", sheetHeight, "important");
-        el.style.setProperty("min-height", sheetHeight, "important");
-        el.style.setProperty("overflow", "hidden", "important");
-      }
-    });
-    document.body.appendChild(printRoot);
-
-    const pageStyle = document.createElement("style");
-    pageStyle.id = "exam-print-page-size";
-    pageStyle.textContent = `
-      @page { size: ${isB5 ? "182mm 257mm" : "A4 portrait"}; margin: 0; }
-      #exam-print-root #printable-paper-container,
-      #exam-print-root .print-preview-scale,
-      #exam-print-root .print-preview-fit {
-        width: ${sheetWidth} !important;
-        max-width: ${sheetWidth} !important;
-        height: auto !important;
-        transform: none !important;
-        zoom: normal !important;
-        margin: 0 auto !important;
-      }
-      #exam-print-root .paper-sheet-fit {
-        width: ${sheetWidth} !important;
-        max-width: ${sheetWidth} !important;
-        height: ${sheetHeight} !important;
-        max-height: ${sheetHeight} !important;
-        min-height: ${sheetHeight} !important;
-        margin: 0 auto !important;
-        margin-bottom: 0 !important;
-        overflow: hidden !important;
-        transform: none !important;
-        zoom: normal !important;
-        page-break-after: always !important;
-        break-after: page !important;
-        page-break-inside: avoid !important;
-        break-inside: avoid !important;
-      }
-      #exam-print-root .paper-sheet-fit:last-of-type {
-        page-break-after: auto !important;
-        break-after: auto !important;
-      }
-    `;
-    document.head.appendChild(pageStyle);
-
-    root.classList.add("printing-exam");
-    root.setAttribute("data-print-size", settings.paperSize);
-    if (isMobilePrint) root.setAttribute("data-print-mobile", "1");
-    else root.removeAttribute("data-print-mobile");
-    if (isTwoUp) root.setAttribute("data-print-two-up", "1");
-    else root.removeAttribute("data-print-two-up");
-
-    // Keep the on-screen preview from jumping when the clone is attached.
-    requestAnimationFrame(() => {
-      if (!canvas) return;
-      canvas.scrollLeft = scrollLeft;
-      canvas.scrollTop = scrollTop;
-    });
-
-    let cleaned = false;
-    const cleanup = () => {
-      if (cleaned) return;
-      cleaned = true;
-      root.classList.remove("printing-exam");
-      root.removeAttribute("data-print-size");
-      root.removeAttribute("data-print-mobile");
-      root.removeAttribute("data-print-two-up");
-      printRoot.remove();
-      pageStyle.remove();
-      window.removeEventListener("afterprint", cleanup);
-      requestAnimationFrame(() => {
-        if (!canvas) return;
-        canvas.scrollLeft = scrollLeft;
-        canvas.scrollTop = scrollTop;
-      });
-    };
-    window.addEventListener("afterprint", cleanup);
-    window.setTimeout(cleanup, 120000);
-    window.print();
-  };
-
-  /** Phones: download a raster PDF (Safari print pagination is unreliable). */
-  const handlePrimaryOutput = () => {
-    if (isMobileClient()) {
-      void handleDownloadPdf();
-      return;
-    }
-    handlePrint();
-  };
-
   const paperWidthStyle = settings.paperSize === "B5" ? "182mm" : "210mm";
   const paperHeightStyle = settings.paperSize === "B5" ? "257mm" : "297mm";
-  const mobileOutput = isMobileClient();
 
   return (
     <div className="app-screen-overlay bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
@@ -492,9 +347,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
               </h3>
               <p className="text-xs text-slate-500 hidden sm:block">
                 {showPreview
-                  ? mobileOutput
-                    ? "確認紙張畫面無誤後，下載 PDF（手機列印易跨頁，改由本機產生）"
-                    : "確認紙張畫面無誤後，再按列印送給印表機"
+                  ? "確認紙張畫面無誤後，再下載 PDF"
                   : "先調整規格，再另開畫面預覽康乃爾雙欄與紙張排版"}
               </p>
             </div>
@@ -518,10 +371,11 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handlePrint}
-                className="px-2.5 py-1 text-[11px] font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition"
+                onClick={() => void handleDownloadPdf()}
+                disabled={isExporting || !showPreview}
+                className="px-2.5 py-1 text-[11px] font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg transition disabled:opacity-60"
               >
-                改用瀏覽器原生列印 (另存 PDF)
+                再試一次下載 PDF
               </button>
               <button
                 type="button"
@@ -542,7 +396,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
               版面規格與排版風格
             </div>
             <p className="text-[11px] text-slate-500 leading-relaxed">
-              調整完成後按「預覽排版」，會另開畫面顯示紙張。確認無誤後再列印。
+              調整完成後按「預覽排版」，會另開畫面顯示紙張。確認無誤後再下載 PDF。
             </p>
 
             {/* Paper Size */}
@@ -1468,45 +1322,19 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
             ) : (
               <>
                 <button
-                  id="print-browser-btn"
+                  id="download-pdf-btn"
                   type="button"
-                  onClick={handlePrimaryOutput}
+                  onClick={() => void handleDownloadPdf()}
                   disabled={isExporting}
                   className="flex-1 sm:flex-none px-4 sm:px-5 py-2.5 sm:py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:scale-95 rounded-xl transition flex items-center justify-center gap-1.5 shadow-md disabled:opacity-60 disabled:pointer-events-none"
                 >
                   {isExporting ? (
                     <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
-                  ) : mobileOutput ? (
-                    <Download className="w-4 h-4 shrink-0" />
                   ) : (
-                    <Printer className="w-4 h-4 shrink-0" />
+                    <Download className="w-4 h-4 shrink-0" />
                   )}
-                  {isExporting
-                    ? progressText || "產生 PDF 中…"
-                    : mobileOutput
-                      ? "下載 PDF"
-                      : "列印"}
+                  {isExporting ? progressText || "產生 PDF 中…" : "下載 PDF"}
                 </button>
-                {mobileOutput && !isExporting && (
-                  <button
-                    type="button"
-                    onClick={handlePrint}
-                    className="px-3 sm:px-4 py-2.5 sm:py-2 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition"
-                    title="改用系統列印（部分手機可能跨頁）"
-                  >
-                    列印
-                  </button>
-                )}
-                {!mobileOutput && !isExporting && (
-                  <button
-                    type="button"
-                    onClick={() => void handleDownloadPdf()}
-                    className="px-3 sm:px-4 py-2.5 sm:py-2 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition flex items-center gap-1"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    PDF
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() => setShowPreview(false)}
