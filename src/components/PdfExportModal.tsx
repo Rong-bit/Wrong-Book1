@@ -401,7 +401,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 >
                   B5 (182×257 mm)
                   <span className="block text-[10px] font-normal opacity-90 mt-0.5">
-                    學生錯題本最常用
+                    較小本、學校練習簿
                   </span>
                 </button>
                 <button
@@ -415,7 +415,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 >
                   A4 (210×297 mm)
                   <span className="block text-[10px] font-normal opacity-90 mt-0.5">
-                    標準試卷/印表機
+                    家用印表機預設
                   </span>
                 </button>
               </div>

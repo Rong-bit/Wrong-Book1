@@ -167,7 +167,7 @@ export default function App() {
     gradeClass: "",
     studentName: "",
     seatNumber: "",
-    paperSize: "B5",
+    paperSize: "A4",
     orientation: "portrait",
     mode: "cornell",
     questionDisplayMode: "textOnly",
