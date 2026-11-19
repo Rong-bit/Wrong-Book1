@@ -115,6 +115,13 @@
   background-position: -1px -1px;
 }
 
+/* Screen: keep the print clone invisible. Appending it used to expand the
+   document and reset preview scroll, so mobile A4 looked like it “ran away”
+   the moment 列印 was tapped. */
+#exam-print-root {
+  display: none !important;
+}
+
 /* Print: isolate cloned sheets so mobile Safari cannot paginate hidden UI. */
 @media print {
   html.printing-exam,
@@ -138,6 +145,15 @@
     margin: 0 !important;
     padding: 0 !important;
     background: #ffffff !important;
+    transform: none !important;
+    zoom: normal !important;
+  }
+
+  html.printing-exam #exam-print-root #printable-paper-container {
+    width: 100% !important;
+    max-width: none !important;
+    transform: none !important;
+    zoom: normal !important;
   }
 
   html.printing-exam #exam-print-root .katex-mathml {
@@ -149,9 +165,12 @@
 
   html.printing-exam #exam-print-root .paper-sheet {
     margin: 0 auto !important;
+    margin-bottom: 0 !important;
     box-shadow: none !important;
     border: none !important;
     box-sizing: border-box !important;
+    transform: none !important;
+    zoom: normal !important;
     page-break-after: always !important;
     break-after: page !important;
   }

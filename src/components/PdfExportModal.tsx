@@ -165,7 +165,10 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   const [exportError, setExportError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [exportSubject, setExportSubject] = useState(initialSubjectFilter);
+  /** Scale factor so full A4/B5 fits the phone preview width (not cloned into print). */
+  const [previewScale, setPreviewScale] = useState(1);
   const previewRef = useRef<HTMLDivElement>(null);
+  const previewCanvasRef = useRef<HTMLDivElement>(null);
 
   const isCornellCompact = settings.questionsPerPage === "compact";
   /** 背科精簡固定 4 題；圖形縮進每格剩餘高度。每頁 1／2 題也固定題數。 */
@@ -240,6 +243,28 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     return pages;
   }, [exportQuestions, cornellPageSize]);
 
+  // Fit the on-screen preview to the phone width. Applied on a wrapper outside
+  // previewRef so cloneNode(print) never inherits zoom/transform.
+  useEffect(() => {
+    if (!isOpen || !showPreview) {
+      setPreviewScale(1);
+      return;
+    }
+    const canvas = previewCanvasRef.current;
+    if (!canvas) return;
+
+    const update = () => {
+      const paperMm = settings.paperSize === "B5" ? 182 : 210;
+      const paperPx = paperMm * (96 / 25.4);
+      const available = Math.max(0, canvas.clientWidth - 8);
+      const next = available > 0 ? Math.min(1, available / paperPx) : 1;
+      setPreviewScale(Number.isFinite(next) && next > 0 ? next : 1);
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, [isOpen, showPreview, settings.paperSize]);
 
   if (!isOpen) return null;
 
@@ -255,6 +280,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     // "mobile chrome" height made 每頁 2 題 flex slots reflow in 列印預覽.
     const sheetWidth = isB5 ? "182mm" : "210mm";
     const sheetHeight = isB5 ? "257mm" : "297mm";
+    const canvas = previewCanvasRef.current;
+    const scrollLeft = canvas?.scrollLeft ?? 0;
+    const scrollTop = canvas?.scrollTop ?? 0;
 
     document.getElementById("exam-print-root")?.remove();
     document.getElementById("exam-print-page-size")?.remove();
@@ -268,6 +296,12 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     pageStyle.id = "exam-print-page-size";
     pageStyle.textContent = `
       @page { size: ${isB5 ? "182mm 257mm" : "A4 portrait"}; margin: 0; }
+      #exam-print-root #printable-paper-container {
+        width: 100% !important;
+        max-width: none !important;
+        transform: none !important;
+        zoom: normal !important;
+      }
       #exam-print-root .paper-sheet-fit {
         width: ${sheetWidth} !important;
         max-width: ${sheetWidth} !important;
@@ -275,6 +309,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
         max-height: ${sheetHeight} !important;
         min-height: ${sheetHeight} !important;
         margin: 0 auto !important;
+        margin-bottom: 0 !important;
+        transform: none !important;
+        zoom: normal !important;
       }
     `;
     document.head.appendChild(pageStyle);
@@ -283,6 +320,13 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     root.setAttribute("data-print-size", settings.paperSize);
     if (isTwoUp) root.setAttribute("data-print-two-up", "1");
     else root.removeAttribute("data-print-two-up");
+
+    // Keep the on-screen preview from jumping when the clone is attached.
+    requestAnimationFrame(() => {
+      if (!canvas) return;
+      canvas.scrollLeft = scrollLeft;
+      canvas.scrollTop = scrollTop;
+    });
 
     let cleaned = false;
     const cleanup = () => {
@@ -294,6 +338,11 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       printRoot.remove();
       pageStyle.remove();
       window.removeEventListener("afterprint", cleanup);
+      requestAnimationFrame(() => {
+        if (!canvas) return;
+        canvas.scrollLeft = scrollLeft;
+        canvas.scrollTop = scrollTop;
+      });
     };
     window.addEventListener("afterprint", cleanup);
     window.setTimeout(cleanup, 120000);
@@ -738,7 +787,19 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
           </div>
         </div>
         ) : (
-          <div className="print-preview-canvas flex-1 min-h-0 bg-slate-300/80 p-4 md:p-8 overflow-y-auto overflow-x-auto flex flex-col items-center">
+          <div
+            ref={previewCanvasRef}
+            className="print-preview-canvas flex-1 min-h-0 bg-slate-300/80 p-4 md:p-8 overflow-y-auto overflow-x-auto flex flex-col items-center"
+          >
+            {/* zoom lives here — outside previewRef — so print clone stays full A4/B5 */}
+            <div
+              className="print-preview-fit flex flex-col items-center"
+              style={
+                previewScale < 0.999
+                  ? ({ zoom: previewScale } as React.CSSProperties)
+                  : undefined
+              }
+            >
             <div ref={previewRef} id="printable-paper-container" className="w-full flex flex-col items-center">
               {/* CORNELL MODE RENDERING */}
               {settings.mode === "cornell" ? (
@@ -1211,6 +1272,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                   </div>
                 </div>
               )}
+            </div>
             </div>
           </div>
         )}
