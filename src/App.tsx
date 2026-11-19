@@ -19,7 +19,6 @@ import {
   SimilarQuestionVariant,
   CalibratedCrop,
 } from "./types";
-import { initialSampleQuestions } from "./data/sampleQuestions";
 import {
   analyzeQuestionImage,
   getStoredApiKey,
@@ -114,30 +113,26 @@ export default function App() {
       if (saved) {
         const parsed: QuestionItem[] = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const repaired = parsed.map((q) => {
-            // Repair sample questions if they have outdated/broken/empty image
-            if (q.id === "sample-1" && (!q.imageBase64 || q.imageBase64.includes("utf8") || q.imageBase64.startsWith("data:image/svg"))) {
-              const fresh = initialSampleQuestions.find((s) => s.id === "sample-1");
-              if (fresh) return { ...q, imageBase64: fresh.imageBase64 };
-            }
-            if (q.id === "sample-2" && (!q.imageBase64 || q.imageBase64.includes("utf8") || q.imageBase64.startsWith("data:image/svg"))) {
-              const fresh = initialSampleQuestions.find((s) => s.id === "sample-2");
-              if (fresh) return { ...q, imageBase64: fresh.imageBase64 };
-            }
-            let next = q;
-            if (q.imageBase64) {
-              next = { ...q, imageBase64: normalizeImageSrc(q.imageBase64) };
-            }
-            // Drop stem screenshots already OCR'd when a figure field was split out
-            return releaseTextScreenshot(next);
-          });
-          return alignQuestionCollection(newestFirst(repaired));
+          const repaired = parsed
+            // Drop built-in demo items; real notebook starts empty.
+            .filter((q) => !String(q.id || "").startsWith("sample-"))
+            .map((q) => {
+              let next = q;
+              if (q.imageBase64) {
+                next = { ...q, imageBase64: normalizeImageSrc(q.imageBase64) };
+              }
+              // Drop stem screenshots already OCR'd when a figure field was split out
+              return releaseTextScreenshot(next);
+            });
+          if (repaired.length > 0) {
+            return alignQuestionCollection(newestFirst(repaired));
+          }
         }
       }
     } catch (e) {
       console.warn("Failed reading saved questions:", e);
     }
-    return initialSampleQuestions;
+    return [];
   });
   const questionsRef = useRef(questions);
   questionsRef.current = questions;
@@ -157,7 +152,6 @@ export default function App() {
   const [hasCustomKey, setHasCustomKey] = useState<boolean>(false);
   const [pasteToast, setPasteToast] = useState<string | null>(null);
   const [isConfirmingClearAll, setIsConfirmingClearAll] = useState<boolean>(false);
-  const [isConfirmingLoadSamples, setIsConfirmingLoadSamples] = useState<boolean>(false);
   const [scrollToQuestionId, setScrollToQuestionId] = useState<string | null>(null);
 
   const [paperSettings, setPaperSettings] = useState<PaperSettings>({
@@ -419,11 +413,7 @@ export default function App() {
   };
 
   const handleOpenCalibrationForQuestion = (question: QuestionItem) => {
-    let imgSrc = normalizeImageSrc(question.imageBase64);
-    if (!imgSrc && question.id.startsWith("sample-")) {
-      const sample = initialSampleQuestions.find((s) => s.id === question.id);
-      if (sample) imgSrc = sample.imageBase64;
-    }
+    const imgSrc = normalizeImageSrc(question.imageBase64);
     setCalibrationModal({
       isOpen: true,
       imageSrc: imgSrc,
@@ -663,17 +653,6 @@ export default function App() {
     setTimeout(() => setPasteToast(null), 3500);
   };
 
-  const handleLoadSamples = () => {
-    if (questions.length > 0 && !isConfirmingLoadSamples) {
-      setIsConfirmingLoadSamples(true);
-      setIsConfirmingClearAll(false);
-      return;
-    }
-    setIsConfirmingLoadSamples(false);
-    setQuestions(initialSampleQuestions);
-    setAppPage("notebook");
-  };
-
   const handleClearAll = () => {
     setQuestions([]);
   };
@@ -801,11 +780,9 @@ export default function App() {
         {appPage === "home" ? (
           <CaptureZone
             onImageSelected={handleImageSelected}
-            onLoadSamples={handleLoadSamples}
             onOpenByok={() => setIsByokOpen(true)}
             hasCustomKey={hasCustomKey}
             isAnalyzing={isAnalyzing}
-            questionCount={questions.length}
             autoCalibrate={autoCalibrateOnCapture}
             onToggleAutoCalibrate={handleToggleAutoCalibrate}
           />
@@ -861,34 +838,6 @@ export default function App() {
           <div className="flex items-center gap-2 self-end sm:self-auto">
             {questions.length > 0 && (
               <>
-                {isConfirmingLoadSamples ? (
-                  <div className="flex items-center gap-1.5 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-lg text-xs">
-                    <span className="text-amber-800 font-bold text-[11px]">確定覆蓋成示範題？</span>
-                    <button
-                      type="button"
-                      onClick={handleLoadSamples}
-                      className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-[10px] font-bold shadow-2xs transition"
-                    >
-                      覆蓋
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsConfirmingLoadSamples(false)}
-                      className="px-1 text-slate-500 hover:text-slate-700 text-[10px]"
-                    >
-                      取消
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleLoadSamples}
-                    className="px-2.5 py-1 text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-lg transition"
-                    title="重新填入示範考題"
-                  >
-                    重載示範題
-                  </button>
-                )}
                 {isConfirmingClearAll ? (
                   <div className="flex items-center gap-1.5 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded-lg text-xs">
                     <span className="text-rose-700 font-bold text-[11px]">確定清空？</span>
@@ -961,13 +910,6 @@ export default function App() {
                 className="px-4 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-xl transition"
               >
                 去拍照擷取
-              </button>
-              <button
-                type="button"
-                onClick={handleLoadSamples}
-                className="px-4 py-2 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 border border-sky-200 rounded-xl transition"
-              >
-                載入示範錯題試玩
               </button>
             </div>
           </div>
