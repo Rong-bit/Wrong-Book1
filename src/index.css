@@ -193,11 +193,25 @@
     min-height: 0 !important;
   }
 
-  html.printing-exam[data-print-two-up="1"] #exam-print-root [data-cornell-figure-slot] .print-figure-img {
-    max-height: 100% !important;
+  /* Oversized maps shrink into the half-page slot (do not paint at natural size). */
+  html.printing-exam[data-print-two-up="1"] #exam-print-root [data-cornell-figure-slot] .print-figure {
+    width: 100% !important;
+    height: 100% !important;
     max-width: 100% !important;
+    max-height: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    overflow: hidden !important;
+  }
+
+  html.printing-exam[data-print-two-up="1"] #exam-print-root [data-cornell-figure-slot] .print-figure-img {
     width: auto !important;
     height: auto !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    object-fit: contain !important;
+    object-position: center !important;
   }
 
   /* Sidebar width must not jump between screen sm: breakpoint and print. */

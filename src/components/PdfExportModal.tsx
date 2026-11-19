@@ -66,38 +66,30 @@ function ExportFigure({
   src: string;
   maxHeight?: string;
   /**
-   * true: image caps to a flex-grown cell (背科精簡).
-   * "range": image caps to this question's half-page box and does not
-   * grow the box past the scaled bitmap (每頁 2 題).
+   * true: shrink into the flex-grown cell (每頁 2 題／背科精簡).
+   * Large maps scale down with object-contain instead of overflowing.
    */
-  fit?: boolean | "range";
+  fit?: boolean;
 }) {
-  if (fit === "range") {
-    // Direct image so the half-page grid row can size to the bitmap, while
-    // max-height still caps a tall figure to that question's range.
+  if (fit) {
+    // Shrink oversized maps into the flex slot; border hugs the scaled bitmap.
     return (
-      <img
-        src={normalizeImageSrc(src)}
-        alt="題目附圖（地圖／圖示）"
-        className="print-figure print-figure-img block max-h-full max-w-full min-h-0 w-auto h-auto object-contain object-right-top border border-slate-300 bg-white rounded-sm"
-      />
+      <div className="print-figure h-full w-full min-h-0 min-w-0 flex items-center justify-center overflow-hidden">
+        <img
+          src={normalizeImageSrc(src)}
+          alt="題目附圖（地圖／圖示）"
+          className="print-figure-img block max-h-full max-w-full w-auto h-auto min-h-0 min-w-0 object-contain object-center border border-slate-300 bg-white rounded-sm"
+        />
+      </div>
     );
   }
   return (
-    <div
-      className={`print-figure flex w-full ${
-        fit ? "h-full min-h-0 items-center justify-center" : "justify-end items-start"
-      }`}
-    >
+    <div className="print-figure flex w-full justify-end items-start">
       <img
         src={normalizeImageSrc(src)}
         alt="題目附圖（地圖／圖示）"
-        className={`print-figure-img block w-auto max-w-full object-contain border border-slate-300 bg-white rounded-sm ${
-          fit
-            ? "h-auto max-h-full min-h-0 object-center"
-            : "h-auto object-right-top"
-        }`}
-        style={fit ? undefined : { maxHeight }}
+        className="print-figure-img block w-auto max-w-full h-auto object-contain object-right-top border border-slate-300 bg-white rounded-sm"
+        style={maxHeight ? { maxHeight } : undefined}
       />
     </div>
   );
