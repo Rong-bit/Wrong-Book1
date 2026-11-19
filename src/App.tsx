@@ -35,6 +35,10 @@ import { BackupModal } from "./components/BackupModal";
 import { ImageCalibrationModal } from "./components/ImageCalibrationModal";
 import { compressImage, normalizeImageSrc } from "./utils/imageUtils";
 import {
+  getQuestionPreviewSrc,
+  releaseTextScreenshot,
+} from "./utils/questionExport";
+import {
   alignQuestionCollection,
   collectExistingLabels,
   listSubjectFilterKeys,
@@ -120,10 +124,12 @@ export default function App() {
               const fresh = initialSampleQuestions.find((s) => s.id === "sample-2");
               if (fresh) return { ...q, imageBase64: fresh.imageBase64 };
             }
+            let next = q;
             if (q.imageBase64) {
-              return { ...q, imageBase64: normalizeImageSrc(q.imageBase64) };
+              next = { ...q, imageBase64: normalizeImageSrc(q.imageBase64) };
             }
-            return q;
+            // Drop stem screenshots already OCR'd when a figure field was split out
+            return releaseTextScreenshot(next);
           });
           return alignQuestionCollection(newestFirst(repaired));
         }
@@ -254,24 +260,22 @@ export default function App() {
         setQuestions((prev) =>
           alignQuestionCollection(
             prev.map((item) => {
-              if (item.id === tempId) {
-                return {
-                  ...item,
-                  subject: result.科目 || "未歸類",
-                  gradeLevel: result.冊別 || "",
-                  chapter: result.章節 || "",
-                  unit: result.單元 || "未歸類單元",
-                  questionText: result.題目文字 || "",
-                  questionType: result.題型 || "綜合題",
-                  answer: result.答案 || "",
-                  coreConcepts: result.核心考點 || "",
-                  commonPitfalls: result.易錯陷阱 || "",
-                  explanation: result.詳解步驟 || "",
-                  tips: result.關鍵技巧 || "",
-                  status: "ready",
-                };
-              }
-              return item;
+              if (item.id !== tempId) return item;
+              return releaseTextScreenshot({
+                ...item,
+                subject: result.科目 || "未歸類",
+                gradeLevel: result.冊別 || "",
+                chapter: result.章節 || "",
+                unit: result.單元 || "未歸類單元",
+                questionText: result.題目文字 || "",
+                questionType: result.題型 || "綜合題",
+                answer: result.答案 || "",
+                coreConcepts: result.核心考點 || "",
+                commonPitfalls: result.易錯陷阱 || "",
+                explanation: result.詳解步驟 || "",
+                tips: result.關鍵技巧 || "",
+                status: "ready" as const,
+              });
             })
           )
         );
@@ -555,25 +559,23 @@ export default function App() {
       setQuestions((prev) =>
         alignQuestionCollection(
           prev.map((item) => {
-            if (item.id === questionId) {
-              return {
-                ...item,
-                subject: result.科目 || item.subject || "未歸類",
-                gradeLevel: result.冊別 || item.gradeLevel || "",
-                chapter: result.章節 || item.chapter || "",
-                unit: result.單元 || item.unit || "未歸類單元",
-                questionText: result.題目文字 || "",
-                questionType: result.題型 || "綜合題",
-                answer: result.答案 || "",
-                coreConcepts: result.核心考點 || "",
-                commonPitfalls: result.易錯陷阱 || "",
-                explanation: result.詳解步驟 || "",
-                tips: result.關鍵技巧 || "",
-                status: "ready",
-                errorMessage: undefined,
-              };
-            }
-            return item;
+            if (item.id !== questionId) return item;
+            return releaseTextScreenshot({
+              ...item,
+              subject: result.科目 || item.subject || "未歸類",
+              gradeLevel: result.冊別 || item.gradeLevel || "",
+              chapter: result.章節 || item.chapter || "",
+              unit: result.單元 || item.unit || "未歸類單元",
+              questionText: result.題目文字 || "",
+              questionType: result.題型 || "綜合題",
+              answer: result.答案 || "",
+              coreConcepts: result.核心考點 || "",
+              commonPitfalls: result.易錯陷阱 || "",
+              explanation: result.詳解步驟 || "",
+              tips: result.關鍵技巧 || "",
+              status: "ready" as const,
+              errorMessage: undefined,
+            });
           })
         )
       );
@@ -681,18 +683,23 @@ export default function App() {
     mode: "merge" | "overwrite",
     restoredPaperSettings?: PaperSettings
   ) => {
+    const normalized = restoredQuestions.map((q) => releaseTextScreenshot(q));
     if (mode === "overwrite") {
-      setQuestions(restoredQuestions);
+      setQuestions(normalized);
       if (restoredPaperSettings) {
         paperAutoLockRef.current = { subtitle: true, gradeClass: true };
-        setPaperSettings(restoredPaperSettings);
+        setPaperSettings({
+          ...restoredPaperSettings,
+          questionDisplayMode: "textOnly",
+          includeImages: false,
+        });
       }
-      setPasteToast(`✨ 已成功完全還原 ${restoredQuestions.length} 道考題！`);
+      setPasteToast(`✨ 已成功完全還原 ${normalized.length} 道考題！`);
     } else {
       setQuestions((prev) => {
         const existingIds = new Set(prev.map((q) => q.id));
         const idMap = new Map<string, string>();
-        const newItems = restoredQuestions.map((q) => {
+        const newItems = normalized.map((q) => {
           if (existingIds.has(q.id)) {
             const newId = `q_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
             idMap.set(q.id, newId);
@@ -709,7 +716,7 @@ export default function App() {
           ),
         ];
       });
-      setPasteToast(`✨ 已成功合併匯入 ${restoredQuestions.length} 道考題！`);
+      setPasteToast(`✨ 已成功合併匯入 ${normalized.length} 道考題！`);
     }
     setTimeout(() => setPasteToast(null), 3500);
   };
@@ -1017,41 +1024,75 @@ export default function App() {
       </main>
 
       {/* Image Control Modal */}
-      {selectedQuestionForImageModal && (
+      {selectedQuestionForImageModal && getQuestionPreviewSrc(selectedQuestionForImageModal) && (
         <ImageControlModal
           isOpen={Boolean(selectedQuestionForImageModal)}
           questionId={selectedQuestionForImageModal.id}
-          imageSrc={selectedQuestionForImageModal.imageBase64}
+          imageSrc={getQuestionPreviewSrc(selectedQuestionForImageModal) || ""}
           settings={selectedQuestionForImageModal.imageSettings}
           onClose={() => setSelectedQuestionForImageModal(null)}
           onUpdateSettings={handleUpdateImageSettings}
           onDeleteQuestion={handleDeleteQuestion}
           onRemoveImageOnly={handleRemoveImageOnly}
-          onOpenCalibration={() => {
-            const q = selectedQuestionForImageModal;
-            setSelectedQuestionForImageModal(null);
-            handleOpenCalibrationForQuestion(q);
-          }}
+          onOpenCalibration={
+            selectedQuestionForImageModal.imageBase64
+              ? () => {
+                  const q = selectedQuestionForImageModal;
+                  setSelectedQuestionForImageModal(null);
+                  handleOpenCalibrationForQuestion(q);
+                }
+              : undefined
+          }
           onReplaceImage={(newBase64) => {
-            handleUpdateQuestion(selectedQuestionForImageModal.id, {
-              imageBase64: newBase64,
-              figureImageBase64: undefined,
-              imageSettings: {
-                ...selectedQuestionForImageModal.imageSettings,
-                zoom: 100,
-                includeInExport: true,
-              },
-            });
-            setSelectedQuestionForImageModal((prev) => {
-              if (!prev) return null;
-              const next = {
-                ...prev,
+            const stemStillPresent = Boolean(selectedQuestionForImageModal.imageBase64);
+            if (stemStillPresent) {
+              handleUpdateQuestion(selectedQuestionForImageModal.id, {
                 imageBase64: newBase64,
-                imageSettings: { ...prev.imageSettings, zoom: 100, includeInExport: true },
-              };
-              delete next.figureImageBase64;
-              return next;
-            });
+                figureImageBase64: undefined,
+                imageSettings: {
+                  ...selectedQuestionForImageModal.imageSettings,
+                  zoom: 100,
+                  includeInExport: true,
+                },
+              });
+              setSelectedQuestionForImageModal((prev) => {
+                if (!prev) return null;
+                const next = {
+                  ...prev,
+                  imageBase64: newBase64,
+                  imageSettings: {
+                    ...prev.imageSettings,
+                    zoom: 100,
+                    includeInExport: true,
+                  },
+                };
+                delete next.figureImageBase64;
+                return next;
+              });
+            } else {
+              // Figure-only question: replace the retained diagram crop
+              handleUpdateQuestion(selectedQuestionForImageModal.id, {
+                figureImageBase64: newBase64,
+                imageSettings: {
+                  ...selectedQuestionForImageModal.imageSettings,
+                  zoom: 100,
+                  includeInExport: true,
+                },
+              });
+              setSelectedQuestionForImageModal((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      figureImageBase64: newBase64,
+                      imageSettings: {
+                        ...prev.imageSettings,
+                        zoom: 100,
+                        includeInExport: true,
+                      },
+                    }
+                  : null
+              );
+            }
           }}
         />
       )}
@@ -1099,7 +1140,11 @@ export default function App() {
           setPaperSettings((prev) => {
             if (next.subtitle !== prev.subtitle) paperAutoLockRef.current.subtitle = true;
             if (next.gradeClass !== prev.gradeClass) paperAutoLockRef.current.gradeClass = true;
-            return next;
+            return {
+              ...next,
+              questionDisplayMode: "textOnly",
+              includeImages: false,
+            };
           });
         }}
       />

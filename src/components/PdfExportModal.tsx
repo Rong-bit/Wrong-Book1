@@ -11,11 +11,9 @@ import {
   CheckSquare,
   Sparkles,
   Eye,
-  Image as ImageIcon,
-  Camera,
   AlignLeft,
 } from "lucide-react";
-import { PaperSettings, QuestionItem, PaperSize, ImageSettings } from "../types";
+import { PaperSettings, QuestionItem } from "../types";
 import { MathRenderer } from "./MathRenderer";
 import { normalizeImageSrc } from "../utils/imageUtils";
 import { getTextOnlyFigureSrc } from "../utils/questionExport";
@@ -59,20 +57,6 @@ const FIGURE_MAX_HEIGHT = {
   cornell: "96mm",
   paper: "112mm",
 } as const;
-
-function questionImageStyle(
-  settings: ImageSettings | undefined
-): React.CSSProperties | undefined {
-  const rotation = settings?.rotation || 0;
-  const zoom = settings?.zoom ?? 100;
-  // rotate(0) scale(1) still promotes a layer; Chrome then prints that layer
-  // at screen DPI and maps/diagrams look soft.
-  if (rotation === 0 && zoom === 100) return undefined;
-  return {
-    transform: `rotate(${rotation}deg) scale(${zoom / 100})`,
-    transformOrigin: "center center",
-  };
-}
 
 function ExportFigure({
   src,
@@ -213,6 +197,17 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       setExportError(null);
       return;
     }
+    // Export is fixed to typeset text + figure attach; normalize legacy modes.
+    if (
+      settings.questionDisplayMode !== "textOnly" ||
+      settings.includeImages !== false
+    ) {
+      onUpdateSettings({
+        ...settings,
+        questionDisplayMode: "textOnly",
+        includeImages: false,
+      });
+    }
   }, [isOpen]);
 
   // Sync notebook chip → export scope only when opening / chip changes.
@@ -315,21 +310,6 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
   const paperWidthStyle = settings.paperSize === "B5" ? "182mm" : "210mm";
   const paperHeightStyle = settings.paperSize === "B5" ? "257mm" : "297mm";
-
-  const displayMode =
-    settings.questionDisplayMode ||
-    (settings.includeImages ? "both" : "textOnly");
-
-  /** imageOnly / both: full crop; textOnly: figure-only; textPlain: never */
-  const shouldRenderQuestionImage = (q: QuestionItem): boolean => {
-    if (displayMode === "textPlain") return false;
-    if (q.imageSettings?.includeInExport === false) return false;
-    if (displayMode === "imageOnly" || displayMode === "both") {
-      return Boolean(q.imageBase64);
-    }
-    if (displayMode === "textOnly") return Boolean(getTextOnlyFigureSrc(q));
-    return false;
-  };
 
   return (
     <div className="app-screen-overlay bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
@@ -734,177 +714,18 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
               </div>
             </div>
 
-            {/* Question Content Display Mode */}
+            {/* Fixed export layout: typeset stem + optional figure */}
             <div className="pt-2 border-t border-slate-100 space-y-2">
-              <label className="block font-semibold text-slate-700">
-                題目內容呈現方式
-              </label>
-
-              <div className="space-y-1.5">
-                {/* Option 1: Image Only */}
-                <button
-                  type="button"
-                  onClick={() =>
-                    onUpdateSettings({
-                      ...settings,
-                      questionDisplayMode: "imageOnly",
-                      includeImages: true,
-                    })
-                  }
-                  className={`w-full p-2 rounded-xl border flex items-center justify-between text-left transition ${
-                    displayMode === "imageOnly"
-                      ? "bg-amber-50 border-amber-400 text-amber-950 font-bold shadow-2xs"
-                      : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <Camera className="w-4 h-4 text-amber-600 shrink-0" />
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs">僅截圖照片 (沒文字)</span>
-                        <span className="text-[9px] bg-amber-200 text-amber-900 px-1.5 py-0.2 rounded font-bold">
-                          原汁原味
-                        </span>
-                      </div>
-                      <span className="block text-[10px] text-slate-500 font-normal">
-                        直接呈現原題裁切照片，不印辨識文字
-                      </span>
-                    </div>
-                  </div>
-                  <div
-                    className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                      displayMode === "imageOnly"
-                        ? "border-amber-600 bg-amber-600"
-                        : "border-slate-300"
-                    }`}
-                  >
-                    {displayMode === "imageOnly" && (
-                      <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                    )}
-                  </div>
-                </button>
-
-                {/* Option 2: Both Text and Image */}
-                <button
-                  type="button"
-                  onClick={() =>
-                    onUpdateSettings({
-                      ...settings,
-                      questionDisplayMode: "both",
-                      includeImages: true,
-                    })
-                  }
-                  className={`w-full p-2 rounded-xl border flex items-center justify-between text-left transition ${
-                    displayMode === "both"
-                      ? "bg-sky-50 border-sky-400 text-sky-950 font-bold shadow-2xs"
-                      : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <ImageIcon className="w-4 h-4 text-sky-600 shrink-0" />
-                    <div>
-                      <span className="block text-xs">包含文字與題目截圖</span>
-                      <span className="block text-[10px] text-slate-500 font-normal">
-                        上方顯示原題照片，下方顯示文字排版
-                      </span>
-                    </div>
-                  </div>
-                  <div
-                    className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                      displayMode === "both"
-                        ? "border-sky-600 bg-sky-600"
-                        : "border-slate-300"
-                    }`}
-                  >
-                    {displayMode === "both" && (
-                      <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                    )}
-                  </div>
-                </button>
-
-                {/* Option 3: Text + figure attach */}
-                <button
-                  type="button"
-                  onClick={() =>
-                    onUpdateSettings({
-                      ...settings,
-                      questionDisplayMode: "textOnly",
-                      includeImages: false,
-                    })
-                  }
-                  className={`w-full p-2 rounded-xl border flex items-center justify-between text-left transition ${
-                    displayMode === "textOnly"
-                      ? "bg-indigo-50 border-indigo-400 text-indigo-950 font-bold shadow-2xs"
-                      : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <AlignLeft className="w-4 h-4 text-indigo-600 shrink-0" />
-                    <div>
-                      <span className="block text-xs">僅排版文字（附圖形圖）</span>
-                      <span className="block text-[10px] text-slate-500 font-normal">
-                        印排版文字；有「選圖形」才緊接題幹附上地圖／圖區，複習區在圖下，不附文字截圖
-                      </span>
-                    </div>
-                  </div>
-                  <div
-                    className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                      displayMode === "textOnly"
-                        ? "border-indigo-600 bg-indigo-600"
-                        : "border-slate-300"
-                    }`}
-                  >
-                    {displayMode === "textOnly" && (
-                      <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                    )}
-                  </div>
-                </button>
-
-                {/* Option 4: Pure text — no screenshots at all */}
-                <button
-                  type="button"
-                  onClick={() =>
-                    onUpdateSettings({
-                      ...settings,
-                      questionDisplayMode: "textPlain",
-                      includeImages: false,
-                    })
-                  }
-                  className={`w-full p-2 rounded-xl border flex items-center justify-between text-left transition ${
-                    displayMode === "textPlain"
-                      ? "bg-emerald-50 border-emerald-400 text-emerald-950 font-bold shadow-2xs"
-                      : "bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <AlignLeft className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs">僅排版文字 (無截圖)</span>
-                        <span className="text-[9px] bg-emerald-200 text-emerald-900 px-1.5 py-0.2 rounded font-bold">
-                          省墨
-                        </span>
-                      </div>
-                      <span className="block text-[10px] text-slate-500 font-normal">
-                        純文字印刷排版；不放文字截圖、也不放地圖／圖形截圖
-                      </span>
-                    </div>
-                  </div>
-                  <div
-                    className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                      displayMode === "textPlain"
-                        ? "border-emerald-600 bg-emerald-600"
-                        : "border-slate-300"
-                    }`}
-                  >
-                    {displayMode === "textPlain" && (
-                      <div className="w-1.5 h-1.5 rounded-full bg-white" />
-                    )}
-                  </div>
-                </button>
+              <div className="w-full p-2.5 rounded-xl border border-indigo-200 bg-indigo-50/80 text-indigo-950 flex items-start gap-2">
+                <AlignLeft className="w-4 h-4 text-indigo-600 shrink-0 mt-0.5" />
+                <div>
+                  <div className="text-xs font-bold">排版文字（附圖形）</div>
+                  <p className="text-[10px] text-indigo-900/80 font-normal mt-0.5 leading-relaxed">
+                    題幹印辨識文字；有「選圖形」才緊接題幹附上地圖／圖區，複習區在圖下。文字截圖辨識後不保留，也不再匯出。
+                  </p>
+                </div>
               </div>
 
-              {/* Answer Sheet Toggle */}
               <label className="flex items-center gap-2 cursor-pointer pt-2 border-t border-slate-100">
                 <input
                   type="checkbox"
@@ -1108,103 +929,38 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                   )}
                                 </div>
 
-                                {/* Question Content based on displayMode */}
-                                {displayMode === "imageOnly" ? (
-                                  shouldRenderQuestionImage(q) ? (
-                                    <div
-                                      className={`my-1.5 flex ${
-                                        q.imageSettings.align === "left"
-                                          ? "justify-start"
-                                          : q.imageSettings.align === "right"
-                                          ? "justify-end"
-                                          : "justify-center"
-                                      }`}
-                                    >
-                                      <img
-                                        src={normalizeImageSrc(q.imageBase64)}
-                                        alt="題目原圖截圖"
-                                        className={`w-auto max-w-full object-contain border border-slate-200 rounded shadow-2xs ${
-                                          isCornellCompact
-                                            ? "max-h-20"
-                                            : "max-h-48 sm:max-h-56"
-                                        }`}
-                                        style={questionImageStyle(q.imageSettings)}
-                                      />
-                                    </div>
-                                  ) : (
-                                    <div className="text-xs text-slate-800 leading-relaxed whitespace-pre-line">
-                                      <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-1 py-0.5 rounded mr-1">
-                                        (此題無截圖照片，自動顯示文字)
-                                      </span>
-                                      <MathRenderer content={q.questionText} />
-                                    </div>
-                                  )
-                                ) : displayMode === "textOnly" ||
-                                  displayMode === "textPlain" ? (
-                                  <div className="space-y-1">
-                                    <div
-                                      className={`text-slate-900 leading-relaxed whitespace-pre-line ${
-                                        isCornellCompact ? "text-[11px]" : "text-xs"
-                                      }`}
-                                    >
-                                      <MathRenderer content={q.questionText} />
-                                    </div>
+                                <div className="space-y-1">
+                                  <div
+                                    className={`text-slate-900 leading-relaxed whitespace-pre-line ${
+                                      isCornellCompact ? "text-[11px]" : "text-xs"
+                                    }`}
+                                  >
+                                    <MathRenderer content={q.questionText} />
                                   </div>
-                                ) : (
-                                  <>
-                                    {shouldRenderQuestionImage(q) && (
-                                        <div
-                                          className={`my-1.5 flex ${
-                                            q.imageSettings.align === "left"
-                                              ? "justify-start"
-                                              : q.imageSettings.align === "right"
-                                              ? "justify-end"
-                                              : "justify-center"
-                                          }`}
-                                        >
-                                          <img
-                                            src={normalizeImageSrc(q.imageBase64)}
-                                            alt="題目原圖"
-                                            className={`max-w-full object-contain border border-slate-200 rounded ${
-                                              isCornellCompact ? "max-h-16" : "max-h-28"
-                                            }`}
-                                            style={questionImageStyle(q.imageSettings)}
-                                          />
-                                        </div>
-                                      )}
-                                    <div
-                                      className={`text-slate-900 leading-relaxed whitespace-pre-line ${
-                                        isCornellCompact ? "text-[11px]" : "text-xs"
-                                      }`}
-                                    >
-                                      <MathRenderer content={q.questionText} />
-                                    </div>
-                                  </>
-                                )}
+                                </div>
                               </div>
 
-                              {displayMode === "textOnly" &&
-                                (() => {
-                                  const figureSrc = getTextOnlyFigureSrc(q);
-                                  if (!figureSrc) return null;
-                                  return (
-                                    <div
-                                      className={`border-b border-slate-200 bg-white ${
-                                        isTwoUp
-                                          ? "min-h-0 min-w-0 overflow-hidden px-1.5 py-1 flex justify-end items-start"
-                                          : scaleFigure
-                                            ? "flex-1 min-h-0 overflow-hidden px-1.5 py-1"
-                                            : "shrink-0 px-2 py-1.5"
-                                      }`}
-                                    >
-                                      <ExportFigure
-                                        src={figureSrc}
-                                        fit={isTwoUp ? "range" : scaleFigure}
-                                        maxHeight={FIGURE_MAX_HEIGHT.cornell}
-                                      />
-                                    </div>
-                                  );
-                                })()}
+                              {(() => {
+                                const figureSrc = getTextOnlyFigureSrc(q);
+                                if (!figureSrc) return null;
+                                return (
+                                  <div
+                                    className={`border-b border-slate-200 bg-white ${
+                                      isTwoUp
+                                        ? "min-h-0 min-w-0 overflow-hidden px-1.5 py-1 flex justify-end items-start"
+                                        : scaleFigure
+                                          ? "flex-1 min-h-0 overflow-hidden px-1.5 py-1"
+                                          : "shrink-0 px-2 py-1.5"
+                                    }`}
+                                  >
+                                    <ExportFigure
+                                      src={figureSrc}
+                                      fit={isTwoUp ? "range" : scaleFigure}
+                                      maxHeight={FIGURE_MAX_HEIGHT.cornell}
+                                    />
+                                  </div>
+                                );
+                              })()}
                               <CornellReview
                                 isCornellCompact={isCornellCompact}
                                 showGrid={settings.showGrid !== false}
@@ -1296,75 +1052,21 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                           )}
                         </div>
 
-                        {/* Question Content based on displayMode */}
-                        {displayMode === "imageOnly" ? (
-                          shouldRenderQuestionImage(q) ? (
-                            <div
-                              className={`my-2 flex ${
-                                q.imageSettings.align === "left"
-                                  ? "justify-start"
-                                  : q.imageSettings.align === "right"
-                                  ? "justify-end"
-                                  : "justify-center"
-                              }`}
-                            >
-                              <img
-                                src={normalizeImageSrc(q.imageBase64)}
-                                alt="題目原圖截圖"
-                                className="max-h-64 max-w-full object-contain border border-slate-200 rounded shadow-2xs"
-                                style={questionImageStyle(q.imageSettings)}
-                              />
-                            </div>
-                          ) : (
-                            <div className="text-sm leading-relaxed whitespace-pre-line text-slate-900">
-                              <span className="text-xs text-amber-700 font-bold bg-amber-50 px-1 py-0.5 rounded mr-1">
-                                (此題無截圖照片，自動顯示文字)
-                              </span>
-                              <MathRenderer content={q.questionText} />
-                            </div>
-                          )
-                        ) : displayMode === "textOnly" || displayMode === "textPlain" ? (
-                          <div className="space-y-1.5">
-                            <div className="text-sm leading-relaxed whitespace-pre-line text-slate-900">
-                              <MathRenderer content={q.questionText} />
-                            </div>
-                            {displayMode === "textOnly" &&
-                              (() => {
-                                const figureSrc = getTextOnlyFigureSrc(q);
-                                if (!figureSrc) return null;
-                                return (
-                                  <ExportFigure
-                                    src={figureSrc}
-                                    maxHeight={FIGURE_MAX_HEIGHT.paper}
-                                  />
-                                );
-                              })()}
+                        <div className="space-y-1.5">
+                          <div className="text-sm leading-relaxed whitespace-pre-line text-slate-900">
+                            <MathRenderer content={q.questionText} />
                           </div>
-                        ) : (
-                          <>
-                            {shouldRenderQuestionImage(q) && (
-                                <div
-                                  className={`my-2 flex ${
-                                    q.imageSettings.align === "left"
-                                      ? "justify-start"
-                                      : q.imageSettings.align === "right"
-                                      ? "justify-end"
-                                      : "justify-center"
-                                  }`}
-                                >
-                                  <img
-                                    src={normalizeImageSrc(q.imageBase64)}
-                                    alt="題目原圖"
-                                    className="max-h-52 max-w-full object-contain border border-slate-200 rounded"
-                                    style={questionImageStyle(q.imageSettings)}
-                                  />
-                                </div>
-                              )}
-                            <div className="text-sm leading-relaxed whitespace-pre-line text-slate-900">
-                              <MathRenderer content={q.questionText} />
-                            </div>
-                          </>
-                        )}
+                          {(() => {
+                            const figureSrc = getTextOnlyFigureSrc(q);
+                            if (!figureSrc) return null;
+                            return (
+                              <ExportFigure
+                                src={figureSrc}
+                                maxHeight={FIGURE_MAX_HEIGHT.paper}
+                              />
+                            );
+                          })()}
+                        </div>
 
                         {/* Exam Mode: Blank workspace for student work */}
                         {settings.mode === "exam" ? (
@@ -1533,13 +1235,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
             </span>
             <span className="hidden sm:inline">·</span>
             <span className="text-slate-600 hidden sm:inline">
-              {displayMode === "imageOnly"
-                ? "僅截圖照片 (無文字)"
-                : displayMode === "both"
-                ? "文字與照片"
-                : displayMode === "textPlain"
-                ? "純文字（無截圖）"
-                : "排版文字＋圖區（無文字圖）"}
+              排版文字＋圖區
             </span>
           </div>
 

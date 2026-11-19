@@ -59,7 +59,10 @@ export interface CalibratedCrop {
 }
 
 export type PaperSize = "B5" | "A4";
-/** textOnly = 排版文字＋圖區附圖；textPlain = 純文字、完全無截圖 */
+/**
+ * Export layout. UI always uses textOnly (typeset stem + figure attach).
+ * Legacy both / imageOnly / textPlain may still appear in old backups.
+ */
 export type QuestionDisplayMode = "both" | "imageOnly" | "textOnly" | "textPlain";
 
 export interface PaperSettings {
