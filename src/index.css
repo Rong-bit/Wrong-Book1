@@ -152,10 +152,20 @@
     box-shadow: none !important;
     border: none !important;
     box-sizing: border-box !important;
-    /* visible: overflow:hidden makes Chrome flatten images at screen DPI */
-    overflow: visible !important;
     page-break-after: always !important;
     break-after: page !important;
+  }
+
+  /* Fixed-height Cornell sheets must not split mid-page in 列印預覽. */
+  html.printing-exam #exam-print-root .paper-sheet-fit {
+    overflow: hidden !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  html.printing-exam #exam-print-root .paper-sheet:not(.paper-sheet-fit) {
+    /* visible: overflow:hidden can flatten images at screen DPI on free-flow pages */
+    overflow: visible !important;
     page-break-inside: auto !important;
     break-inside: auto !important;
   }
@@ -165,19 +175,47 @@
     break-after: auto !important;
   }
 
-  /* Do NOT force min-height:0 on all descendants — that undoes Cornell
-     cards' min-h-min and re-enables flex shrink + overflow clip on print. */
+  /* Keep 每頁 2 題 half-page flex containment; blanket overflow:visible
+     used to let tall maps blow past the card and shove the next question. */
+  html.printing-exam #exam-print-root [data-cornell-body],
+  html.printing-exam #exam-print-root [data-cornell-card],
+  html.printing-exam #exam-print-root [data-cornell-figure-slot] {
+    overflow: hidden !important;
+  }
 
-  html.printing-exam #exam-print-root .overflow-hidden,
-  html.printing-exam #exam-print-root .overflow-y-auto,
-  html.printing-exam #exam-print-root .overflow-x-auto {
+  html.printing-exam #exam-print-root [data-cornell-card] {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  html.printing-exam[data-print-two-up="1"] #exam-print-root [data-cornell-card] {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+  }
+
+  html.printing-exam[data-print-two-up="1"] #exam-print-root [data-cornell-figure-slot] .print-figure-img {
+    max-height: 100% !important;
+    max-width: 100% !important;
+    width: auto !important;
+    height: auto !important;
+  }
+
+  /* Sidebar width must not jump between screen sm: breakpoint and print. */
+  html.printing-exam #exam-print-root [data-cornell-sidebar] {
+    width: 48mm !important;
+    max-width: 48mm !important;
+  }
+
+  /* Free-flow pages (notebook/exam): still prefer bitmap fidelity over clip. */
+  html.printing-exam #exam-print-root .paper-sheet:not(.paper-sheet-fit) .overflow-hidden,
+  html.printing-exam #exam-print-root .paper-sheet:not(.paper-sheet-fit) .overflow-y-auto,
+  html.printing-exam #exam-print-root .paper-sheet:not(.paper-sheet-fit) .overflow-x-auto {
     overflow: visible !important;
   }
 
   /* Figure crops must print from the bitmap, not a transformed screen layer. */
   html.printing-exam #exam-print-root .print-figure,
   html.printing-exam #exam-print-root .print-figure-img {
-    overflow: visible !important;
     transform: none !important;
     filter: none !important;
   }

@@ -259,9 +259,10 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
     const root = document.documentElement;
     const isB5 = settings.paperSize === "B5";
-    const isMobile =
-      window.matchMedia("(pointer: coarse)").matches ||
-      /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    // Print sheet must match @page exactly (including phones). A shorter
+    // "mobile chrome" height made 每頁 2 題 flex slots reflow in 列印預覽.
+    const sheetWidth = isB5 ? "182mm" : "210mm";
+    const sheetHeight = isB5 ? "257mm" : "297mm";
 
     document.getElementById("exam-print-root")?.remove();
     document.getElementById("exam-print-page-size")?.remove();
@@ -271,33 +272,25 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     printRoot.appendChild(source.cloneNode(true));
     document.body.appendChild(printRoot);
 
-    // Match preview paperHeightStyle (257/297) so fit-check and print use the same box.
-    // Mobile uses a shorter sheet for browser chrome, but keep desktop exact.
-    const sheetWidth = isMobile ? "100%" : isB5 ? "182mm" : "210mm";
-    const sheetHeight = isMobile
-      ? isB5
-        ? "220mm"
-        : "248mm"
-      : isB5
-        ? "257mm"
-        : "297mm";
-
     const pageStyle = document.createElement("style");
     pageStyle.id = "exam-print-page-size";
     pageStyle.textContent = `
       @page { size: ${isB5 ? "182mm 257mm" : "A4 portrait"}; margin: 0; }
       #exam-print-root .paper-sheet-fit {
         width: ${sheetWidth} !important;
-        max-width: 100% !important;
+        max-width: ${sheetWidth} !important;
         height: ${sheetHeight} !important;
         max-height: ${sheetHeight} !important;
-        min-height: 0 !important;
+        min-height: ${sheetHeight} !important;
+        margin: 0 auto !important;
       }
     `;
     document.head.appendChild(pageStyle);
 
     root.classList.add("printing-exam");
     root.setAttribute("data-print-size", settings.paperSize);
+    if (isTwoUp) root.setAttribute("data-print-two-up", "1");
+    else root.removeAttribute("data-print-two-up");
 
     let cleaned = false;
     const cleanup = () => {
@@ -305,6 +298,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       cleaned = true;
       root.classList.remove("printing-exam");
       root.removeAttribute("data-print-size");
+      root.removeAttribute("data-print-two-up");
       printRoot.remove();
       pageStyle.remove();
       window.removeEventListener("afterprint", cleanup);
@@ -802,6 +796,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                       {/* Questions in this sheet */}
                       <div
                         data-cornell-body
+                        data-cornell-two-up={isTwoUp ? "1" : undefined}
                         className={`flex-1 min-h-0 flex flex-col overflow-hidden ${
                           isCornellCompact ? "gap-1.5 justify-start" : "gap-2.5"
                         }`}
@@ -811,11 +806,16 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                             key={q.id}
                             data-cornell-card
                             className={`border border-slate-300 rounded-lg overflow-hidden flex flex-row relative bg-white ${
-                              scaleFigure ? "flex-1 min-h-0" : "flex-1 min-h-min"
+                              isTwoUp
+                                ? "flex-1 min-h-0 basis-0"
+                                : scaleFigure
+                                  ? "flex-1 min-h-0"
+                                  : "flex-1 min-h-min"
                             }`}
                           >
                             {/* LEFT SIDEBAR: Metadata & Mistake Reason Analysis */}
                             <div
+                              data-cornell-sidebar
                               className={`shrink-0 bg-slate-50 border-r border-slate-300 flex flex-col text-[11px] font-sans ${
                                 isCornellCompact
                                   ? "w-36 sm:w-40 p-1.5"
@@ -949,7 +949,10 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                                 // 每頁 2 題：即使沒有圖也留 flex 空槽，讓兩題的複習區都貼在卡片底部對齊
                                 if (isTwoUp) {
                                   return (
-                                    <div className="flex-1 min-h-0 min-w-0 overflow-hidden border-b border-slate-200 bg-white px-1.5 py-1 flex items-center justify-center">
+                                    <div
+                                      data-cornell-figure-slot
+                                      className="flex-1 min-h-0 min-w-0 overflow-hidden border-b border-slate-200 bg-white px-1.5 py-1 flex items-center justify-center"
+                                    >
                                       {figureSrc ? (
                                         <ExportFigure src={figureSrc} fit />
                                       ) : null}
