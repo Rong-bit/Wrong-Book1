@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect, useMemo } from "react";
 import {
   X,
   Printer,
+  Download,
+  Loader2,
   FileText,
   Settings2,
   BookOpen,
@@ -17,11 +19,20 @@ import { PaperSettings, QuestionItem } from "../types";
 import { MathRenderer } from "./MathRenderer";
 import { normalizeImageSrc } from "../utils/imageUtils";
 import { getTextOnlyFigureSrc } from "../utils/questionExport";
+import { exportToHighDefPdf } from "../services/pdfService";
 import {
   listSubjectFilterKeys,
   matchesSubjectFilter,
   normalizeSubjectKey,
 } from "../utils/curriculumLabels";
+
+function isMobileClient(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    window.matchMedia("(pointer: coarse)").matches ||
+    /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+  );
+}
 
 interface PdfExportModalProps {
   isOpen: boolean;
@@ -165,6 +176,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   const [exportError, setExportError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
   const [exportSubject, setExportSubject] = useState(initialSubjectFilter);
+  const [isExporting, setIsExporting] = useState(false);
+  const [progressText, setProgressText] = useState("");
   /**
    * Phone preview: transform-scale the full A4/B5 sheet to fit the modal width.
    * Do NOT use CSS `zoom` — Safari iOS reflows mm/flex at the zoomed width and
@@ -206,6 +219,8 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     if (!isOpen) {
       setShowPreview(false);
       setExportError(null);
+      setIsExporting(false);
+      setProgressText("");
       return;
     }
     // Export is fixed to typeset text + figure attach; normalize legacy modes.
@@ -286,6 +301,35 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
   }, [isOpen, showPreview, settings.paperSize, cornellPages.length]);
 
   if (!isOpen) return null;
+
+  const handleDownloadPdf = async () => {
+    const source =
+      previewRef.current ||
+      document.getElementById("printable-paper-container");
+    if (!source) return;
+
+    setIsExporting(true);
+    setExportError(null);
+    // Capture at full A4/B5 layout — phone preview transform must not shrink pages.
+    const prevScale = previewScale;
+    setPreviewScale(1);
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+
+    try {
+      await exportToHighDefPdf(source, settings, (msg) => setProgressText(msg));
+    } catch (err: unknown) {
+      console.error("PDF export failed:", err);
+      const msg =
+        err instanceof Error ? err.message : "產生 PDF 時發生未知問題";
+      setExportError(msg);
+    } finally {
+      setPreviewScale(prevScale);
+      setIsExporting(false);
+      setProgressText("");
+    }
+  };
 
   const handlePrint = () => {
     const source =
@@ -413,8 +457,18 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     window.print();
   };
 
+  /** Phones: download a raster PDF (Safari print pagination is unreliable). */
+  const handlePrimaryOutput = () => {
+    if (isMobileClient()) {
+      void handleDownloadPdf();
+      return;
+    }
+    handlePrint();
+  };
+
   const paperWidthStyle = settings.paperSize === "B5" ? "182mm" : "210mm";
   const paperHeightStyle = settings.paperSize === "B5" ? "257mm" : "297mm";
+  const mobileOutput = isMobileClient();
 
   return (
     <div className="app-screen-overlay bg-slate-900/70 backdrop-blur-xs animate-in fade-in duration-200">
@@ -438,7 +492,9 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
               </h3>
               <p className="text-xs text-slate-500 hidden sm:block">
                 {showPreview
-                  ? "確認紙張畫面無誤後，再按列印送給印表機"
+                  ? mobileOutput
+                    ? "確認紙張畫面無誤後，下載 PDF（手機列印易跨頁，改由本機產生）"
+                    : "確認紙張畫面無誤後，再按列印送給印表機"
                   : "先調整規格，再另開畫面預覽康乃爾雙欄與紙張排版"}
               </p>
             </div>
@@ -1414,16 +1470,48 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                 <button
                   id="print-browser-btn"
                   type="button"
-                  onClick={handlePrint}
-                  className="flex-1 sm:flex-none px-4 sm:px-5 py-2.5 sm:py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:scale-95 rounded-xl transition flex items-center justify-center gap-1.5 shadow-md"
+                  onClick={handlePrimaryOutput}
+                  disabled={isExporting}
+                  className="flex-1 sm:flex-none px-4 sm:px-5 py-2.5 sm:py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 active:scale-95 rounded-xl transition flex items-center justify-center gap-1.5 shadow-md disabled:opacity-60 disabled:pointer-events-none"
                 >
-                  <Printer className="w-4 h-4 shrink-0" />
-                  列印
+                  {isExporting ? (
+                    <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
+                  ) : mobileOutput ? (
+                    <Download className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <Printer className="w-4 h-4 shrink-0" />
+                  )}
+                  {isExporting
+                    ? progressText || "產生 PDF 中…"
+                    : mobileOutput
+                      ? "下載 PDF"
+                      : "列印"}
                 </button>
+                {mobileOutput && !isExporting && (
+                  <button
+                    type="button"
+                    onClick={handlePrint}
+                    className="px-3 sm:px-4 py-2.5 sm:py-2 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition"
+                    title="改用系統列印（部分手機可能跨頁）"
+                  >
+                    列印
+                  </button>
+                )}
+                {!mobileOutput && !isExporting && (
+                  <button
+                    type="button"
+                    onClick={() => void handleDownloadPdf()}
+                    className="px-3 sm:px-4 py-2.5 sm:py-2 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition flex items-center gap-1"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    PDF
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => setShowPreview(false)}
-                  className="px-3 sm:px-4 py-2.5 sm:py-2 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition"
+                  disabled={isExporting}
+                  className="px-3 sm:px-4 py-2.5 sm:py-2 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 border border-slate-300 rounded-xl transition disabled:opacity-60"
                 >
                   返回設定
                 </button>

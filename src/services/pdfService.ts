@@ -120,6 +120,20 @@ export async function exportToHighDefPdf(
     compress: true,
   });
 
+  // Wait for figures inside the preview so capture does not blank maps.
+  const images = Array.from(containerElement.querySelectorAll("img"));
+  await Promise.all(
+    images.map(
+      (img) =>
+        img.complete
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => {
+              img.addEventListener("load", () => resolve(), { once: true });
+              img.addEventListener("error", () => resolve(), { once: true });
+            })
+    )
+  );
+
   const capture = async (sourceNode: HTMLElement) => {
     return html2canvas(sourceNode, {
       scale: 2.0,
@@ -129,6 +143,11 @@ export async function exportToHighDefPdf(
       backgroundColor: "#ffffff",
       imageTimeout: 15000,
       foreignObjectRendering: false,
+      // Capture layout box (ignore phone preview transform:scale on ancestors).
+      width: sourceNode.offsetWidth || undefined,
+      height: sourceNode.offsetHeight || undefined,
+      windowWidth: sourceNode.offsetWidth || undefined,
+      windowHeight: sourceNode.offsetHeight || undefined,
       onclone: (clonedDoc: Document, clonedEl?: HTMLElement) => {
         const target =
           clonedEl || (clonedDoc.body.firstElementChild as HTMLElement | null);
@@ -136,7 +155,29 @@ export async function exportToHighDefPdf(
           copyComputedStyles(sourceNode, target);
           target.style.backgroundColor = "#ffffff";
           target.style.color = "#0f172a";
+          target.style.transform = "none";
+          target.style.zoom = "normal";
+          // Pin Cornell / paper sheets to the selected page size so a scaled
+          // phone preview cannot flatten the bitmap page.
+          if (target.classList.contains("paper-sheet")) {
+            target.style.width = `${pageWidth}mm`;
+            target.style.maxWidth = `${pageWidth}mm`;
+            target.style.height = `${pageHeight}mm`;
+            target.style.minHeight = `${pageHeight}mm`;
+            target.style.maxHeight = `${pageHeight}mm`;
+            target.style.margin = "0";
+            target.style.boxShadow = "none";
+            target.style.overflow = "hidden";
+          }
         }
+        clonedDoc
+          .querySelectorAll<HTMLElement>(".print-preview-scale, .print-preview-fit")
+          .forEach((el) => {
+            el.style.transform = "none";
+            el.style.zoom = "normal";
+            el.style.width = "auto";
+            el.style.height = "auto";
+          });
       },
     });
   };
