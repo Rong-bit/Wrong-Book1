@@ -152,11 +152,26 @@
   html.printing-exam #exam-print-root #printable-paper-container,
   html.printing-exam #exam-print-root .print-preview-scale,
   html.printing-exam #exam-print-root .print-preview-fit {
-    width: 100% !important;
+    width: auto !important;
     max-width: none !important;
     height: auto !important;
     transform: none !important;
     zoom: normal !important;
+    margin: 0 auto !important;
+  }
+
+  /* Mobile Safari Save-as-PDF: leave a little headroom under the page box so
+     a full-height sheet does not spill its footer onto the next PDF page. */
+  html.printing-exam[data-print-mobile="1"][data-print-size="A4"] #exam-print-root .paper-sheet-fit {
+    height: 285mm !important;
+    max-height: 285mm !important;
+    min-height: 285mm !important;
+  }
+
+  html.printing-exam[data-print-mobile="1"][data-print-size="B5"] #exam-print-root .paper-sheet-fit {
+    height: 248mm !important;
+    max-height: 248mm !important;
+    min-height: 248mm !important;
   }
 
   html.printing-exam #exam-print-root .katex-mathml {

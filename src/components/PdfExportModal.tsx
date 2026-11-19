@@ -295,10 +295,22 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
 
     const root = document.documentElement;
     const isB5 = settings.paperSize === "B5";
-    // Print sheet must match @page exactly (including phones). A shorter
-    // "mobile chrome" height made 每頁 2 題 flex slots reflow in 列印預覽.
+    // Mobile Safari "Save as PDF" still reserves a thin printable chrome even with
+    // @page margin:0. A full 297mm sheet then spills (footer appears on the next
+    // PDF page, cards split). Keep on-screen preview at full A4/B5; only shrink
+    // the print clone slightly so each sheet fits one PDF page. Avoid the old
+    // ~248mm height that crushed 每頁 2 題 flex.
+    const isMobilePrint =
+      window.matchMedia("(pointer: coarse)").matches ||
+      /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
     const sheetWidth = isB5 ? "182mm" : "210mm";
-    const sheetHeight = isB5 ? "257mm" : "297mm";
+    const sheetHeight = isB5
+      ? isMobilePrint
+        ? "248mm"
+        : "257mm"
+      : isMobilePrint
+        ? "285mm"
+        : "297mm";
     const canvas = previewCanvasRef.current;
     const scrollLeft = canvas?.scrollLeft ?? 0;
     const scrollTop = canvas?.scrollTop ?? 0;
@@ -309,6 +321,23 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
     const printRoot = document.createElement("div");
     printRoot.id = "exam-print-root";
     printRoot.appendChild(source.cloneNode(true));
+    // Belt-and-suspenders for WebKit print: strip preview spacing and pin size
+    // on the cloned nodes themselves (not only via stylesheet).
+    printRoot.querySelectorAll<HTMLElement>(".paper-sheet").forEach((el) => {
+      el.classList.remove("mb-8", "shadow-xl", "border", "border-slate-300");
+      el.style.setProperty("margin", "0", "important");
+      el.style.setProperty("margin-bottom", "0", "important");
+      el.style.setProperty("box-shadow", "none", "important");
+      el.style.setProperty("border", "none", "important");
+      if (el.classList.contains("paper-sheet-fit")) {
+        el.style.setProperty("width", sheetWidth, "important");
+        el.style.setProperty("max-width", sheetWidth, "important");
+        el.style.setProperty("height", sheetHeight, "important");
+        el.style.setProperty("max-height", sheetHeight, "important");
+        el.style.setProperty("min-height", sheetHeight, "important");
+        el.style.setProperty("overflow", "hidden", "important");
+      }
+    });
     document.body.appendChild(printRoot);
 
     const pageStyle = document.createElement("style");
@@ -318,11 +347,12 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       #exam-print-root #printable-paper-container,
       #exam-print-root .print-preview-scale,
       #exam-print-root .print-preview-fit {
-        width: 100% !important;
-        max-width: none !important;
+        width: ${sheetWidth} !important;
+        max-width: ${sheetWidth} !important;
         height: auto !important;
         transform: none !important;
         zoom: normal !important;
+        margin: 0 auto !important;
       }
       #exam-print-root .paper-sheet-fit {
         width: ${sheetWidth} !important;
@@ -332,14 +362,25 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
         min-height: ${sheetHeight} !important;
         margin: 0 auto !important;
         margin-bottom: 0 !important;
+        overflow: hidden !important;
         transform: none !important;
         zoom: normal !important;
+        page-break-after: always !important;
+        break-after: page !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+      }
+      #exam-print-root .paper-sheet-fit:last-of-type {
+        page-break-after: auto !important;
+        break-after: auto !important;
       }
     `;
     document.head.appendChild(pageStyle);
 
     root.classList.add("printing-exam");
     root.setAttribute("data-print-size", settings.paperSize);
+    if (isMobilePrint) root.setAttribute("data-print-mobile", "1");
+    else root.removeAttribute("data-print-mobile");
     if (isTwoUp) root.setAttribute("data-print-two-up", "1");
     else root.removeAttribute("data-print-two-up");
 
@@ -356,6 +397,7 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
       cleaned = true;
       root.classList.remove("printing-exam");
       root.removeAttribute("data-print-size");
+      root.removeAttribute("data-print-mobile");
       root.removeAttribute("data-print-two-up");
       printRoot.remove();
       pageStyle.remove();
@@ -863,31 +905,32 @@ export const PdfExportModal: React.FC<PdfExportModalProps> = ({
                         boxSizing: "border-box",
                       }}
                     >
-                      {/* Sheet Top Header */}
-                      <div className="pb-2 mb-2 border-b-2 border-slate-900 flex items-end justify-between">
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h1 className="text-base font-black tracking-wider text-slate-900">
+                      {/* Sheet Top Header — meta stacks on the right so long
+                          年級／副標 cannot crush the title into vertical glyphs. */}
+                      <div className="pb-2 mb-2 border-b-2 border-slate-900 flex items-end justify-between gap-3 min-w-0">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h1 className="text-base font-black tracking-wider text-slate-900 shrink-0">
                               {settings.title || "錯題訂正本"}
                             </h1>
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-bold tracking-widest">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-bold tracking-widest shrink-0">
                               CORNELL NOTE
                             </span>
                           </div>
                           {settings.subtitle && (
-                            <p className="text-[10px] text-slate-500 mt-0.5">
+                            <p className="text-[10px] text-slate-500 mt-0.5 line-clamp-2 break-words">
                               {settings.subtitle}
                             </p>
                           )}
                         </div>
-                        <div className="flex items-center gap-3 text-[11px] text-slate-700">
-                          <span>
+                        <div className="flex flex-col items-end gap-0.5 text-[11px] text-slate-700 shrink-0 max-w-[46%] min-w-0">
+                          <span className="truncate max-w-full">
                             年級：<u>&nbsp;{settings.gradeClass || "________"}&nbsp;</u>
                           </span>
-                          <span>
+                          <span className="whitespace-nowrap">
                             姓名：<u>&nbsp;{settings.studentName || "____________"}&nbsp;</u>
                           </span>
-                          <span>
+                          <span className="whitespace-nowrap">
                             日期：<u>&nbsp;________/____/____&nbsp;</u>
                           </span>
                         </div>
