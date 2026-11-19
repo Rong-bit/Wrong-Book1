@@ -54,7 +54,11 @@ export const BackupModal: React.FC<BackupModalProps> = ({
     return acc;
   }, {} as Record<string, number>);
 
-  const imageCount = questions.filter((q) => Boolean(q.imageBase64)).length;
+  const imageCount = questions.filter(
+    (q) =>
+      Boolean(q.imageBase64) ||
+      (typeof q.figureImageBase64 === "string" && q.figureImageBase64.length > 0)
+  ).length;
   const variantCount = questions.reduce(
     (sum, q) => sum + (q.similarVariants?.length || 0),
     0
@@ -440,7 +444,12 @@ export const BackupModal: React.FC<BackupModalProps> = ({
                     </div>
                     <div className="p-2 rounded-lg bg-white border border-slate-200 text-xs">
                       <div className="font-black text-sky-700 text-base">
-                        {parsedBackup.questions.filter((q) => Boolean(q.imageBase64)).length}
+                        {parsedBackup.questions.filter(
+                          (q) =>
+                            Boolean(q.imageBase64) ||
+                            (typeof q.figureImageBase64 === "string" &&
+                              q.figureImageBase64.length > 0)
+                        ).length}
                       </div>
                       <div className="text-[10px] text-slate-500">附圖考題</div>
                     </div>
